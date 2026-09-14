@@ -1,13 +1,17 @@
-<h1 style="text-align: center;">Anny Body</h1>
+<!-- <h1 style="text-align: center;">Anny Body</h1> -->
+
+<img src="docs/figures/Anny_black_w_subtitle.jpg" alt="Anny" style="display:block;max-width:100%;max-height:24em;margin:auto"/>
 
 <img src="docs/figures/anny_teaser.jpg" alt="Anny" style="display:block;max-width:100%;max-height:24em;margin:auto"/>
 
 Anny is a differentiable human body mesh model written in PyTorch.
 Anny models a large variety of human body shapes, from infants to elders, using a common topology and parameter space.
 
-[![ArXiv](https://img.shields.io/badge/arXiv-2511.03589-33cb56)](https://arxiv.org/abs/2511.03589)
-[![Demo](https://img.shields.io/badge/Demo-33cb56)](http://anny-demo.europe.naverlabs.com/)
-[![Blogpost](https://img.shields.io/badge/Blogpost-33cb56)](https://europe.naverlabs.com/blog/anny-a-free-to-use-3d-human-parametric-model-for-all-ages/)
+[![PyPI version](https://img.shields.io/pypi/v/anny?color=3776AB)](https://pypi.org/project/anny/)
+[![License](https://img.shields.io/badge/License-Apache_2.0-2E7D32)](https://opensource.org/licenses/Apache-2.0)
+[![arXiv](https://img.shields.io/badge/arXiv-2511.03589-B31B1B)](https://arxiv.org/abs/2511.03589)
+[![Demo](https://img.shields.io/badge/Demo-7C3AED)](http://anny-demo.europe.naverlabs.com/)
+[![Blogpost](https://img.shields.io/badge/Blogpost-C75B12)](https://europe.naverlabs.com/blog/anny-a-free-to-use-3d-human-parametric-model-for-all-ages/)
 
 ### Features
 - Anny is based on the tremendous work of the [MakeHuman](https://static.makehumancommunity.org/) community, which offers plenty of opportunities for extensions.
@@ -126,10 +130,11 @@ The code of Anny, Copyright (c) 2025 NAVER Corp., is licensed under the Apache L
 ## Citation
 
 ```
-@misc{br\’egier2025humanmeshmodelinganny,
+@inproceedings{br\’egier2026humanmeshmodelinganny,
       title={Human Mesh Modeling for Anny Body}, 
       author={Romain Br\’egier and Gu\’enol\’e Fiche and Laura Bravo-S\’anchez and Thomas Lucas and Matthieu Armando and Philippe Weinzaepfel and Gr\’egory Rogez and Fabien Baradel},
-      year={2025},
+      booktitle={European Conference on Computer Vision (ECCV)},
+      year={2026},
       eprint={2511.03589},
       archivePrefix={arXiv},
       primaryClass={cs.CV},
