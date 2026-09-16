@@ -1,11 +1,12 @@
 <!-- <h1 style="text-align: center;">Anny Body</h1> -->
 
-<img src="docs/figures/Anny_black_w_subtitle.jpg" alt="Anny" style="display:block;max-width:100%;max-height:24em;margin:auto"/>
+<img src="docs/figures/anny_banner.svg" alt="Anny — A human model for every body" style="display:block;max-width:100%;max-height:24em;margin:auto"/>
 
-<img src="docs/figures/anny_teaser.jpg" alt="Anny" style="display:block;max-width:100%;max-height:24em;margin:auto"/>
 
 Anny is a differentiable human body mesh model written in PyTorch.
 Anny models a large variety of human body shapes, from infants to elders, using a common topology and parameter space.
+
+<img src="docs/figures/anny_teaser.jpg" alt="Anny" style="display:block;max-width:100%;max-height:24em;margin:auto"/>
 
 [![PyPI version](https://img.shields.io/pypi/v/anny?color=3776AB)](https://pypi.org/project/anny/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-2E7D32)](https://opensource.org/licenses/Apache-2.0)

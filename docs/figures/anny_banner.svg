@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="600" viewBox="0 0 2000 600">
+  <rect width="2000" height="600" fill="#1a1a1a"/>
+  <text x="1000" y="390" text-anchor="middle" fill="#ffffff"
+        font-family="'Arial Black', 'Arial Bold', Arial, Helvetica, 'Liberation Sans', sans-serif" font-weight="900" font-size="290">Anny</text>
+  <text x="1000" y="520" text-anchor="middle" fill="#ffffff"
+        font-family="'Segoe UI', 'Open Sans', Arial, Helvetica, 'Liberation Sans', sans-serif" font-size="56">A human model for every body</text>
+</svg>
