@@ -129,15 +129,15 @@ The code of Anny, Copyright (c) 2025 NAVER Corp., is licensed under the Apache L
 
 ## Citation
 
-```
-@inproceedings{br\’egier2026humanmeshmodelinganny,
-      title={Human Mesh Modeling for Anny Body}, 
-      author={Romain Br\’egier and Gu\’enol\’e Fiche and Laura Bravo-S\’anchez and Thomas Lucas and Matthieu Armando and Philippe Weinzaepfel and Gr\’egory Rogez and Fabien Baradel},
-      booktitle={European Conference on Computer Vision (ECCV)},
+```bibtex
+@inproceedings{anny,
+      title={Human Mesh Modeling for {A}nny {B}ody},
+      author={Romain Br{\'e}gier and Gu{\'e}nol{\'e} Fiche and Laura Bravo-S{\'a}nchez and Thomas Lucas and Matthieu Armando and Philippe Weinzaepfel and Gr{\'e}gory Rogez and Fabien Baradel},
+      booktitle="Computer Vision -- ECCV 2026",
       year={2026},
-      eprint={2511.03589},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2511.03589}, 
+      publisher="Springer Nature Switzerland",
+      address="Cham",
+      pages="170--188",
+      isbn="978-3-032-37314-4"
 }
 ```
