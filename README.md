@@ -1,18 +1,21 @@
 <!-- <h1 style="text-align: center;">Anny Body</h1> -->
 
-<img src="docs/figures/anny_banner.svg" alt="Anny — A human model for every body" style="display:block;max-width:100%;max-height:24em;margin:auto"/>
-
+<p align="center">
+  <img src="docs/figures/anny_banner.svg" alt="Anny — A human model for every body" width="900" align="top" style="display:block;width:100%;max-width:900px;margin:auto"/>
+  <img src="docs/figures/anny_teaser.jpg" alt="Anny" width="900" align="top" style="display:block;width:100%;max-width:900px;margin:auto"/>
+</p>
 
 Anny is a differentiable human body mesh model written in PyTorch.
 Anny models a large variety of human body shapes, from infants to elders, using a common topology and parameter space.
 
-<img src="docs/figures/anny_teaser.jpg" alt="Anny" style="display:block;max-width:100%;max-height:24em;margin:auto"/>
 
-[![PyPI version](https://img.shields.io/pypi/v/anny?color=3776AB)](https://pypi.org/project/anny/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-2E7D32)](https://opensource.org/licenses/Apache-2.0)
-[![arXiv](https://img.shields.io/badge/arXiv-2511.03589-B31B1B)](https://arxiv.org/abs/2511.03589)
-[![Demo](https://img.shields.io/badge/Demo-7C3AED)](http://anny-demo.europe.naverlabs.com/)
-[![Blogpost](https://img.shields.io/badge/Blogpost-C75B12)](https://europe.naverlabs.com/blog/anny-a-free-to-use-3d-human-parametric-model-for-all-ages/)
+<p align="center">
+  <a href="https://pypi.org/project/anny/"><img src="https://img.shields.io/pypi/v/anny?color=3776AB" alt="PyPI version"/></a>
+  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-2E7D32" alt="License"/></a>
+  <a href="https://arxiv.org/abs/2511.03589"><img src="https://img.shields.io/badge/arXiv-2511.03589-B31B1B" alt="arXiv"/></a>
+  <a href="http://anny-demo.europe.naverlabs.com/"><img src="https://img.shields.io/badge/Demo-7C3AED" alt="Demo"/></a>
+  <a href="https://europe.naverlabs.com/blog/anny-a-free-to-use-3d-human-parametric-model-for-all-ages/"><img src="https://img.shields.io/badge/Blogpost-C75B12" alt="Blogpost"/></a>
+</p>
 
 ### Features
 - Anny is based on the tremendous work of the [MakeHuman](https://static.makehumancommunity.org/) community, which offers plenty of opportunities for extensions.
