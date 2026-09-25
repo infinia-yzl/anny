@@ -227,11 +227,13 @@ def render_anny(
     accumulation: int = 4,
     margin: float = 1.25,
     out_dir: pathlib.Path | None = None,
+    on_image=None,
 ):
     """
     Portraits (n, size, size, 3) of anny from the viewer page, one per look (the page's preset
     format: phenotype, face, skin, hair and eyes). The page renders with its own shading and
-    hair; ``margin`` widens the face framing like FairFace's crops.
+    hair; ``margin`` widens the face framing like FairFace's crops. With ``on_image``, each
+    portrait goes to ``on_image(index, image)`` instead of the returned list.
     """
     from PIL import Image
     from playwright.sync_api import sync_playwright
@@ -269,7 +271,10 @@ def render_anny(
             image = np.asarray(Image.open(io.BytesIO(png)).convert("RGB"))
             if out_dir is not None and i < 64:
                 Image.fromarray(image).save(out_dir / f"anny_{i:03d}.png")
-            images.append(image)
+            if on_image is None:
+                images.append(image)
+            else:
+                on_image(i, image)
         browser.close()
     return images
 
