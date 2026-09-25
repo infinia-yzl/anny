@@ -5,40 +5,41 @@
 Build the calibrated distribution of anny's face shapes
 (``data/shape_calibration/face_prior.safetensors``, read by :mod:`anny.faces.distribution`).
 
-1. **ICT prior.** A Gaussian over (gender, weight, muscle, face values) of the fits of
-   :mod:`anny.faces.authoring.fit_3d`, with Ledoit–Wolf shrinkage. The face values with gender,
-   weight and muscle held at their mean give the starting mean and the covariance: the fitted
-   phenotypes mostly trade off against the face shapes (a heavier fitted muscle goes with a
-   deeper head shape, for example), so a regression on them would count anny's own phenotype
-   shapes twice. The ear shapes, which the fits leave out, start from a zero mean and an
-   independent SD of ``UNSEEN_SD``.
-2. **Moment matching.** At each anchor age and for each sex, the Gaussian moves so that the
-   measurements of the simulated bodies (:mod:`anny.faces.measurements`) meet the data:
+1. **ICT spread.** A Gaussian over (gender, weight, muscle, face values) of the fits of
+   :mod:`anny.faces.authoring.fit_3d`, with Ledoit–Wolf shrinkage, conditioned on gender,
+   weight and muscle at their mean, gives the covariance of the face values: how faces vary
+   around their mean. The ear shapes, which the fits leave out, get an independent SD of
+   ``UNSEEN_SD``, and the two asymmetric shapes (the sideways shifts of the nose and the mouth)
+   stay at 0.
+2. **Calibrated means.** At each anchor age and for each sex, the mean face values move from
+   anny's default face (0) so that the measurements of the simulated bodies
+   (:mod:`anny.faces.measurements`) meet the data:
 
-   - adults (28 years): the 13 head and face measurements of ANSUR II (means and covariance),
-     and the other measurements of 3D Facial Norms (ages 18 to 40);
+   - adults (28 years): the 13 head and face measurements of ANSUR II and the other
+     measurements of 3D Facial Norms (ages 18 to 40);
    - older adults (47 years): ANSUR II from 40 years;
    - 3 to 18 years: 3D Facial Norms, as ratios to its adults applied to the adult targets, so
      that the growth of each measurement follows the data;
    - below 3 years: the head circumference of the CDC growth charts.
 
-   The mean moves by linearised Gaussian conditioning of the face values on the measurements:
-   ``K (target - simulated)`` with ``K = S J^T (J S J^T + N)^-1``, where J comes from finite
-   differences and the simulated mean from bodies and faces drawn from the current Gaussian,
-   over six rounds. The mean stays within a Mahalanobis radius of ``TRUST_RADIUS`` around the
-   mean of the ICT fits (random faces lie at about 10), so that it remains a plausible face; a
-   gap that it cannot close stays as a bias of anny's body and is reported. The spread is the
-   ICT covariance with one variance factor per group of face shapes (head, forehead, brows,
-   eyes, nose, cheeks, mouth, chin, ears, detail), within ``VARIANCE_BOUNDS``, so that the
-   predicted SD of each measurement, from the face and from the rest of the body (height,
-   weight, muscle, proportions), meets the data.
-3. **Race offsets.** For users of anny's race phenotypes, the adult means of the ANSUR II race
+   The fit is a Gauss-Newton MAP estimate (``map_mean``) with measurement noise of 15 % of the
+   target SD and an independent normal prior of SD ``MEAN_SD`` on each named symmetric shape;
+   the detail shapes keep a zero mean. The adults start from anny's default face, and the
+   other anchors from the adult mean, so that the faces change smoothly with age. The prior
+   keeps the mean faces plausible: renders showed that means fitted without it, or around the
+   mean of the ICT fits (whose nose and eye shapes the data contradict), reach the data only
+   through implausible faces. Three rounds correct the targets for the bias of the population
+   (the mean of drawn bodies and faces minus the mean body with the mean face).
+3. **Calibrated spread.** The ICT covariance takes one variance factor per group of face shapes
+   (head, forehead, brows, eyes, nose, cheeks, mouth, chin, ears, detail), within
+   ``VARIANCE_BOUNDS``, so that the predicted SD of each measurement, from the face and from
+   the rest of the body (height, weight, muscle, proportions), meets the data.
+4. **Race offsets.** For users of anny's race phenotypes, the adult means of the ANSUR II race
    groups (White, Black and Asian for anny's caucasian, african and asian) give offsets of the
    mean, relative to their average.
-4. **Slider ranges.** The range of each face shape in ``data/faces/face_shapes.json`` widens
+5. **Slider ranges.** The range of each face shape in ``data/faces/face_shapes.json`` widens
    from [-1, 1] (or [0, 1]) to hold the central 99 % of the distribution at every anchor, sex and
-   race, rounded outward to 0.5. The ICT fits need some shapes beyond 1: for example, the mean
-   ICT face has less deep-set eyes and a narrower nose base than anny's default face.
+   race, rounded outward to 0.5.
 
 Usage::
 
@@ -102,10 +103,12 @@ ANSUR_RACES = {"caucasian": 1.0, "african": 2.0, "asian": 4.0}
 UNSEEN_SHARE = 0.05
 UNSEEN_SD = 0.35
 # bounds of the variance factor of each group of face shapes on the ICT covariance (SD factors
-# from 0.71 to 1.41), and the Mahalanobis radius around the ICT mean within which the calibrated
-# means stay: the anthropometric data move the faces only as far as faces of the fits reach
+# from 0.71 to 1.41)
 VARIANCE_BOUNDS = (0.5, 2.0)
-TRUST_RADIUS = 3.0
+# SD of the prior of the calibrated means, around anny's default face, on each named symmetric
+# shape: the MakeHuman shapes look plausible within their ranges of 1, and larger prior SDs
+# (tests: 0.5 and 0.8) fit the data only a little better
+MEAN_SD = 0.3
 
 
 def tdfn_names() -> list[str]:
@@ -293,55 +296,67 @@ def jacobian(sim: Simulator, phen: torch.Tensor, face: np.ndarray, names, h=0.2)
     return values[0], J
 
 
-def within_trust(mu: np.ndarray, prior: dict) -> np.ndarray:
-    """the mean pulled back into the ball of Mahalanobis radius TRUST_RADIUS around the mean of
-    the ICT fits, under their covariance: a mean face well inside the faces of the fits (whose
-    random draws lie at a radius of about the square root of the number of shapes)"""
-    d = mu - prior["mean_face"]
-    m = float(np.sqrt(d @ prior["precision"] @ d))
-    return mu if m <= TRUST_RADIUS else prior["mean_face"] + d * (TRUST_RADIUS / m)
+def map_mean(sim, mu, prior, centre, phen_mean, names, target, noise_sd, rounds=3):
+    """
+    the mean face values that meet the targets best under the prior of the mean: a
+    Gauss-Newton MAP fit, with an independent normal prior of SD ``prior["mean_sd"]`` around
+    ``centre`` on each shape that the mean may move, and measurement noise ``noise_sd``
+    """
+    free = np.nonzero(prior["mean_sd"] > 0)[0]
+    s = prior["mean_sd"][free]
+    for _ in range(rounds):
+        pred, J = jacobian(sim, phen_mean, mu, names)
+        A = J[:, free] * s / noise_sd[:, None]
+        r = (target - pred) / noise_sd
+        c = (mu[free] - centre[free]) / s
+        c = c + np.linalg.solve(A.T @ A + np.eye(len(free)), A.T @ r - c)
+        mu = mu.copy()
+        mu[free] = centre[free] + c * s
+        mu = np.where(sim.one_sided, np.maximum(mu, 0.0), mu)
+    return mu
 
 
-def moment_match(
+def calibrate_anchor(
     sim,
-    mu,
     prior,
+    centre,
     phen_mean,
     phen_samples,
     names,
     target_mean,
     target_sd,
     noise_sd,
-    rounds=6,
+    rounds=3,
     seed=0,
 ):
     """
-    the Gaussian (mu, S) of the face values moved, from the mean mu and the ICT prior, to meet
-    the target measurements. Each round sets the spread by one variance factor per group of face
-    shapes on the ICT covariance (``variance_factors``), draws a face from the Gaussian for each
-    body of ``phen_samples``, and moves the mean by the gain of linearised Gaussian
-    conditioning times the gap between the targets and the mean of the simulated measurements
-    (the rectified shapes make that mean differ from the measurements of the mean face). The
-    mean stays within the trust region of ``within_trust``.
+    the Gaussian (mu, S) of the face values at one anchor. Each round fits the mean
+    (``map_mean``) to the targets minus the bias of the population, sets the spread by one
+    variance factor per group of face shapes on the ICT covariance (``variance_factors``), and
+    measures that bias: the mean of the measurements of bodies and faces drawn from the
+    Gaussian, minus the measurements of the mean body with the mean face (the rectified shapes
+    and the spread of the bodies make them differ).
     """
-    S0 = prior["cov"]
-    z = np.random.default_rng(seed).standard_normal((len(phen_samples), len(mu)))
-    # one-sided shapes act from 0 up, so their means stay at 0 or above
-    mu = np.where(sim.one_sided, np.maximum(mu, 0.0), mu)
+    z = np.random.default_rng(seed).standard_normal((len(phen_samples), len(centre)))
+    bias = np.zeros(len(names))
+    mu = centre.copy()
     for _ in range(rounds):
-        _, J = jacobian(sim, phen_mean, mu, names)
+        mu = map_mean(
+            sim, mu, prior, centre, phen_mean, names, target_mean - bias, noise_sd
+        )
+        at_mean, J = jacobian(sim, phen_mean, mu, names)
         # the part of the measurement variance that the rest of the body explains
         other = sim(
             phen_samples, torch.tensor(np.repeat(mu[None], len(phen_samples), 0)), names
         )
-        factors = variance_factors(J, S0, other.var(0), target_sd**2, sim.groups)
+        factors = variance_factors(
+            J, prior["cov"], other.var(0), target_sd**2, sim.groups
+        )
         d = np.sqrt(factors[sim.group_index])
-        S = S0 * np.outer(d, d)
+        S = prior["cov"] * np.outer(d, d)
         faces = mu + z @ np.linalg.cholesky(S + 1e-10 * np.eye(len(mu))).T
         simulated = sim(phen_samples, torch.tensor(faces), names).mean(0)
-        K = S @ J.T @ np.linalg.inv(J @ S @ J.T + np.diag(noise_sd**2))
-        mu = within_trust(mu + K @ (target_mean - simulated), prior)
-        mu = np.where(sim.one_sided, np.maximum(mu, 0.0), mu)
+        bias = simulated - at_mean
     return mu, S, simulated
 
 
@@ -417,7 +432,29 @@ def unseen_shapes(model, fits: dict, labels: list[str]) -> np.ndarray:
     return np.array(unseen)
 
 
-def ict_prior(fits: dict, labels: list[str], unseen: np.ndarray):
+def asymmetric_shapes(model, labels: list[str]) -> np.ndarray:
+    """whether each face shape moves the face mostly antisymmetrically (the sideways shifts of
+    the nose and the mouth)"""
+    from anny.faces.authoring.base_mesh import base_mesh
+    from anny.faces.authoring.landmarks import mirror_map
+
+    base = model.base_mesh_vertex_indices.numpy()
+    to_model = -np.ones(len(base_mesh().V), np.int64)
+    to_model[base] = np.arange(len(base))
+    mirror = to_model[mirror_map()[base]]
+    ok = mirror >= 0
+    rows = list(model.blendshape_labels)
+    B = model.blendshapes.detach().cpu().numpy()
+    flip = np.array([-1.0, 1.0, 1.0])
+    out = []
+    for name in labels:
+        b = B[rows.index(f"face_shape:{name}.pos")]
+        a, m = b[ok], b[mirror[ok]] * flip
+        out.append(((a - m) ** 2).sum() > ((a + m) ** 2).sum())
+    return np.array(out)
+
+
+def ict_prior(fits: dict, labels: list[str], unseen: np.ndarray, asymmetric=None):
     """
     mean and covariance of the face values of the ICT fits with (gender, weight, muscle) held
     at their mean; the shapes that the fits do not see get a zero mean and an independent SD of
@@ -441,11 +478,18 @@ def ict_prior(fits: dict, labels: list[str], unseen: np.ndarray):
     cov = np.diag(np.full(F, UNSEEN_SD**2))
     mean_face[seen] = mu[3:]
     cov[np.ix_(seen, seen)] = S22 - B @ S12
+    # the prior of the calibrated means: the named symmetric shapes move, around anny's face
+    named = np.array([face_shape_parameter(k).source == "makehuman" for k in labels])
+    asymmetric = np.zeros(F, bool) if asymmetric is None else asymmetric
+    mean_sd = np.where(named & ~asymmetric, MEAN_SD, 0.0)
+    # the asymmetric shapes stay at 0 in the distribution
+    cov[asymmetric] = 0.0
+    cov[:, asymmetric] = 0.0
     return dict(
         mean_phen=mu[:3],
         mean_face=mean_face,
         cov=cov,
-        precision=np.linalg.inv(cov),
+        mean_sd=mean_sd,
     )
 
 
@@ -458,7 +502,10 @@ def run(samples: int = 400, seed: int = 0):
     print(
         f"shapes that the ICT fits do not see: {[labels[i] for i in np.nonzero(unseen)[0]]}"
     )
-    prior = ict_prior(fits, labels, unseen)
+    asymmetric = asymmetric_shapes(sim.model, labels)
+    print(f"asymmetric shapes: {[labels[i] for i in np.nonzero(asymmetric)[0]]}")
+    prior = ict_prior(fits, labels, unseen, asymmetric)
+    zero = np.zeros(len(labels))
     pooled = tdfn_table()
     tnames = tdfn_names()
     report = dict(anchors=[])
@@ -485,10 +532,10 @@ def run(samples: int = 400, seed: int = 0):
             adult_sd.append(p[2])
         adult_mean, adult_sd = np.array(adult_mean), np.array(adult_sd)
         phen_mean, phen_rand = phen_sets(sex, ADULT_YEARS)
-        mu_a, S_a, m_pred = moment_match(
+        mu_a, S_a, m_pred = calibrate_anchor(
             sim,
-            prior["mean_face"],
             prior,
+            zero,
             phen_mean,
             phen_rand,
             adult_names,
@@ -512,10 +559,10 @@ def run(samples: int = 400, seed: int = 0):
         # ---------------- older adults: ANSUR II from 40 years
         m_old, C_old, n_old = ansur_targets(sex, 40, 200)
         phen_mean, phen_rand = phen_sets(sex, OLDER_YEARS)
-        mu_o, S_o, _ = moment_match(
+        mu_o, S_o, _ = calibrate_anchor(
             sim,
-            mu_a,
             prior,
+            mu_a,
             phen_mean,
             phen_rand,
             list(ANSUR_MEASUREMENTS),
@@ -551,8 +598,8 @@ def run(samples: int = 400, seed: int = 0):
                 sd.append(p[2] * adult_target[name] / tdfn_adult[name][1])
             mean, sd = np.array(mean), np.array(sd)
             phen_mean, phen_rand = phen_sets(sex, years)
-            mu_g, S_g, _ = moment_match(
-                sim, mu_a, prior, phen_mean, phen_rand, names, mean, sd, 0.15 * sd
+            mu_g, S_g, _ = calibrate_anchor(
+                sim, prior, mu_a, phen_mean, phen_rand, names, mean, sd, 0.15 * sd
             )
             calibrated[(sex, years)] = (mu_g, S_g)
             report["anchors"].append(
@@ -571,10 +618,10 @@ def run(samples: int = 400, seed: int = 0):
         for years in [y for y in ANCHOR_YEARS if y < 3]:
             hc, hc_sd = cdc_head_circumference(sex, 12 * years)
             phen_mean, phen_rand = phen_sets(sex, years)
-            mu_i, S_i, _ = moment_match(
+            mu_i, S_i, _ = calibrate_anchor(
                 sim,
-                mu_3,
                 prior,
+                mu_3,
                 phen_mean,
                 phen_rand,
                 ["headcircumference"],
@@ -602,33 +649,22 @@ def run(samples: int = 400, seed: int = 0):
         for r in RACES:
             m_r, C_r, n_r = ansur_targets(sex, 17, 40, ANSUR_RACES[r])
             phen_mean, _ = phen_sets(sex, ADULT_YEARS, race=r)
-            mu_r = mu_a.copy()
-            for _ in range(2):
-                m_pred, J = jacobian(sim, phen_mean, mu_r, list(ANSUR_MEASUREMENTS))
-                P = J @ S_a @ J.T
-                noise = np.diag(
-                    (0.15 * np.sqrt(np.diag(C_r))) ** 2 + np.diag(C_r) / n_r
-                )
-                mu_r = within_trust(
-                    mu_r + S_a @ J.T @ np.linalg.solve(P + noise, m_r - m_pred), prior
-                )
+            noise = np.sqrt((0.15**2 + 1 / n_r) * np.diag(C_r))
+            mu_r = map_mean(
+                sim, mu_a, prior, mu_a, phen_mean, list(ANSUR_MEASUREMENTS), m_r, noise
+            )
             deltas.append(mu_r - mu_a)
         deltas = np.array(deltas)
         race_offsets[si] = deltas - deltas.mean(0)
         print(f"{sex} race offsets: done ({time.time() - t0:.0f} s)")
 
-    # the Mahalanobis distance of each calibrated mean from the mean of the ICT fits
-    report["mean_shift"] = [
+    # the largest mean value of each anchor
+    report["largest_mean"] = [
         dict(
             sex=sex,
             years=y,
-            distance=float(
-                np.sqrt(
-                    (mu - prior["mean_face"])
-                    @ prior["precision"]
-                    @ (mu - prior["mean_face"])
-                )
-            ),
+            value=float(np.abs(mu).max()),
+            shape=labels[int(np.argmax(np.abs(mu)))],
         )
         for (sex, y), (mu, _) in sorted(calibrated.items())
     ]
