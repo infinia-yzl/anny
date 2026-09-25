@@ -1659,6 +1659,8 @@ async function init() {
   const start = loadRememberedLook() || normaliseLook(BASELINE_LOOK);
   for (const s of BODY.sliders) if (q.has(s.name)) start.phenotype[s.name] = Math.min(1, Math.max(0, parseFloat(q.get(s.name))));
   applyLook(start, false);
+  // tests wait for this: the start look is on the body, so a look set from now on stays
+  (window as any).__READY = true;
   if (MOTION.cur) {
     const rm = SHOT ? null : loadRememberedMotion();
     if (rm) { MOTION.playing = rm.playing !== false; MOTION.speed = rm.speed || 1; }

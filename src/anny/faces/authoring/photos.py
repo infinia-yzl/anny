@@ -253,7 +253,7 @@ def render_anny(
         tab = browser.new_page(viewport=dict(width=size, height=size))
         tab.goto(url)
         tab.wait_for_function(
-            "window.__BODY && window.__BODY.ready && window.__RIG && window.__RIG.ready",
+            "window.__READY && window.__BODY.ready && window.__RIG && window.__RIG.ready",
             timeout=600000,
         )
         # the canvas alone, and the head without its hair (the brows and the lashes stay)
