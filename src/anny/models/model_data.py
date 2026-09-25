@@ -19,6 +19,7 @@ import torch
 
 from anny.paths import get_anny_cache_path, get_anny_root_dir
 from anny.typing import (
+    FaceShapes,
     FacialActions,
     LocalChanges,
     PathLike,
@@ -33,7 +34,7 @@ from anny.typing import (
 
 ANNY_VERSION = importlib.metadata.version("anny")
 # Increase this if there are any non-backwards-compatible changes to the data/metadata format
-CURRENT_DATA_VERSION = 11
+CURRENT_DATA_VERSION = 12
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +283,9 @@ class AnnyModelConfig:
     rig: RigConfig | str
     topology: TopologyConfig | str
 
+    face_shapes: FaceShapes = "none"
+    scale_face_shapes: bool = True
+
 
 @dataclasses.dataclass(frozen=True)
 class ModelMetadata:
@@ -291,13 +295,25 @@ class ModelMetadata:
     # Unique label per blend shape, identifying corresponding rows across configurations
     blendshape_labels: list[str] = dataclasses.field(default_factory=list)
 
+    # Craniofacial landmarks regressed at build time (see ModelData.craniofacial_landmarks)
+    craniofacial_landmark_labels: list[str] = dataclasses.field(default_factory=list)
+
     @property
     def local_change_labels(self) -> list[str]:
+        # Local changes come in pairs of rows (positive, negative), labelled by the positive row.
+        rows = [x for x in self.blendshape_labels if x.split(":")[0] == "local_change"]
+        return [x.split(":")[1] for x in rows[::2]]
+
+    @property
+    def face_shape_labels(self) -> list[str]:
+        """face-shape parameter names, in the order of their first row"""
         res = []
-        for x in self.blendshape_labels[::2]:
+        for x in self.blendshape_labels:
             block_name, label = x.split(":")
-            if block_name == "local_change":
-                res.append(label)
+            if block_name == "face_shape":
+                name = label.rsplit(".", 1)[0]
+                if not res or res[-1] != name:
+                    res.append(name)
         return res
 
     @property
@@ -347,6 +363,10 @@ class ModelData:
     bone_children_indices: torch.Tensor | None = None
     bone_children_mask: torch.Tensor | None = None
     bone_children_local_offsets: torch.Tensor | None = None
+    # Craniofacial landmarks of the template (K, 3) and their blend shapes (N, K, 3), regressed on
+    # the MakeHuman mesh at build time so that every topology can measure the head
+    craniofacial_landmarks: torch.Tensor | None = None
+    craniofacial_landmarks_blendshapes: torch.Tensor | None = None
 
     @property
     def device(self) -> torch.device:
@@ -429,7 +449,7 @@ def _get_builder_metadata(
                 f"Missing value for parameter {param.name} of builder function {f.__name__}"
             )
 
-        if param.name == "facial_actions" and value == "none":
+        if param.name in ("facial_actions", "face_shapes") and value == "none":
             continue
 
         all_kwargs[param.name] = value
@@ -719,9 +739,13 @@ def resolve_blendshape_mask(
     local_changes: LocalChanges,
     facial_actions: FacialActions,
     blendshape_labels: list[str],
+    face_shapes: FaceShapes = "none",
 ) -> list[bool]:
     local_changes = copy(local_changes)
     facial_actions = copy(facial_actions)
+    if not isinstance(face_shapes, str):
+        face_shapes = list(face_shapes)
+    unknown_face_shapes = set(face_shapes) if isinstance(face_shapes, list) else set()
 
     def _filter(i: int) -> bool:
         x = blendshape_labels[i]
@@ -759,6 +783,19 @@ def resolve_blendshape_mask(
                 f"Unknown facial_actions preset {facial_actions!r}. "
                 "Expected 'none', 'all', or a sequence of label strings."
             )
+        if block_name == "face_shape":
+            if face_shapes == "none":
+                return False
+            if face_shapes == "all":
+                return True
+            if isinstance(face_shapes, list):
+                name = label.rsplit(".", 1)[0]
+                unknown_face_shapes.discard(name)
+                return name in face_shapes
+            raise ValueError(
+                f"Unknown face_shapes preset {face_shapes!r}. "
+                "Expected 'none', 'all', or a sequence of face-shape names."
+            )
         return True
 
     res = list(map(_filter, range(len(blendshape_labels))))
@@ -766,6 +803,8 @@ def resolve_blendshape_mask(
         raise ValueError(f"Uknown local change labels: {local_changes=}")
     if isinstance(facial_actions, list) and len(facial_actions) > 0:
         raise ValueError(f"Uknown facial actions: {facial_actions=}")
+    if unknown_face_shapes:
+        raise ValueError(f"Unknown face shapes: {sorted(unknown_face_shapes)}")
     return res
 
 

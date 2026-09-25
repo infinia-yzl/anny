@@ -21,6 +21,7 @@ from anny.models.model_transforms import (
 )
 import anny.utils.obj_utils
 from anny.models.facial_actions import load_facial_action_blendshapes
+from anny.models.face_shapes import load_face_shape_blendshapes
 from anny.models.phenotype import PHENOTYPE_VARIATIONS
 from anny.models.model_data import (
     ModelData,
@@ -32,7 +33,7 @@ from anny.models.model_data import (
 )
 from anny.paths import get_anny_root_dir, PathLike
 import anny.models.model_transforms as model_transforms
-from anny.typing import FacialActions, LocalChanges, Submodel
+from anny.typing import FaceShapes, FacialActions, LocalChanges, Submodel
 from anny.face_segmentation import get_face_segmentation_mask
 
 logger = logging.getLogger(__name__)
@@ -263,6 +264,7 @@ class BlendshapeData:
     local_change_labels: list[str]
     facial_action_labels: list[str]
     blendshape_labels: list[str]
+    face_shape_row_labels: list[str]
 
 
 @dataclass
@@ -386,20 +388,31 @@ def load_all_blendshapes(
     )
     facial_action_blend_shapes = list(facial_action_blend_shape_tensor)
 
+    face_shape_row_labels, face_shape_blend_shape_tensor = load_face_shape_blendshapes(
+        template_vertices=template_vertices,
+        world_transformation=world_transformation,
+        dtype=dtype,
+    )
+    face_shape_blend_shapes = list(face_shape_blend_shape_tensor)
+
     logger.info(
         f"{len(universal_blend_shapes)=}, {len(race_blend_shapes)=}, "
         f"{len(height_blend_shapes)=}, {len(proportions_blend_shapes)=}, "
         f"{len(breast_blend_shapes)=}, {len(facial_action_blend_shapes)=}, "
-        f"{len(local_blend_shapes)=}"
+        f"{len(local_blend_shapes)=}, {len(face_shape_blend_shapes)=}"
     )
 
     blendshape_labels = (
         blendshape_labels
         + [f"facial_action:{label}" for label in facial_action_labels]
         + local_blendshape_labels
+        + face_shape_row_labels
     )
     blendshapes = torch.stack(
-        l_blend_shape + facial_action_blend_shapes + local_blend_shapes
+        l_blend_shape
+        + facial_action_blend_shapes
+        + local_blend_shapes
+        + face_shape_blend_shapes
     )
     assert (
         len(set(blendshape_labels)) == len(blendshape_labels) == blendshapes.shape[0]
@@ -411,6 +424,7 @@ def load_all_blendshapes(
         local_change_labels=local_change_labels,
         facial_action_labels=facial_action_labels,
         blendshape_labels=blendshape_labels,
+        face_shape_row_labels=face_shape_row_labels,
     )
 
 
@@ -772,6 +786,25 @@ def _filter_rig(
     )
 
 
+def regress_craniofacial_landmarks(
+    template_vertices: torch.Tensor, blendshapes: torch.Tensor
+) -> tuple[list[str], torch.Tensor, torch.Tensor]:
+    """
+    The craniofacial landmarks (``data/keypoints/craniofacial.json``, see
+    anny.faces.measurements) of the MakeHuman template (K, 3) and of each blend shape (N, K, 3).
+    """
+    from anny.faces.measurements import craniofacial_landmark_vertices
+
+    vertices = craniofacial_landmark_vertices()
+    labels = list(vertices)
+    landmarks, landmark_blendshapes = [], []
+    for label in labels:
+        idx = torch.tensor(vertices[label])
+        landmarks.append(template_vertices[idx].mean(0))
+        landmark_blendshapes.append(blendshapes[:, idx].mean(1))
+    return labels, torch.stack(landmarks), torch.stack(landmark_blendshapes, dim=1)
+
+
 @cache_builder
 def load_data(
     weights_filename: PathLike,
@@ -810,11 +843,16 @@ def load_data(
         dtype=mesh_data.template_vertices.dtype,
     )
 
+    landmark_labels, landmarks, landmark_blendshapes = regress_craniofacial_landmarks(
+        mesh_data.template_vertices, blendshape_data.blendshapes
+    )
+
     data = ModelData(
         metadata=ModelMetadata(
             bone_labels=rig_data.bone_labels,
             bone_parents=rig_data.bone_parents,
             blendshape_labels=blendshape_data.blendshape_labels,
+            craniofacial_landmark_labels=landmark_labels,
         ),
         template_vertices=mesh_data.template_vertices,
         faces=mesh_data.faces,
@@ -832,6 +870,8 @@ def load_data(
         template_bone_tails=rig_data.template_bone_tails,
         bone_tails_blendshapes=rig_data.bone_tails_blendshapes,
         bone_rolls_rotmat=rig_data.bone_rolls_rotmat,
+        craniofacial_landmarks=landmarks,
+        craniofacial_landmarks_blendshapes=landmark_blendshapes,
     )
     if remove_zero_weights_bones:
         weighted_bones = set(
@@ -947,6 +987,7 @@ def build_anny_model_data(
     topology: TopologyConfig,
     local_changes: LocalChanges,
     facial_actions: FacialActions,
+    face_shapes: FaceShapes = "none",
 ) -> ModelData:
     if topology.base_mesh != "makehuman":
         raise ValueError(
@@ -966,7 +1007,10 @@ def build_anny_model_data(
     data = _filter_rig(data, rig.bones_to_remove, rig.subtree_root)
 
     mask = resolve_blendshape_mask(
-        local_changes, facial_actions, data.metadata.blendshape_labels
+        local_changes,
+        facial_actions,
+        data.metadata.blendshape_labels,
+        face_shapes=face_shapes,
     )
     data = model_transforms.filter_blendshapes(data, mask)
 
