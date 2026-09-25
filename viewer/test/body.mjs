@@ -27,7 +27,7 @@ const body = new AnnyBody({ ...man, detail_step: info.head_detail.step }, {
   template: new Float32Array(bytes('coarse_template')), components: drop4th(new Int16Array(bytes('shape_components'))),
   projection: new Float32Array(bytes('shape_projection')), jointTemplate: new Float32Array(bytes('joint_template')),
   jointBlend: new Float32Array(bytes('joint_blend')), quads: new Uint32Array(bytes('coarse_quads')), rows: new Uint32Array(bytes('head_row')),
-  detail: drop4th(new Int16Array(bytes('head_detail'))), index, rest, nsmooth: vertexNormals(rest, index), coarseSkin: new Uint8Array(bytes('coarse_skin')),
+  detail: drop4th(new Int16Array(bytes('head_detail'))), relief: new Int16Array(bytes('head_detail')).filter((_, i) => i % 4 === 3), index, rest, nsmooth: vertexNormals(rest, index), coarseSkin: new Uint8Array(bytes('coarse_skin')),
 });
 
 // the hair of anny's default body: 16-bit roots and 8-bit steps

@@ -346,10 +346,12 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
         4,
     )
     # detail layers in the (t1, t2, n) frames of the smooth surface, steps of 0.01 mm
-    # (a fourth zero pads each record to 8 bytes, since meshopt encodes strides that are multiples of 4)
-    dl = np.round(body.detail_local / 1e-5)
+    # (t1, t2, n) without the relief, then the height of the relief along n, which the page fades with the
+    # sliders (the record of 8 bytes suits meshopt, which encodes strides that are multiples of 4)
+    base = body.detail_local.copy()
+    base[:, 2] -= body.relief_height
+    dl = np.round(np.concatenate([base, body.relief_height[:, None]], axis=1) / 1e-5)
     assert np.abs(dl).max() < 32767
-    dl = np.concatenate([dl, np.zeros((nV, 1))], axis=1)
     pk.add("head_detail", dl.astype(np.int16), "vertex", nV, 8, step=1e-5)
     pk.add(
         "head_skin",

@@ -135,6 +135,9 @@ class FineBody:
     N: np.ndarray  # normals of V
     detail: np.ndarray  # V - V_smooth
     detail_local: np.ndarray  # the detail in the (t1, t2, n) frames of V_smooth
+    relief_height: (
+        np.ndarray
+    )  # the part of detail_local[:, 2] that comes from the relief
     eye_centers: dict  # 'l', 'r' -> centre of the eyeball (legacy frame)
     eye_radius: float
     eye_sphere: (
@@ -177,10 +180,13 @@ def fine_body() -> FineBody:
         V = close_lips(V, mx, ysm, mx[-1] + 0.0008, float(np.median(mz)))
     N = vertex_normals(V, T)
     arm_w = relief.arm_weights(subdivision, coarse["W"])
-    V = V + relief.relief(V, N, arm_w)
+    bump = relief.relief(V, N, arm_w)
+    V = V + bump
     detail = V - V_smooth
     frames = tangent_frames(V_smooth, T, vertex_normals(V_smooth, T))
     detail_local = np.einsum("nij,nj->ni", frames, detail)
+    # the relief alone, along the normal of the smooth surface (the page fades it with the sliders)
+    relief_height = np.einsum("nj,nj->n", frames[:, 2], bump)
     return FineBody(
         subdivision=subdivision,
         T=T,
@@ -189,6 +195,7 @@ def fine_body() -> FineBody:
         N=vertex_normals(V, T),
         detail=detail,
         detail_local=detail_local,
+        relief_height=relief_height,
         eye_centers=centers,
         eye_radius=R,
         eye_sphere=eye_sphere,

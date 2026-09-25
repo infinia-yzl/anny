@@ -190,6 +190,9 @@ export class AnnyBody {
   area: Float32Array; area0: Float32Array;   // ringFrames' area now and on anny's default body
   localDetail: Float32Array;    // per fine vertex: the detail layers in the frame (t1, t2, n), per unit of local size
   localNormals: Float32Array;   // per fine vertex: the full normal and the smooth shading normal in the frame (t1, t2, n)
+  // the vertices under the relief of the collarbones and the biceps: the relief in the frame (per unit of local size)
+  // and the normal of the body without the relief
+  reliefIndex: Uint32Array; reliefLocal: Float32Array; reliefNormals: Float32Array;
   coarse: Float32Array; joints: Float32Array; coarseSkin: Uint8Array;
   pos: Float32Array; nrm: Float32Array; ns: Float32Array; smooth: Float32Array; tan: Float32Array; sn: Float32Array;
   floor: number; eyeRange: Record<string, number[]>; eyeSphere0: Record<string, [number[], number]>; eyeOffset: number[];
@@ -201,7 +204,7 @@ export class AnnyBody {
   jointsDefault: Float32Array;
   constructor(meta: any, bufs: {
     template: Float32Array; components: Int16Array; projection: Float32Array; jointTemplate: Float32Array; jointBlend: Float32Array;
-    quads: Uint32Array; rows: Uint32Array; detail: Int16Array; index: Uint32Array; rest: Float32Array; nsmooth: Float32Array;
+    quads: Uint32Array; rows: Uint32Array; detail: Int16Array; relief?: Int16Array; index: Uint32Array; rest: Float32Array; nsmooth: Float32Array;
     coarseSkin: Uint8Array;
   }, positions?: Float32Array, normals?: Float32Array, nsmooth?: Float32Array) {
     const sm = meta.shape;
@@ -229,17 +232,20 @@ export class AnnyBody {
     // vertex, so these normals keep their place in the frame on every body, and an update needs no pass over the
     // triangles.
     this.smoothSurface({});
-    const S = this.smooth, D = this.detail, st = this.detailStep, nF = this.nFine;
+    const S = this.smooth, D = this.detail, H = bufs.relief, st = this.detailStep, nF = this.nFine;
     const Nt = new Float32Array(nF * 3), Tt = new Float32Array(nF * 3);
     vertexFrames(S, this.index, Nt, Tt);
-    const P = this.pos, W = new Float32Array(nF * 3);   // W: the detail in world axes
-    for (let o = 0; o < nF * 3; o += 3) {
+    // W: the detail without the relief in world axes; the relief lies along the normal
+    const P = this.pos, W = new Float32Array(nF * 3), bare = new Float32Array(nF * 3), reliefIds: number[] = [];
+    for (let o = 0, v = 0; v < nF; v++, o += 3) {
       const t2x = Nt[o + 1] * Tt[o + 2] - Nt[o + 2] * Tt[o + 1], t2y = Nt[o + 2] * Tt[o] - Nt[o] * Tt[o + 2], t2z = Nt[o] * Tt[o + 1] - Nt[o + 1] * Tt[o];
-      const a = D[o] * st, b = D[o + 1] * st, n = D[o + 2] * st;
-      W[o] = a * Tt[o] + b * t2x + n * Nt[o];
-      W[o + 1] = a * Tt[o + 1] + b * t2y + n * Nt[o + 1];
-      W[o + 2] = a * Tt[o + 2] + b * t2z + n * Nt[o + 2];
-      P[o] = S[o] + W[o]; P[o + 1] = S[o + 1] + W[o + 1]; P[o + 2] = S[o + 2] + W[o + 2];
+      const a = D[o] * st, b = D[o + 1] * st, n = D[o + 2] * st, h = H ? H[v] * st : 0;
+      if (h !== 0) reliefIds.push(v);
+      for (let k = 0; k < 3; k++) {
+        W[o + k] = a * Tt[o + k] + b * [t2x, t2y, t2z][k] + n * Nt[o + k];
+        bare[o + k] = S[o + k] + W[o + k];
+        P[o + k] = bare[o + k] + h * Nt[o + k];
+      }
     }
     // the strands bind to this body as the updates rebuild it (the rest attribute holds it in 16 bits)
     this.pos0 = P.slice();
@@ -248,16 +254,26 @@ export class AnnyBody {
     this.area0 = this.area.slice();
     const N = this.sn, T = this.tan, N1 = vertexNormals(P, this.index), NS = bufs.nsmooth;
     this.localDetail = new Float32Array(nF * 3); this.localNormals = new Float32Array(nF * 6);
-    const toLocal = (src: Float32Array, o: number, out: Float32Array, q: number, t2x: number, t2y: number, t2z: number) => {
-      out[q] = src[o] * T[o] + src[o + 1] * T[o + 1] + src[o + 2] * T[o + 2];
-      out[q + 1] = src[o] * t2x + src[o + 1] * t2y + src[o + 2] * t2z;
-      out[q + 2] = src[o] * N[o] + src[o + 1] * N[o + 1] + src[o + 2] * N[o + 2];
+    const toLocal = (x: number, y: number, z: number, o: number, out: Float32Array, q: number, t2x: number, t2y: number, t2z: number) => {
+      out[q] = x * T[o] + y * T[o + 1] + z * T[o + 2];
+      out[q + 1] = x * t2x + y * t2y + z * t2z;
+      out[q + 2] = x * N[o] + y * N[o + 1] + z * N[o + 2];
     };
+    const t2 = (o: number): [number, number, number] => [N[o + 1] * T[o + 2] - N[o + 2] * T[o + 1], N[o + 2] * T[o] - N[o] * T[o + 2], N[o] * T[o + 1] - N[o + 1] * T[o]];
     for (let o = 0, v = 0; v < nF; v++, o += 3) {
-      const t2x = N[o + 1] * T[o + 2] - N[o + 2] * T[o + 1], t2y = N[o + 2] * T[o] - N[o] * T[o + 2], t2z = N[o] * T[o + 1] - N[o + 1] * T[o];
-      toLocal(W, o, this.localDetail, o, t2x, t2y, t2z);
-      toLocal(N1, o, this.localNormals, v * 6, t2x, t2y, t2z);
-      toLocal(NS, o, this.localNormals, v * 6 + 3, t2x, t2y, t2z);
+      const [t2x, t2y, t2z] = t2(o);
+      toLocal(W[o], W[o + 1], W[o + 2], o, this.localDetail, o, t2x, t2y, t2z);
+      toLocal(N1[o], N1[o + 1], N1[o + 2], o, this.localNormals, v * 6, t2x, t2y, t2z);
+      toLocal(NS[o], NS[o + 1], NS[o + 2], o, this.localNormals, v * 6 + 3, t2x, t2y, t2z);
+    }
+    // the relief vertices: the relief in the frames, and the normals of the body without the relief
+    const N0 = vertexNormals(bare, this.index), m = reliefIds.length;
+    this.reliefIndex = Uint32Array.from(reliefIds);
+    this.reliefLocal = new Float32Array(m * 3); this.reliefNormals = new Float32Array(m * 3);
+    for (let q = 0; q < m; q++) {
+      const v = reliefIds[q], o = v * 3, h = H[v] * st, [t2x, t2y, t2z] = t2(o);
+      toLocal(h * Nt[o], h * Nt[o + 1], h * Nt[o + 2], o, this.reliefLocal, q * 3, t2x, t2y, t2z);
+      toLocal(N0[o], N0[o + 1], N0[o + 2], o, this.reliefNormals, q * 3, t2x, t2y, t2z);
     }
   }
 
@@ -300,6 +316,18 @@ export class AnnyBody {
       NS[o] = L[q + 3] * tx + L[q + 4] * t2x + L[q + 5] * nx;
       NS[o + 1] = L[q + 3] * ty + L[q + 4] * t2y + L[q + 5] * ny;
       NS[o + 2] = L[q + 3] * tz + L[q + 4] * t2z + L[q + 5] * nz;
+    }
+    // the relief of the collarbones and the biceps, faded with the sliders, and the normals under it
+    const kr = reliefWeight(values), RI = this.reliefIndex, RL = this.reliefLocal, RN = this.reliefNormals;
+    for (let q = 0; q < RI.length; q++) {
+      const v = RI[q], o = v * 3, i = q * 3, j = v * 6;
+      const tx = T[o], ty = T[o + 1], tz = T[o + 2], nx = N[o], ny = N[o + 1], nz = N[o + 2];
+      const t2x = ny * tz - nz * ty, t2y = nz * tx - nx * tz, t2z = nx * ty - ny * tx;
+      const k = kr * Math.sqrt(A[v] / A0[v]), a = RL[i] * k, b = RL[i + 1] * k, n = RL[i + 2] * k;
+      P[o] += a * tx + b * t2x + n * nx; P[o + 1] += a * ty + b * t2y + n * ny; P[o + 2] += a * tz + b * t2z + n * nz;
+      let lx = RN[i] + kr * (L[j] - RN[i]), ly = RN[i + 1] + kr * (L[j + 1] - RN[i + 1]), lz = RN[i + 2] + kr * (L[j + 2] - RN[i + 2]);
+      const l = Math.sqrt(lx * lx + ly * ly + lz * lz) || 1; lx /= l; ly /= l; lz /= l;
+      N1[o] = lx * tx + ly * t2x + lz * nx; N1[o + 1] = lx * ty + ly * t2y + lz * ny; N1[o + 2] = lx * tz + ly * t2z + lz * nz;
     }
     marks.push(['frames and detail', performance.now()]);
     const V = this.coarse;
@@ -414,6 +442,13 @@ export class AnnyBody {
     }
     return best;
   }
+}
+
+// how much of the relief of the collarbones and the biceps shows: it belongs to a lean body, so it fades out toward
+// the youngest bodies and under body fat (anny's age and weight sliders, at 0.5 by default)
+export function reliefWeight(values: Record<string, number>): number {
+  const step = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  return step(0.15, 0.45, values.age ?? 0.5) * (1 - 0.85 * step(0.5, 1.0, values.weight ?? 0.5));
 }
 
 // barycentric points of triangles (one per strand)

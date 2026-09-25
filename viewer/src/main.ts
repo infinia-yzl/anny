@@ -779,9 +779,9 @@ function initBody(meta: any, B: any, geo: any) {
   const sm = meta.shape;
   const at = geo.attributes;
   const nF = at.position.count;
-  // the detail records hold 4 values (the fourth pads the record); AnnyBody reads 3 per vertex
-  const d4 = new Int16Array(B.head_detail.data.buffer, B.head_detail.data.byteOffset, nF * 4), detailRaw = new Int16Array(nF * 3);
-  for (let i = 0; i < nF; i++) { detailRaw[i * 3] = d4[i * 4]; detailRaw[i * 3 + 1] = d4[i * 4 + 1]; detailRaw[i * 3 + 2] = d4[i * 4 + 2]; }
+  // the detail records hold (t1, t2, n) without the relief, then the height of the relief along n
+  const d4 = new Int16Array(B.head_detail.data.buffer, B.head_detail.data.byteOffset, nF * 4), detailRaw = new Int16Array(nF * 3), relief = new Int16Array(nF);
+  for (let i = 0; i < nF; i++) { detailRaw[i * 3] = d4[i * 4]; detailRaw[i * 3 + 1] = d4[i * 4 + 1]; detailRaw[i * 3 + 2] = d4[i * 4 + 2]; relief[i] = d4[i * 4 + 3]; }
   const rows = new Uint32Array(B.head_row.data.buffer, B.head_row.data.byteOffset, nF);
   // the shape components come as records of 4 values (x, y, z and a pad)
   const c4 = i16('shape_components'), nComp = sm.components * sm.coarse_vertices, components = new Int16Array(nComp * 3);
@@ -790,7 +790,7 @@ function initBody(meta: any, B: any, geo: any) {
     template: f32('coarse_template'), components,
     projection: f32('shape_projection').subarray(0, sm.components * sm.blend_shapes),
     jointTemplate: f32('joint_template'), jointBlend: f32('joint_blend'),
-    quads: u32('coarse_quads'), rows, detail: detailRaw,
+    quads: u32('coarse_quads'), rows, detail: detailRaw, relief,
     index: geo.index.array, rest: at.rest.array, nsmooth: at.nsmooth.array.slice(), coarseSkin: B.coarse_skin.data,
   }, at.position.array, at.normal.array, at.nsmooth.array);
   body.detailStep = B.head_detail.info.step || 1e-5;
