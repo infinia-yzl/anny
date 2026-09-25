@@ -334,18 +334,23 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
     rec[:, 28:32] = u8(A["cover"])
     pk.add("head_v", rec, "vertex", nV, 32, lo=lo.tolist(), hi=hi.tolist())
     pk.add("head_i", T.reshape(-1), "index", T.size, 4)
-    # the row of each fine vertex in the last level of the subdivision
+    # the row of each fine vertex in the last level of the subdivision, for the page's
+    # numbering of the coarse body (the body vertices alone, see coarse_quads)
+    body_of = -np.ones(len(base_index), np.int64)
+    body_of[body_used] = np.arange(len(body_used))
     pk.add(
         "head_row",
-        body.subdivision.used_top_vertices.astype(np.uint32),
+        body.subdivision.renumbered_rows(body_of, len(body_used)).astype(np.uint32),
         "vertex",
         nV,
         4,
     )
     # detail layers in the (t1, t2, n) frames of the smooth surface, steps of 0.01 mm
+    # (a fourth zero pads each record to 8 bytes, since meshopt encodes strides that are multiples of 4)
     dl = np.round(body.detail_local / 1e-5)
     assert np.abs(dl).max() < 32767
-    pk.add("head_detail", dl.astype(np.int16), "vertex", nV, 6, step=1e-5)
+    dl = np.concatenate([dl, np.zeros((nV, 1))], axis=1)
+    pk.add("head_detail", dl.astype(np.int16), "vertex", nV, 8, step=1e-5)
     pk.add(
         "head_skin",
         skin_record(weights["si"], weights["sw"]),
@@ -374,7 +379,10 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
     comp = space["components"]
     comp_scale = np.abs(comp).reshape(len(comp), -1).max(1) / 32767
     cq = np.round(comp / comp_scale[:, None, None]).astype(np.int16)
-    pk.add("shape_components", cq, "raw", cq.size * 2, 1)
+    # one record of 4 values (x, y, z and a zero pad) per component and vertex: meshopt encodes them as
+    # vertices, and the neighbouring vertices of a component move alike
+    cq = np.concatenate([cq, np.zeros(cq.shape[:2] + (1,), np.int16)], 2).reshape(-1, 4)
+    pk.add("shape_components", cq, "vertex", len(cq), 8)
     proj = space["projection"].astype(np.float32)
     pk.add("shape_projection", proj, "raw", proj.size * 4, 1)
     jt = space["joint_template"].astype(np.float32)
@@ -384,12 +392,6 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
     # anny's skinning weights on the coarse body (for grounding the poses in the page)
     csi, csw = top_weights(coarse["W"][compact], 8)
     pk.add("coarse_skin", skin_record(csi, csw), "raw", len(compact) * 16, 1)
-    # the local size of the coarse body around each vertex on anny's default body (legacy frame)
-    Vd = rig.to_legacy(model(phenotype_kwargs={})["rest_vertices"][0].detach().numpy())[
-        compact
-    ]
-    size_ref = ring_size(Vd, quads.astype(np.int64), len(body_used))
-    pk.add("coarse_size_ref", size_ref.astype(np.float32), "raw", size_ref.size * 4, 1)
     man["shape"] = dict(
         tables=space["tables"],
         sliders=SLIDERS,
@@ -564,24 +566,6 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
             f"viewer data: {tot / 1e6:.1f} MB raw -> {out_dir} ({time.time() - t0:.0f} s)"
         )
     return man
-
-
-def ring_size(V, quads, n_body):
-    """mean length of the edges around each vertex (the eye vertices get the mean of the head)"""
-    E = np.concatenate(
-        [quads[:, [0, 1]], quads[:, [1, 2]], quads[:, [2, 3]], quads[:, [3, 0]]]
-    )
-    E = np.unique(np.sort(E, 1), axis=0)
-    length = np.linalg.norm(V[E[:, 0]] - V[E[:, 1]], axis=1)
-    s = np.zeros(len(V))
-    c = np.zeros(len(V))
-    np.add.at(s, E[:, 0], length)
-    np.add.at(s, E[:, 1], length)
-    np.add.at(c, E[:, 0], 1)
-    np.add.at(c, E[:, 1], 1)
-    out = s / np.maximum(c, 1)
-    out[n_body:] = out[:n_body].mean()
-    return out
 
 
 def pack_strands(pk, name, P_, ao, lo, hi, step, max_pts, dq=0.00004):

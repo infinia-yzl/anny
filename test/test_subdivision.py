@@ -183,6 +183,25 @@ class TestMixedSubdivision(unittest.TestCase):
             1e-12,
         )
 
+    def test_renumbered_rows(self):
+        # the body vertices alone, in a compact numbering: the same fine surface
+        quads = self.subdivision.input_quads
+        used = np.unique(quads)
+        compact = -np.ones(self.subdivision.input_vertex_count, np.int64)
+        compact[used] = np.arange(len(used))
+        rows = self.subdivision.renumbered_rows(compact, len(used))
+        n, q = len(used), compact[quads]
+        rest = self.model(phenotype_kwargs={"age": 0.8})["rest_vertices"][0].numpy()
+        x = rest[used]
+        for _ in range(self.subdivision.base_level):
+            level = catmull_clark(n, q)
+            x = level.operator.apply(x)
+            n, q = level.operator.shape[0], level.quads
+        x = catmull_clark(n, q).operator.select_rows(rows).apply(x)
+        self.assertLess(np.abs(x - self.subdivision(rest)).max(), 1e-12)
+        with self.assertRaises(ValueError):
+            self.subdivision.renumbered_rows(compact[::-1], len(used))
+
 
 if __name__ == "__main__":
     unittest.main()

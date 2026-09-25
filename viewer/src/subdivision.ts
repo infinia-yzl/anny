@@ -19,6 +19,17 @@ export class Csr {
   apply(x: Float32Array | Float64Array, ch: number, out?: Float32Array): Float32Array {
     const y = out || new Float32Array(this.rows * ch);
     const { start, index, value } = this;
+    if (ch === 4) {
+      for (let r = 0; r < this.rows; r++) {
+        let a = 0, b = 0, c = 0, d = 0;
+        for (let e = start[r]; e < start[r + 1]; e++) {
+          const w = value[e], o = index[e] * 4;
+          a += w * x[o]; b += w * x[o + 1]; c += w * x[o + 2]; d += w * x[o + 3];
+        }
+        const q = r * 4; y[q] = a; y[q + 1] = b; y[q + 2] = c; y[q + 3] = d;
+      }
+      return y;
+    }
     if (ch === 3) {
       for (let r = 0; r < this.rows; r++) {
         let a = 0, b = 0, c = 0;
@@ -105,14 +116,19 @@ export function catmullClark(nV: number, quads: Uint32Array, rows?: Uint32Array)
   for (let i = 0; i < faceEdges.length; i++) { const e = faceEdges[i]; if (ef[e * 2] < 0) ef[e * 2] = i >> 2; else ef[e * 2 + 1] = i >> 2; }
   const wanted = rows || null;
   const nRows = wanted ? wanted.length : nOut;
-  // entries per row, collected in a small map and merged
+  // entries per row, merged in a small list (in the order they come, as anny.utils.subdivision sums them) and then
+  // sorted by column
   const start = new Uint32Array(nRows + 1);
-  const idxL: number[] = [], valL: number[] = [];
-  const acc = new Map<number, number>();
-  const add = (c: number, w: number) => acc.set(c, (acc.get(c) || 0) + w);
+  let idxA = new Uint32Array(nRows * 8), valA = new Float32Array(nRows * 8), used = 0;
+  const cols = new Uint32Array(256), vals = new Float64Array(256);
+  let cnt = 0;
+  const add = (c: number, w: number) => {
+    for (let i = 0; i < cnt; i++) if (cols[i] === c) { vals[i] += w; return; }
+    cols[cnt] = c; vals[cnt] = w; cnt++;
+  };
   for (let r = 0; r < nRows; r++) {
     const row = wanted ? wanted[r] : r;
-    acc.clear();
+    cnt = 0;
     if (row >= nV + nE) {
       const f = row - nV - nE;
       for (let k = 0; k < 4; k++) add(quads[f * 4 + k], 0.25);
@@ -144,11 +160,20 @@ export function catmullClark(nV: number, quads: Uint32Array, rows?: Uint32Array)
         for (let q = veStart[v]; q < veStart[v + 1]; q++) { const e = ve[q]; add(edges[e * 2], ew); add(edges[e * 2 + 1], ew); }
       }
     }
-    const cols = Array.from(acc.keys()).sort((x, y) => x - y);
-    for (const c of cols) { idxL.push(c); valL.push(acc.get(c)); }
-    start[r + 1] = idxL.length;
+    for (let i = 1; i < cnt; i++) {
+      const c = cols[i], w = vals[i];
+      let j = i - 1;
+      while (j >= 0 && cols[j] > c) { cols[j + 1] = cols[j]; vals[j + 1] = vals[j]; j--; }
+      cols[j + 1] = c; vals[j + 1] = w;
+    }
+    if (used + cnt > idxA.length) {
+      const i2 = new Uint32Array(idxA.length * 2), v2 = new Float32Array(idxA.length * 2);
+      i2.set(idxA); v2.set(valA); idxA = i2; valA = v2;
+    }
+    for (let i = 0; i < cnt; i++) { idxA[used] = cols[i]; valA[used] = vals[i]; used++; }
+    start[r + 1] = used;
   }
-  const op = new Csr(nRows, nV, start, Uint32Array.from(idxL), Float32Array.from(valL));
+  const op = new Csr(nRows, nV, start, idxA.slice(0, used), valA.slice(0, used));
   // the new quads, in the order of anny.utils.subdivision (one block per corner)
   const nq = new Uint32Array(M * 16), parent = new Uint32Array(M * 4);
   for (let k = 0; k < 4; k++) for (let f = 0; f < M; f++) {
@@ -177,9 +202,12 @@ export class FineSubdivision {
     this.nIn = nVertices;
     this.nOut = lastRows.length;
   }
+  buffers: Record<number, Float32Array[]> = {};
+  // the result is a buffer of this object, overwritten by the next call with the same channel count
   apply(x: Float32Array, ch = 3): Float32Array {
+    const bufs = this.buffers[ch] || (this.buffers[ch] = this.ops.map((op) => new Float32Array(op.rows * ch)));
     let y: Float32Array = x;
-    for (const op of this.ops) y = op.apply(y, ch);
+    this.ops.forEach((op, i) => { y = op.apply(y, ch, bufs[i]); });
     return y;
   }
 }

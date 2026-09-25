@@ -332,6 +332,10 @@ class MixedSubdivision:
             n, q = level.operator.shape[0], level.quads
         # The extra level, on the whole base-level mesh; only the rows in use are kept.
         top = catmull_clark(n, q)
+        # (input, output) vertex counts of every level, the top level included
+        self.level_sizes = [
+            (level.num_vertices, level.operator.shape[0]) for level in levels + [top]
+        ]
         base_count = n
         base_quads, base_region = q, face_region
 
@@ -407,6 +411,39 @@ class MixedSubdivision:
             faces = faces[np.asarray(faces_mask, dtype=bool)]
         region = faces_weighted_to_bones(model, faces, region_bones, threshold)
         return cls(model.template_vertices.shape[0], faces, region, base_level)
+
+    def renumbered_rows(self, vertex_map, num_vertices: int) -> np.ndarray:
+        """
+        The rows of ``used_top_vertices`` for the same faces on renumbered input vertices.
+
+        The viewer page subdivides the body vertices alone, in a compact numbering. Each level
+        numbers its vertex points first, then its edge points and then its face points, so
+        a different count of input vertices shifts the rows of the edge and face points.
+
+        Args:
+            vertex_map: (input vertices,) new index of each input vertex. It must keep the
+                order of the vertices that the faces use, so that the edges keep their order.
+            num_vertices: number of vertices of the renumbered input mesh.
+
+        Returns:
+            (output vertices,) the top-level row of each output vertex in the new numbering.
+        """
+        vertex_map = np.asarray(vertex_map, dtype=np.int64)
+        mapped = vertex_map[np.unique(self.input_quads)]
+        if (
+            np.any(np.diff(mapped) <= 0)
+            or mapped.min() < 0
+            or mapped.max() >= num_vertices
+        ):
+            raise ValueError(
+                "The map must keep the order of the vertices of the faces."
+            )
+        row_map, n_new = vertex_map, int(num_vertices)
+        for n_in, n_out in self.level_sizes:
+            added = n_out - n_in
+            row_map = np.concatenate([row_map, n_new + np.arange(added)])
+            n_new += added
+        return row_map[self.used_top_vertices]
 
     @property
     def operator(self) -> SparseOperator:

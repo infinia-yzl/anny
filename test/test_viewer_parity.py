@@ -81,16 +81,21 @@ class TestViewerParity(unittest.TestCase):
         body = (base_index[faces] < 13380).all(1)
         cls.sub = MixedSubdivision.for_model(model, faces_mask=body)
         cls.rest = model(phenotype_kwargs={"age": 0.2})["rest_vertices"][0].numpy()
-        faces[body].astype(np.uint32).tofile(cls.dir / "quads.bin")
-        cls.sub.used_top_vertices.astype(np.uint32).tofile(cls.dir / "rows.bin")
-        cls.rest.astype(np.float32).tofile(cls.dir / "coarse_in.bin")
+        # the page subdivides the body vertices alone, in a compact numbering
+        used = np.unique(faces[body])
+        compact = -np.ones(len(cls.rest), np.int64)
+        compact[used] = np.arange(len(used))
+        compact[faces[body]].astype(np.uint32).tofile(cls.dir / "quads.bin")
+        rows = cls.sub.renumbered_rows(compact, len(used))
+        rows.astype(np.uint32).tofile(cls.dir / "rows.bin")
+        cls.rest[used].astype(np.float32).tofile(cls.dir / "coarse_in.bin")
         inp = dict(
             tables=export.phenotype_tables(model),
             settings=settings,
             n_shapes=n,
             component_scale=scale.tolist(),
             shape_settings=20,
-            subdivision=dict(n=int(model.template_vertices.shape[0]), levels=2),
+            subdivision=dict(n=int(len(used)), levels=2),
         )
         with open(cls.dir / "input.json", "w") as f:
             json.dump(inp, f)
