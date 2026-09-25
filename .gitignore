@@ -14,3 +14,5 @@ test/data/
 tutorials/.ipynb_checkpoints/
 viewer/node_modules/
 viewer/build/
+# the built viewer page is part of the repository
+!viewer/dist/

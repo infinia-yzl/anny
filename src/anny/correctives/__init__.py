@@ -25,6 +25,12 @@ of an anny model and leaves ``Anny.forward`` unchanged::
 The layer assumes linear blend skinning. It needs a model built from the MakeHuman base mesh
 (the ``anny`` and ``makehuman`` topologies) with MakeHuman bone names (the ``anny`` and
 ``makehuman`` rigs).
+
+``python -m anny.correctives.authoring.evaluate`` compares plain skinning and the shapes with a
+full simulation of library poses, on anny's default body or on the body that the environment
+variable ANNY_AUTHORING_PHENOTYPE names. On the default body and at age 1/3 the shapes remove
+about half of the error of plain skinning in the seated pose and about three quarters in the
+T-pose. At age 0 they remove about a quarter of it in the seated pose.
 """
 
 from __future__ import annotations
