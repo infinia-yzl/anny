@@ -19,6 +19,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { AnnyBody, vertexNormals as normalsOf } from './body.ts';
+import { sampleFace, type FaceData } from './anny_shape.ts';
 import {
   BG_GLSL, COVER_GLSL, EYE_FS, EYE_VS, GLSL_COMMON, HAIR_FS, HAIR_VS, HEAD_OUT_GLSL, NOISE_GLSL, PROP_FS, PROP_VS, SKIN_FS, SKIN_GLSL,
   SKIN_VS, SSS_GLSL,
@@ -764,7 +765,7 @@ function makeHairMesh(geo, p, defines, strands) {
 // The body comes from anny (body.ts): the sliders set anny's blend-shape coefficients, the coarse body and the
 // joints follow, the fine surface is rebuilt by subdivision with its detail layers, and the eyes, the hair, the
 // skeleton and the corrective shapes follow the body. Every slider runs from 0 to 1, and anny's default is 0.5.
-const BODY: any = { ready: false, anny: null as AnnyBody | null, geo: null, values: null, sliders: [], lastMs: 0, lastTotalMs: 0, lastTiming: {} };
+const BODY: any = { ready: false, anny: null as AnnyBody | null, geo: null, values: null, face: null, faceSliders: [], sliders: [], lastMs: 0, lastTotalMs: 0, lastTiming: {} };
 function sliderEnds(tables: any, label: string) {
   const v = tables.variations.find((x: any) => x[0] === label);
   const a = tables.anchors[label];
@@ -787,21 +788,51 @@ function initBody(meta: any, B: any, geo: any) {
   // the shape components come as records of 4 values (x, y, z and a pad)
   const c4 = i16('shape_components'), nComp = sm.components * sm.coarse_vertices, components = new Int16Array(nComp * 3);
   for (let i = 0; i < nComp; i++) { components[i * 3] = c4[i * 4]; components[i * 3 + 1] = c4[i * 4 + 1]; components[i * 3 + 2] = c4[i * 4 + 2]; }
+  // anny's face shapes: sparse offsets on the coarse body (records of x, y, z and a pad), bone-head deltas, the
+  // landmarks that size the scale groups, and the factors of the face-shape distribution
+  let face: FaceData | undefined;
+  if (sm.face && B.face_offsets) {
+    const o4 = i16('face_offsets'), n = o4.length / 4, offsets = new Int16Array(n * 3);
+    for (let i = 0; i < n; i++) { offsets[i * 3] = o4[i * 4]; offsets[i * 3 + 1] = o4[i * 4 + 1]; offsets[i * 3 + 2] = o4[i * 4 + 2]; }
+    face = { tables: sm.face, lmTemplate: f32('face_lm_template'), lmBlend: f32('face_lm_blend'), ids: u32('face_ids'), offsets,
+      boneDeltas: f32('face_bones'), prior: B.face_prior ? f32('face_prior') : undefined };
+  }
   const body = new AnnyBody(meta, {
     template: f32('coarse_template'), components,
     projection: f32('shape_projection').subarray(0, sm.components * sm.blend_shapes),
     jointTemplate: f32('joint_template'), jointBlend: f32('joint_blend'),
     quads: u32('coarse_quads'), rows, detail: detailRaw, relief,
-    index: geo.index.array, rest: at.rest.array, nsmooth: at.nsmooth.array.slice(), coarseSkin: B.coarse_skin.data,
+    index: geo.index.array, rest: at.rest.array, nsmooth: at.nsmooth.array.slice(), coarseSkin: B.coarse_skin.data, face,
   }, at.position.array, at.normal.array, at.nsmooth.array);
   body.detailStep = B.head_detail.info.step || 1e-5;
   BODY.anny = body; BODY.geo = geo;
   BODY.sliders = sm.sliders.map((name: string) => ({ name, label: name.charAt(0).toUpperCase() + name.slice(1), ends: sliderEnds(sm.tables, name) }));
+  BODY.face = face || null;
+  BODY.faceSliders = face ? face.tables.names.map((name: string, i: number) => ({ name, group: face.tables.groups[i],
+    label: faceLabel(name, face.tables.groups[i]), range: face.tables.ranges[i], ends: (face.tables.ends || [])[i] || ['', ''] })) : [];
   BODY.ready = true;
 }
+// a readable label for a face-shape name, without the group's own word: 'nose-scale-vert' -> 'Height'
+const FACE_WORDS: Record<string, string> = { 'scale-vert': 'height', 'scale-horiz': 'width', 'scale-depth': 'depth', 'trans': 'position',
+  'down-up': 'up and down', 'in-out': 'in and out', 'backward-forward': 'back and forth', 'decr-incr': '', 'invertedtriangular': 'inverted triangular' };
+const FACE_GROUP_WORDS: Record<string, string[]> = { head: ['head'], forehead: ['forehead'], brows: ['eyebrows'], eyes: ['eye'], nose: ['nose'],
+  cheeks: ['cheek'], mouth: ['mouth'], chin: ['chin'], ears: ['ear'] };
+function faceLabel(name: string, group: string) {
+  let t = name;
+  for (const w of FACE_GROUP_WORDS[group] || []) if (t.startsWith(w + '-')) t = t.slice(w.length + 1);
+  for (const [k, v] of Object.entries(FACE_WORDS)) t = t.split(k).join(v);
+  t = t.replace(/-/g, ' ').replace(/\s+/g, ' ').trim() || name;
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+const FACE_GROUP_TITLES: Record<string, string> = { head: 'Head', forehead: 'Forehead', brows: 'Brows', eyes: 'Eyes', nose: 'Nose',
+  cheeks: 'Cheeks', mouth: 'Mouth', chin: 'Chin and jaw', ears: 'Ears' };
 function sameValues(a: any, b: any) {
   if (!a || !b) return false;
   return BODY.sliders.every((s: any) => Math.abs((a[s.name] ?? 0.5) - (b[s.name] ?? 0.5)) < 1e-6);
+}
+function sameFace(a: any, b: any) {
+  if (!a || !b) return false;
+  return BODY.faceSliders.every((s: any) => Math.abs((a[s.name] ?? 0) - (b[s.name] ?? 0)) < 1e-6);
 }
 // the head of anny's default body -> the head of the current body (both at rest): a move and a uniform scale
 const HEADMAP = { def: new THREE.Vector3(), cur: new THREE.Vector3(), k: 1, m: new THREE.Matrix4(), inv: new THREE.Matrix4() };
@@ -816,17 +847,18 @@ function updateHeadMap() {
     .multiply(new THREE.Matrix4().makeTranslation(-HEADMAP.def.x, -HEADMAP.def.y, -HEADMAP.def.z));
   HEADMAP.inv.copy(HEADMAP.m).invert();
 }
-function applyBodyShape(values: any) {
+function applyBodyShape(values: any, face: any = {}) {
   if (!BODY.ready) return false;
-  const v: any = {};
+  const v: any = {}, f: any = {};
   for (const s of BODY.sliders) v[s.name] = typeof values?.[s.name] === 'number' ? values[s.name] : 0.5;
-  if (sameValues(v, BODY.values)) return false;
+  for (const s of BODY.faceSliders) if (typeof face?.[s.name] === 'number' && face[s.name] !== 0) f[s.name] = face[s.name];
+  if (sameValues(v, BODY.values) && sameFace(f, BODY.faceValues)) return false;
   const t0 = performance.now(), steps: any = {};
   let last = t0;
   const mark = (name: string) => { const t = performance.now(); steps[name] = Math.round((t - last) * 10) / 10; last = t; };
-  BODY.values = v;
+  BODY.values = v; BODY.faceValues = f;
   clearCorrectives();
-  const r = BODY.anny.update(v);
+  const r = BODY.anny.update(v, f);
   last = performance.now();
   const at = BODY.geo.attributes;
   markFull(at.position); markFull(at.normal); markFull(at.nsmooth);
@@ -1372,7 +1404,8 @@ function showStool(info) {
 // ------------------------------------------------------------------ look: the parameters a preset carries
 // A preset is plain JSON: sRGB hex colours for the skin, the hair and the eyes, and the values of anny's phenotype
 // sliders, so the same file can set up anny in Python (phenotype_kwargs) and this viewer.
-const LOOK_FORMAT = 'anny-viewer/look@1';
+// look@2 adds the face-shape values (face: {name: value}); a look@1 preset reads as a face of anny's defaults
+const LOOK_FORMAT = 'anny-viewer/look@2';
 const srgb2lin = (c: number) => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 const hexToRgb = (h: string) => { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
 const hexToLin = (h: string) => hexToRgb(h).map(srgb2lin);
@@ -1397,7 +1430,7 @@ const PALETTES: any = {
 };
 const PHENOTYPE_DEFAULT = 0.5;
 function baselinePhenotype() { return Object.fromEntries((MANIFEST?.shape?.sliders || []).map((k: string) => [k, PHENOTYPE_DEFAULT])); }
-const BASELINE_LOOK: any = { format: LOOK_FORMAT, name: 'Baseline', skin: { tone: 0.35, undertone: 0 }, hair: { color: '#271f16' }, eyes: { color: '#875f3d' }, phenotype: {} };
+const BASELINE_LOOK: any = { format: LOOK_FORMAT, name: 'Baseline', skin: { tone: 0.35, undertone: 0 }, hair: { color: '#271f16' }, eyes: { color: '#875f3d' }, phenotype: {}, face: {} };
 const EXAMPLE_LOOKS: any[] = [
   BASELINE_LOOK,
   { format: LOOK_FORMAT, name: 'Fair', skin: { tone: 0.12, undertone: -0.3 }, hair: { color: '#6b4a30' }, eyes: { color: '#5f84a8' } },
@@ -1423,7 +1456,22 @@ function normaliseLook(o: any) {
     hair: { color: col(o.hair && o.hair.color, b.hair.color) },
     eyes: { color: col(o.eyes && o.eyes.color, b.eyes.color) },
     phenotype: Object.fromEntries(Object.keys(baselinePhenotype()).map((k) => [k, Math.round(num(ph[k], 0, 1, PHENOTYPE_DEFAULT) * 1000) / 1000])),
+    face: normaliseFace(o.face),
   };
+}
+// the face-shape values of a preset: known names within their ranges, zeros left out
+function normaliseFace(face: any) {
+  const out: any = {};
+  if (!face || typeof face !== 'object') return out;
+  const tables = MANIFEST?.shape?.face;
+  if (!tables) return out;
+  tables.names.forEach((name: string, i: number) => {
+    const v = face[name];
+    if (typeof v !== 'number' || !isFinite(v)) return;
+    const [lo, hi] = tables.ranges[i], r = Math.round(Math.min(hi, Math.max(lo, v)) * 1000) / 1000;
+    if (r !== 0) out[name] = r;
+  });
+  return out;
 }
 function applyLook(look: any, remember = true) {
   const L = normaliseLook(look);
@@ -1455,7 +1503,7 @@ function applyLook(look: any, remember = true) {
   }
   U.uWearOn.value.set(0, 0, 0, 0);
   U.uMannequin.value = 0;
-  applyBodyShape(L.phenotype);
+  applyBodyShape(L.phenotype, L.face);
   updateHairVisibility();
   if (remember) { try { localStorage.setItem('anny-look', JSON.stringify(L)); } catch (e) { /* storage unavailable */ } }
   shadowsDirty = true;
@@ -1571,6 +1619,7 @@ async function init() {
   });
   scene.add(head); opaque.push(head);
   buildBodySliders();
+  buildFaceSliders();
   initMotion(meta, B);
   initCorrectives(meta, B);
   STOOL = buildStool();
@@ -1929,6 +1978,19 @@ function syncEditor() {
   }
   const rb = $('ed-shape-reset');
   if (rb) rb.disabled = BODY.sliders.every(s => Math.abs((L.phenotype[s.name] ?? 0.5) - 0.5) < 1e-6);
+  for (const s of BODY.faceSliders) {
+    const inp = $('ed-f-' + s.name), out = $('ed-f-' + s.name + '-v');
+    if (!inp) continue;
+    const v = L.face?.[s.name] ?? 0;
+    if (document.activeElement !== inp) inp.value = v;
+    out.textContent = v.toFixed(2); inp.setAttribute('aria-valuetext', v.toFixed(2));
+  }
+  const fr = $('ed-face-reset');
+  if (fr) fr.disabled = !L.face || Object.keys(L.face).length === 0;
+  document.querySelectorAll('#ed-face details.po-group').forEach((d: any) => {
+    const n = BODY.faceSliders.filter(s => s.group === d.dataset.group && (L.face?.[s.name] ?? 0) !== 0).length;
+    const c = d.querySelector('.po-n'); if (c) c.textContent = n ? `${n} set` : '';
+  });
 }
 function shapeText(s, v) {
   return v.toFixed(2);
@@ -1964,6 +2026,59 @@ function buildBodySliders() {
   }
   $('ed-shape-sec').hidden = false;
   syncEditor();
+}
+// face sliders: one group per part of the face, closed at first; the face updates at most once a frame
+let facePending = null;
+function queueFace(name, v) {
+  if (!facePending) {
+    facePending = {};
+    requestAnimationFrame(() => {
+      const p = facePending; facePending = null;
+      editLook(n => { n.face = Object.assign({}, n.face || {}, p); for (const k of Object.keys(n.face)) if (n.face[k] === 0) delete n.face[k]; });
+    });
+  }
+  facePending[name] = v;
+}
+function buildFaceSliders() {
+  const box = $('ed-face');
+  if (!box || !BODY.ready || !BODY.face) return;
+  box.textContent = '';
+  for (const group of BODY.face.tables.group_order) {
+    const d = document.createElement('details'); d.className = 'po-group'; d.dataset.group = group;
+    const sum = document.createElement('summary'); sum.textContent = FACE_GROUP_TITLES[group] || group;
+    const count = document.createElement('span'); count.className = 'po-n'; sum.appendChild(count);
+    const list = document.createElement('div'); list.className = 'ed-shape ed-face-list';
+    for (const s of BODY.faceSliders.filter(x => x.group === group)) {
+      const wrap = document.createElement('div'); wrap.className = 'ed-slider';
+      const row = document.createElement('div'); row.className = 'ed-row';
+      const lab = document.createElement('label'); lab.htmlFor = 'ed-f-' + s.name; lab.textContent = s.label; lab.title = s.name;
+      const out = document.createElement('output'); out.id = 'ed-f-' + s.name + '-v'; out.setAttribute('for', 'ed-f-' + s.name);
+      row.append(lab, out);
+      const inp = document.createElement('input');
+      Object.assign(inp, { type: 'range', id: 'ed-f-' + s.name, min: String(s.range[0]), max: String(s.range[1]), step: '0.01', value: '0' });
+      if (s.range[0] < 0) inp.classList.add('ed-centred');
+      inp.title = 'Double-click to return to 0';
+      inp.addEventListener('input', () => queueFace(s.name, parseFloat(inp.value)));
+      inp.addEventListener('dblclick', () => { inp.value = '0'; queueFace(s.name, 0); });
+      const ends = document.createElement('div'); ends.className = 'ed-ends'; ends.setAttribute('aria-hidden', 'true');
+      for (const t of s.ends) { const sp = document.createElement('span'); sp.textContent = t; ends.appendChild(sp); }
+      wrap.append(row, inp, ends);
+      list.appendChild(wrap);
+    }
+    d.append(sum, list);
+    box.appendChild(d);
+  }
+  $('ed-face-random').hidden = !BODY.face.prior;
+  $('ed-face-sec').hidden = false;
+  syncEditor();
+}
+// a face drawn from anny's calibrated face-shape distribution for the current age, gender, weight and muscle
+function randomFace() {
+  if (!BODY.face?.prior) return;
+  const f = sampleFace(BODY.face, currentLook.phenotype);
+  const out: any = {};
+  BODY.face.tables.names.forEach((name: string, i: number) => { const r = Math.round(f[i] * 1000) / 1000; if (r !== 0) out[name] = r; });
+  editLook(n => { n.face = out; });
 }
 function wireEditor() {
   const ed = $('editor'), btn = $('toggle-editor');
@@ -2005,7 +2120,7 @@ function wireEditor() {
     const c = skinBase(l.skin.tone, l.skin.undertone).map(v => Math.round(v * 255));
     dot.style.background = `linear-gradient(135deg, rgb(${c.join(',')}) 50%, ${l.hair.color} 50%)`;
     b.append(dot, document.createTextNode(l.name));
-    b.addEventListener('click', () => { applyLook(Object.assign({}, l, { phenotype: currentLook.phenotype })); setEdMsg(''); });
+    b.addEventListener('click', () => { applyLook(Object.assign({}, l, { phenotype: currentLook.phenotype, face: currentLook.face })); setEdMsg(''); });
     chips.appendChild(b);
   }
   // skin sliders (the view refreshes while dragging)
@@ -2042,6 +2157,8 @@ function wireEditor() {
   box.addEventListener('input', tryLoad);
   $('ed-reset').addEventListener('click', () => { applyLook(BASELINE_LOOK); box.hidden = true; setEdMsg('Back to the baseline look and anny\'s defaults.'); });
   $('ed-shape-reset').addEventListener('click', () => editLook(n => { n.phenotype = baselinePhenotype(); }));
+  $('ed-face-reset').addEventListener('click', () => editLook(n => { n.face = {}; }));
+  $('ed-face-random').addEventListener('click', () => { randomFace(); setEdMsg(''); });
 }
 wireEditor();
 
@@ -2130,6 +2247,19 @@ window.setFrame = (name) => {
   while (accCount < MAX_ACC) renderPass();
   return true;
 };
+// a frontal portrait of the head for the photo benchmark (anny.faces.authoring.photos): the face framing seen from
+// the front, with the head of the current body
+window.setPortrait = (fov = 24, margin = 1.0) => {
+  const f = FRAMES.face, t = new THREE.Vector3(...f.target);
+  if (RIG.ready) t.applyMatrix4(_headFull);
+  camera.fov = fov; camera.updateProjectionMatrix();
+  placeCamera(0, 0, frameDistance(f) * (RIG.ready ? HEADMAP.k : 1) * margin, t.x, t.y, t.z);
+  tween = null;
+  resetAccum();
+  while (accCount < MAX_ACC) renderPass();
+  return true;
+};
+window.setHair = (on) => { hairWanted = !!on; updateHairVisibility(); return true; };
 window.setPreset = (n) => { applyPreset(n); return true; };
 window.setCorrectives = (on) => { setCorrectivesOn(on); return CORR.ready; };
 window.__CORR = CORR;
@@ -2141,4 +2271,7 @@ window.__BODY = BODY;
 // anny's sliders from a test: returns the times of the update (ms)
 window.setSliders = (v) => { applyLook(Object.assign({}, currentLook, { phenotype: Object.assign({}, currentLook.phenotype, v) }), false); return { body: BODY.lastMs, total: BODY.lastTotalMs, steps: BODY.lastTiming }; };
 window.__look = () => currentLook;
+// anny's face-shape values from a test (missing names take 0), and a face drawn from the distribution
+window.setFace = (v) => { applyLook(Object.assign({}, currentLook, { face: v }), false); return { body: BODY.lastMs, total: BODY.lastTotalMs }; };
+window.randomFace = () => { randomFace(); return currentLook.face; };
 init().catch(e => { console.error(e); showError('The model could not be loaded: ' + e.message); });

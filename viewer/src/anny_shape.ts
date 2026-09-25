@@ -135,3 +135,149 @@ export class ShapeSpace {
     return out;
   }
 }
+
+// ------------------------------------------------------------------ face shapes (anny.models.face_shapes)
+// Each face-shape parameter owns one or two blend-shape rows (its positive and negative directions). A row's
+// weight is the rectified value of its parameter times the scale of its group: the size of that part of the head
+// (landmark distances on the phenotype body) over its size on anny's default body.
+
+export interface FacePrior {
+  age_anchors: number[];
+  gender_anchors: number[];
+  means: number[][][];                    // (A, 2, F)
+  weight_muscle_regression: number[][];   // (F, 2)
+  weight_muscle_centre: number[];
+  rank: number;
+}
+
+export interface FaceTables {
+  names: string[];
+  groups: string[];
+  group_order: string[];
+  ranges: [number, number][];
+  ends?: [string, string][];
+  row_param: number[];
+  row_sign: number[];
+  row_scale: number[];
+  scale_groups: string[];
+  landmarks: string[];
+  scale_pairs: [number, number][][];
+  reference_sizes: number[];
+  starts: number[];
+  counts: number[];
+  bones: number[];
+  step: number;
+  prior?: FacePrior;
+}
+
+export interface FaceData {
+  tables: FaceTables;
+  lmTemplate: Float32Array;   // (K, 3) landmarks of the template
+  lmBlend: Float32Array;      // (N, K, 3) landmarks of the phenotype blend shapes
+  ids: Uint32Array;           // coarse vertex of each sparse offset
+  offsets: Int16Array;        // (total, 3) offsets in steps of tables.step
+  boneDeltas: Float32Array;   // (rows, bones, 3) bone-head deltas of each row on tables.bones
+  prior?: Float32Array;       // (A, 2, F, rank) low-rank factors of the face-shape distribution
+}
+
+// scale of each group (anny's Anny._face_shape_scales) for the phenotype coefficients c
+export function faceScales(face: FaceData, c: Float64Array): Float64Array {
+  const t = face.tables, K = t.landmarks.length, K3 = K * 3, N = face.lmBlend.length / K3;
+  const L = new Float64Array(K3);
+  for (let i = 0; i < K3; i++) L[i] = face.lmTemplate[i];
+  for (let n = 0; n < N; n++) {
+    const w = c[n];
+    if (w === 0) continue;
+    const o = n * K3;
+    for (let i = 0; i < K3; i++) L[i] += w * face.lmBlend[o + i];
+  }
+  const out = new Float64Array(t.scale_groups.length);
+  t.scale_pairs.forEach((pairs, g) => {
+    let s = 0;
+    for (const [a, b] of pairs) {
+      const dx = L[a * 3] - L[b * 3], dy = L[a * 3 + 1] - L[b * 3 + 1], dz = L[a * 3 + 2] - L[b * 3 + 2];
+      s += Math.log(Math.sqrt(dx * dx + dy * dy + dz * dz));
+    }
+    out[g] = Math.exp(s / pairs.length) / t.reference_sizes[g];
+  });
+  return out;
+}
+
+// the weight of each face-shape row for parameter values (in the order of tables.names)
+export function faceRowWeights(t: FaceTables, values: ArrayLike<number>, scales: Float64Array): Float64Array {
+  const out = new Float64Array(t.row_param.length);
+  for (let r = 0; r < out.length; r++) {
+    const v = values[t.row_param[r]] * t.row_sign[r];
+    out[r] = v > 0 ? v * scales[t.row_scale[r]] : 0;
+  }
+  return out;
+}
+
+// add the face-shape rows to coarse vertices (nc * 3) and to bone heads (nb * 3)
+export function addFace(face: FaceData, weights: Float64Array, coarse: Float32Array, joints?: Float32Array) {
+  const t = face.tables, step = t.step, nb = t.bones.length;
+  for (let r = 0; r < weights.length; r++) {
+    const w = weights[r];
+    if (w === 0) continue;
+    const ws = w * step, end = t.starts[r] + t.counts[r];
+    for (let k = t.starts[r]; k < end; k++) {
+      const o = face.ids[k] * 3, q = k * 3;
+      coarse[o] += ws * face.offsets[q];
+      coarse[o + 1] += ws * face.offsets[q + 1];
+      coarse[o + 2] += ws * face.offsets[q + 2];
+    }
+    if (joints) {
+      const o = r * nb * 3;
+      for (let j = 0; j < nb; j++) {
+        const b = t.bones[j] * 3, q = o + j * 3;
+        joints[b] += w * face.boneDeltas[q];
+        joints[b + 1] += w * face.boneDeltas[q + 1];
+        joints[b + 2] += w * face.boneDeltas[q + 2];
+      }
+    }
+  }
+}
+
+// the face-shape distribution (anny.faces.distribution) for anny's slider values: mean (F) and a low-rank factor (F, rank)
+export function facePriorParameters(face: FaceData, values: Record<string, number>): { mean: Float64Array; factor: Float64Array } {
+  const p = face.tables.prior, F = face.tables.names.length, R = p.rank;
+  const val = (k: string) => (typeof values[k] === 'number' ? values[k] : 0.5);
+  const wa = interpolationCoefficients(val('age'), p.age_anchors, false);
+  const [g0, g1] = p.gender_anchors;
+  const t = Math.min(1, Math.max(0, (val('gender') - g0) / (g1 - g0)));
+  const mean = new Float64Array(F), factor = new Float64Array(F * R);
+  for (let a = 0; a < wa.length; a++) {
+    if (wa[a] === 0) continue;
+    for (let g = 0; g < 2; g++) {
+      const w = wa[a] * (g === 0 ? 1 - t : t);
+      if (w === 0) continue;
+      const m = p.means[a][g], o = (a * 2 + g) * F * R;
+      for (let f = 0; f < F; f++) mean[f] += w * m[f];
+      for (let i = 0; i < F * R; i++) factor[i] += w * face.prior[o + i];
+    }
+  }
+  const dw = val('weight') - p.weight_muscle_centre[0], dm = val('muscle') - p.weight_muscle_centre[1];
+  for (let f = 0; f < F; f++) mean[f] += p.weight_muscle_regression[f][0] * dw + p.weight_muscle_regression[f][1] * dm;
+  return { mean, factor };
+}
+
+// a face drawn from the distribution, clipped to the slider ranges (random: uniform numbers in [0, 1))
+export function sampleFace(face: FaceData, values: Record<string, number>, random: () => number = Math.random): Float64Array {
+  const { mean, factor } = facePriorParameters(face, values);
+  const F = mean.length, R = face.tables.prior.rank;
+  const z = new Float64Array(R);
+  for (let k = 0; k < R; k += 2) {
+    const u = Math.max(random(), 1e-12), v = random();
+    const r = Math.sqrt(-2 * Math.log(u));
+    z[k] = r * Math.cos(2 * Math.PI * v);
+    if (k + 1 < R) z[k + 1] = r * Math.sin(2 * Math.PI * v);
+  }
+  const out = new Float64Array(F);
+  for (let f = 0; f < F; f++) {
+    let s = mean[f];
+    for (let k = 0; k < R; k++) s += factor[f * R + k] * z[k];
+    const [lo, hi] = face.tables.ranges[f];
+    out[f] = Math.min(hi, Math.max(lo, s));
+  }
+  return out;
+}

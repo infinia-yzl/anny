@@ -332,6 +332,39 @@ class Anny(RiggedModelWithLinearBlendShapes):
             "bn, nkd -> bkd", coeffs, self.craniofacial_landmarks_blendshapes[:n]
         )
 
+    def rest_craniofacial_landmarks(
+        self,
+        phenotype_kwargs: dict[str, float | torch.Tensor] | torch.Tensor | None = None,
+        face_shape_kwargs: dict[str, float | torch.Tensor] | torch.Tensor | None = None,
+        local_changes_kwargs: dict[str, float | torch.Tensor]
+        | torch.Tensor
+        | None = None,
+    ) -> torch.Tensor:
+        """
+        Craniofacial landmarks (B, K, 3) of the rest body (see ``craniofacial_landmark_labels``
+        and anny.faces.measurements), from the blend shapes of the landmarks: this works on
+        every topology.
+        """
+        if self.craniofacial_landmarks_template is None:
+            raise ValueError("Model data has no craniofacial landmarks.")
+        phenotype = self._parse_parameter_kwargs(
+            phenotype_kwargs, self.phenotype_labels, 0.5, "phenotype_kwargs"
+        )
+        local = self._parse_parameter_kwargs(
+            local_changes_kwargs, self.local_change_labels, 0.0, "local_changes_kwargs"
+        )
+        face = self._parse_parameter_kwargs(
+            face_shape_kwargs, self.face_shape_labels, 0.0, "face_shape_kwargs"
+        )
+        n = max(phenotype.shape[0], local.shape[0], face.shape[0])
+        facial = phenotype.new_zeros((n, len(self.facial_action_labels)))
+        coeffs = self._get_phenotype_blendshape_coefficients(
+            phenotype, local, facial, face
+        )
+        return self.craniofacial_landmarks_template[None] + torch.einsum(
+            "bn, nkd -> bkd", coeffs, self.craniofacial_landmarks_blendshapes
+        )
+
     def _face_shape_group_sizes(self, phenotype_parameters: torch.Tensor):
         """reference size (B, G) of each face-shape scale group, see anny.faces.measurements"""
         from anny.faces.measurements import face_shape_group_sizes

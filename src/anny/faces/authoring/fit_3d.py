@@ -274,6 +274,9 @@ def register(model, target_V, target_T, target_landmarks: dict, max_distance=0.0
         rotation=R,
         translation=t,
         neutral_fit=init,
+        refined=X,
+        local_triangles=tri_local,
+        target_V=TV,
     )
 
 

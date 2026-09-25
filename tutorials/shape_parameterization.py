@@ -194,6 +194,108 @@ scene.apply_transform(
 scene.show()  # This will open a window to visualize the scene with all the faces in
 
 # %% [markdown]
+# ## Face and head shapes
+#
+# `face_shapes` loads 103 named, symmetric shapes of the head and the face, built from the MakeHuman
+# face targets: head archetypes (oval, round, square, ...), the size and the position of the eyes,
+# the nose, the mouth, the chin, the cheeks and the ears. A value of +1 applies the positive target
+# and -1 the negative one; the head archetypes and `chin-triangle` run from 0 to 1.
+#
+# Each group of shapes scales with the size of the matching part of the head, measured on
+# craniofacial landmarks, so the offsets that MakeHuman authored on an adult stay in proportion on a
+# child (`scale_face_shapes=False` applies them unchanged).
+
+# %%
+face_shape_model = anny.Anny(face_shapes="all").to(device=device, dtype=dtype)
+display(
+    Markdown(
+        "**Face-shape parameters:** " + ", ".join(face_shape_model.face_shape_labels)
+    )
+)
+
+batch_size = 3
+phenotype_kwargs = {
+    "age": torch.full((batch_size,), 0.8),
+    "gender": torch.full((batch_size,), 1.0),
+}
+face_shape_kwargs = {
+    "head-round": torch.tensor([0.0, 0.8, 0.0]),
+    "nose-scale-vert": torch.tensor([0.0, 0.0, 1.0]),
+    "chin-width": torch.tensor([0.0, 0.0, 1.0]),
+}
+output = face_shape_model(
+    phenotype_kwargs=phenotype_kwargs, face_shape_kwargs=face_shape_kwargs
+)
+# the scale of each group of shapes, for a child and an adult
+display(
+    Markdown(
+        "**Scale groups:** "
+        + str(
+            dict(
+                zip(
+                    anny.models.face_shapes.SCALE_GROUPS,
+                    face_shape_model.face_shape_scales(
+                        {"age": torch.tensor([0.2, 0.8])}
+                    ).T.tolist(),
+                )
+            )
+        )
+    )
+)
+
+# %% [markdown]
+# #### Calibrated random faces
+#
+# `anny.faces.distribution.FaceShapeDistribution` draws face values for given phenotypes. Its
+# Gaussian comes from fits of anny to the identity space of ICT-FaceKit, calibrated so that anny's
+# head and face measurements match the ANSUR II survey (adults), the 3D Facial Norms database
+# (3 to 39 years) and the CDC growth charts (head circumference below 3 years). The sources and
+# their licences are in `src/anny/data/faces/SOURCES.md`.
+
+# %%
+import anny.faces.distribution
+from anny.faces.measurements import CraniofacialMeasurements
+
+faces = anny.faces.distribution.FaceShapeDistribution(face_shape_model)
+batch_size = 4
+phenotype_kwargs = {
+    "age": torch.full((batch_size,), 0.8),
+    "gender": torch.tensor([0.0, 0.0, 1.0, 1.0]),
+}
+face_values = faces.sample(phenotype_kwargs, generator=torch.Generator().manual_seed(0))
+output = face_shape_model(
+    phenotype_kwargs=phenotype_kwargs, face_shape_kwargs=face_values
+)
+
+# head and face measurements (mm), as ANSUR II and 3D Facial Norms define them
+measure = CraniofacialMeasurements(face_shape_model)
+values = measure(output)
+display(
+    Markdown(
+        "**Head length (mm):** "
+        + ", ".join(f"{v:.0f}" for v in values["headlength"].tolist())
+        + "; **nasal width (mm):** "
+        + ", ".join(f"{v:.1f}" for v in values["nasalwidth"].tolist())
+    )
+)
+
+scene = trimesh.Scene()
+for i in range(batch_size):
+    mesh = trimesh.Trimesh(
+        vertices=output["vertices"][i].squeeze().cpu().numpy(),
+        faces=face_shape_model.faces.cpu().numpy(),
+    )
+    transform = (
+        roma.Rigid(linear=None, translation=torch.tensor([i * 0.3, 0.0, 0.0]))
+        .to_homogeneous()
+        .cpu()
+        .numpy()
+    )
+    scene.add_geometry(mesh, transform=transform)
+scene.apply_transform(trimesh_scene_transform)
+scene.show()
+
+# %% [markdown]
 # ## Facial actions
 #
 # Full-body and head models can optionally expose facial actions.

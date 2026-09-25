@@ -12,8 +12,30 @@ Highlights:
   corrective shapes. `python -m anny.viewer build` rebuilds the page.
 - **Poses, soft tissue and hair for anny.** These parts come from the `3D Model`
   experiment, and they follow the phenotype sliders.
+- **Face and head shapes.** `Anny(face_shapes="all")` adds 103 named, symmetric shapes of the
+  head and the face (`face_shape_kwargs`), scaled with the size of the head. A face-shape
+  distribution, calibrated against measured faces from free sources, draws realistic faces for
+  any age and gender, and the viewer's Character panel gains a Face section with a Random face
+  button.
 
 ### Added
+
+- `Anny(face_shapes=..., scale_face_shapes=True)` and `forward(face_shape_kwargs=...)`: the
+  face-shape parameters of `data/faces/face_shapes.json` (`scripts/make_face_shape_spec.py`),
+  with `face_shape_labels`, `face_shape_groups`, `face_shape_ranges` and `face_shape_scales`.
+- `anny.faces.measurements`: 51 craniofacial landmarks (`data/keypoints/craniofacial.json`,
+  also through `KeypointsRegressor.craniofacial`), the 34 measurements of the 3D Facial Norms
+  database and the head and face measurements of ANSUR II (`CraniofacialMeasurements`), and
+  `Anny.rest_craniofacial_landmarks` on every topology.
+- `anny.faces.distribution.FaceShapeDistribution`: face values for given phenotypes, from
+  `data/shape_calibration/face_prior.safetensors`.
+- `anny.faces.authoring`: the sources (ANSUR II, 3D Facial Norms, CDC growth charts,
+  ICT-FaceKit, FairFace, MediaPipe; all free without an account, see `data/faces/SOURCES.md`),
+  the landmark placement, the fits to the ICT-FaceKit identity space, the calibration and the
+  benchmark against FairFace photographs.
+- `scripts/precompute_rig_caches.py --append`: rows for new blend shapes, leaving the existing
+  rows bit for bit.
+- The `faces` extra (`mediapipe`, `pyarrow`, `playwright`) for the face calibration.
 
 - `anny.poses`: a library of 50 poses and 7 clips for the `anny` rig, as `local-ref` pose
   parameters, with grounding on the floor and a stool for the seated poses.
@@ -32,6 +54,11 @@ Highlights:
   shape space, poses, correctives and hair) and its command line.
 - The `viewer` extra (`scipy`, `tetgen`, `embreex`) for the viewer build and the authoring
   tools.
+
+### Changed
+
+- `CURRENT_DATA_VERSION` is 12: the model data stores the craniofacial landmarks, and the
+  MakeHuman data gains the face-shape rows.
 
 ### Removed
 

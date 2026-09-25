@@ -56,7 +56,13 @@ ICT_FACEKIT = "https://github.com/USC-ICT/ICT-FaceKit"
 FAIRFACE = "HuggingFaceM4/FairFace"
 FAIRFACE_FILES = {
     # the crops with a margin of 1.25 of the face size (the photos around the face)
-    "validation": "1.25/validation-00000-of-00001-09e3e67bb00ab4ec.parquet",
+    "validation": ["1.25/validation-00000-of-00001-09e3e67bb00ab4ec.parquet"],
+    "train": [
+        "1.25/train-00000-of-00004-e715178553977907.parquet",
+        "1.25/train-00001-of-00004-f38b58e3987f3fbf.parquet",
+        "1.25/train-00002-of-00004-239e931aa9c3b3e6.parquet",
+        "1.25/train-00003-of-00004-847c279691a19548.parquet",
+    ],
 }
 
 
@@ -109,13 +115,21 @@ def fetch_ict_facekit() -> pathlib.Path:
     return path
 
 
-def fetch_fairface(split: str = "validation") -> pathlib.Path:
-    """a FairFace parquet file (CC BY 4.0), downloaded from Hugging Face"""
-    path = cache_dir() / f"fairface_{split}.parquet"
-    if not path.exists():
-        url = f"https://huggingface.co/datasets/{FAIRFACE}/resolve/main/{FAIRFACE_FILES[split]}"
-        _download(url, path)
-    return path
+def fetch_fairface(split: str = "validation") -> list[pathlib.Path]:
+    """the FairFace parquet files of a split (CC BY 4.0), downloaded from Hugging Face"""
+    paths = []
+    for k, name in enumerate(FAIRFACE_FILES[split]):
+        path = cache_dir() / (
+            f"fairface_{split}.parquet"
+            if k == 0 and split == "validation"
+            else f"fairface_{split}_{k}.parquet"
+        )
+        if not path.exists():
+            _download(
+                f"https://huggingface.co/datasets/{FAIRFACE}/resolve/main/{name}", path
+            )
+        paths.append(path)
+    return paths
 
 
 def record(names=None) -> dict:
@@ -134,8 +148,11 @@ def record(names=None) -> dict:
         ).stdout.strip()
         out["ict"] = dict(url=ICT_FACEKIT, commit=commit)
     if names is None or "fairface" in names:
-        path = fetch_fairface()
-        out["fairface"] = dict(url=FAIRFACE, file=path.name, sha256=_sha256(path))
+        out["fairface"] = [
+            dict(url=FAIRFACE, file=path.name, sha256=_sha256(path))
+            for split in FAIRFACE_FILES
+            for path in fetch_fairface(split)
+        ]
     return out
 
 

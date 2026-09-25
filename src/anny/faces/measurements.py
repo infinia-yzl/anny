@@ -212,23 +212,32 @@ def _perimeter(poly: np.ndarray) -> float:
     return float(np.linalg.norm(np.roll(poly, -1, 0) - poly, axis=1).sum())
 
 
+def _project_on_polygon(poly: np.ndarray, p2) -> tuple[int, float, np.ndarray]:
+    """closest point of a closed polygon to p2: (edge index, parameter along it, point)"""
+    a, b = poly, np.roll(poly, -1, 0)
+    ab = b - a
+    t = np.clip(((p2 - a) * ab).sum(1) / np.maximum((ab**2).sum(1), 1e-30), 0, 1)
+    q = a + t[:, None] * ab
+    k = int(np.argmin(np.linalg.norm(q - p2, axis=1)))
+    return k, float(t[k]), q[k]
+
+
 def _hull_arc(poly: np.ndarray, a2, b2, through2) -> float:
-    """length of the convex outline between the points nearest a2 and b2, on the side of through2"""
+    """length of the closed polygon between the projections of a2 and b2, on the side of the
+    projection of through2"""
     n = len(poly)
-    ia = int(np.argmin(np.linalg.norm(poly - a2, axis=1)))
-    ib = int(np.argmin(np.linalg.norm(poly - b2, axis=1)))
-    it = int(np.argmin(np.linalg.norm(poly - through2, axis=1)))
+    edge_len = np.linalg.norm(np.roll(poly, -1, 0) - poly, axis=1)
+    cum = np.concatenate([[0.0], np.cumsum(edge_len)])
+    total = cum[-1]
 
-    def path(i, j):
-        out = [i]
-        while out[-1] != j:
-            out.append((out[-1] + 1) % n)
-        return out
+    def position(p2):
+        k, t, _ = _project_on_polygon(poly, p2)
+        return cum[k] + t * edge_len[k % n]
 
-    forward = path(ia, ib)
-    chosen = forward if it in forward else path(ib, ia)
-    seg = poly[chosen]
-    return float(np.linalg.norm(np.diff(seg, axis=0), axis=1).sum())
+    pa, pb, pt = position(a2), position(b2), position(through2)
+    forward = (pb - pa) % total  # from a to b along the polygon's order
+    through = (pt - pa) % total
+    return float(forward if through <= forward else total - forward)
 
 
 def section_measurements(
@@ -238,20 +247,25 @@ def section_measurements(
     labels: list[str],
     neck_axis: tuple[np.ndarray, np.ndarray],
     head_vertices: np.ndarray,
+    pinna_vertices: np.ndarray | None = None,
 ) -> dict[str, float]:
     """
     The circumferences and arcs of ANSUR II (mm) for one rest body: vertices (V, 3), triangles
-    (T, 3), landmarks (K, 3). ``neck_axis`` is (base, top) of the neck, and ``head_vertices``
-    selects the vertices above the neck for the head circumference.
+    (T, 3), landmarks (K, 3). ``neck_axis`` is (base, top) of the neck; ``head_vertices`` selects
+    the head and the neck (above the base of the neck), and the tape passes in front of the
+    ``pinna_vertices``.
     """
     at = {k: landmarks[labels.index(k)] for k in labels}
     out = {}
-    head_tri = triangles[np.isin(triangles, head_vertices).all(1)]
+    keep = np.zeros(len(vertices), bool)
+    keep[head_vertices] = True
+    if pinna_vertices is not None:
+        keep[pinna_vertices] = False
+    head_tri = triangles[keep[triangles].all(1)]
 
     # head circumference: the plane through glabella and opisthocranion, level across the head
     g, op = at["g"], at["op"]
-    axis = op - g
-    normal = np.cross(axis, np.array([1.0, 0, 0]))
+    normal = np.cross(op - g, np.array([1.0, 0, 0]))
     normal /= np.linalg.norm(normal)
     pts = _section_points(vertices, head_tri, g, normal)
     e1, e2 = _plane_basis(normal)
@@ -267,7 +281,7 @@ def section_measurements(
     ):
         normal = np.cross(tr - tl, through - tl)
         normal /= np.linalg.norm(normal)
-        pts = _section_points(vertices, triangles, tl, normal)
+        pts = _section_points(vertices, head_tri, tl, normal)
         e1, e2 = _plane_basis(normal)
         to2 = lambda p: np.array([p @ e1, p @ e2])  # noqa: E731
         poly = _hull(np.stack([pts @ e1, pts @ e2], -1))
@@ -278,7 +292,7 @@ def section_measurements(
     normal = (top - base) / np.linalg.norm(top - base)
     centre = 0.5 * (base + top)
     near = triangles[
-        (np.linalg.norm(vertices[triangles].mean(1) - centre, axis=1) < 0.12)
+        (np.linalg.norm(vertices[triangles].mean(1) - centre, axis=1) < 0.09)
     ]
     pts = _section_points(vertices, near, centre, normal)
     e1, e2 = _plane_basis(normal)
@@ -286,3 +300,67 @@ def section_measurements(
         _hull(np.stack([pts @ e1, pts @ e2], -1))
     )
     return out
+
+
+class CraniofacialMeasurements:
+    """
+    The measurements of 3D Facial Norms and ANSUR II (mm) of the rest bodies of an anny model
+    built on the MakeHuman mesh (``anny`` or ``makehuman`` topology)::
+
+        measure = CraniofacialMeasurements(model)
+        values = measure(model(phenotype_kwargs=...))  # name -> (B,) tensor
+
+    The landmark measurements are differentiable; the circumferences and arcs of ANSUR II come
+    from plane sections (``sections=True``, NumPy).
+    """
+
+    def __init__(self, model):
+        from anny.keypoints import KeypointsRegressor
+
+        self.labels = list(craniofacial_landmark_vertices())
+        self.regressor = KeypointsRegressor.craniofacial(model, self.labels)
+        self.triangles = model.faces.detach().cpu().numpy()
+        self.neck = [model.bone_labels.index(b) for b in ("neck01", "head")]
+        self.pinna = _pinna_vertices(model)
+
+    def landmarks(self, output: dict) -> torch.Tensor:
+        return self.regressor({"vertices": output["rest_vertices"]})
+
+    def __call__(self, output: dict, sections: bool = True) -> dict[str, torch.Tensor]:
+        L = self.landmarks(output)
+        out = landmark_measurements(L, self.labels)
+        if sections:
+            V = output["rest_vertices"].detach().cpu().numpy()
+            heads = output["rest_bone_heads"].detach().cpu().numpy()
+            Ln = L.detach().cpu().numpy()
+            rows = []
+            for b in range(len(V)):
+                base, top = heads[b, self.neck[0]], heads[b, self.neck[1]]
+                head = np.nonzero(V[b, :, 2] > base[2])[0]
+                rows.append(
+                    section_measurements(
+                        V[b],
+                        self.triangles,
+                        Ln[b],
+                        self.labels,
+                        (base, top),
+                        head,
+                        self.pinna,
+                    )
+                )
+            for name in ANSUR_SECTION_MEASUREMENTS:
+                out[name] = torch.tensor([r[name] for r in rows], dtype=L.dtype)
+        return out
+
+
+def _pinna_vertices(model) -> np.ndarray:
+    """vertices of the model that the MakeHuman ear-wing targets move (the pinnae)"""
+    from anny.faces.authoring.base_mesh import read_target
+
+    base = model.base_mesh_vertex_indices.detach().cpu().numpy()
+    pinna = set()
+    for side in ("l", "r"):
+        idx, d = read_target(f"ears/{side}-ear-wing-incr")
+        mag = np.linalg.norm(d, axis=1)
+        pinna.update(idx[mag > 0.05 * mag.max()].tolist())
+    return np.nonzero(np.isin(base, list(pinna)))[0]
