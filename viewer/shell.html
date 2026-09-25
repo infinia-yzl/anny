@@ -1,0 +1,360 @@
+<title>Anny Viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: dark;
+    --ground: #0c0d10;
+    --panel: rgba(17, 18, 22, 0.74);
+    --panel-solid: #15161a;
+    --line: rgba(236, 231, 225, 0.12);
+    --text: #ece7e1;
+    --muted: #a19a92;
+    --accent: #c9a46a;
+    --accent-soft: rgba(201, 164, 106, 0.16);
+    --sans: "Instrument Sans", "Helvetica Neue", Arial, system-ui, sans-serif;
+    --serif: "Instrument Serif", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--ground); color: var(--text);
+    font: 14px/1.45 var(--sans); overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: fixed; inset: 0; background: var(--ground); }
+  #c { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; outline: none; }
+  #c:active { cursor: grabbing; }
+
+  .title {
+    position: fixed; top: calc(env(safe-area-inset-top, 0px) + 22px); left: 26px;
+    max-width: min(360px, calc(100vw - 52px)); pointer-events: none;
+    display: grid; gap: 6px;
+  }
+  .eyebrow {
+    margin: 0; font-size: 11px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted);
+  }
+  .title h1 {
+    margin: 0; font-family: var(--serif); font-weight: 400; font-style: italic;
+    font-size: 42px; line-height: 1.02; letter-spacing: -0.005em; text-wrap: balance;
+  }
+  .caption { margin: 2px 0 0; font-size: 13px; color: var(--muted); max-width: 34ch; text-wrap: pretty; }
+
+  .bar {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+    display: flex; align-items: center; gap: 6px; padding: 6px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    max-width: calc(100vw - 32px); box-sizing: border-box;
+    opacity: 0; transition: opacity 0.6s ease 0.2s;
+  }
+  body.ready .bar { opacity: 1; }
+  .group { display: flex; gap: 2px; }
+  .group-label {
+    font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+    padding: 0 8px 0 10px;
+  }
+  .bar button {
+    font: 500 13px/1 var(--sans); color: var(--muted); background: transparent;
+    border: 0; border-radius: 9px; padding: 10px 12px; cursor: pointer; white-space: nowrap;
+    transition: color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .bar button:hover { color: var(--text); background: rgba(236, 231, 225, 0.05); }
+  .bar button[aria-pressed="true"], .bar button[aria-expanded="true"] {
+    color: var(--text); background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px rgba(201, 164, 106, 0.55);
+  }
+  .bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sep { width: 1px; align-self: stretch; margin: 6px 4px; background: var(--line); }
+
+  .status {
+    position: fixed; right: 24px; bottom: calc(env(safe-area-inset-bottom, 0px) + 30px); margin: 0;
+    font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
+    display: flex; align-items: center; gap: 8px; opacity: 0; transition: opacity 0.4s ease;
+  }
+  body.ready .status { opacity: 1; }
+  .status::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(201, 164, 106, 0.18);
+  }
+  .status[data-done="1"]::before { background: #7fae84; box-shadow: 0 0 0 3px rgba(127, 174, 132, 0.18); }
+
+  .hint {
+    position: fixed; left: 50%; transform: translateX(-50%); margin: 0;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 82px);
+    font-size: 12px; color: var(--muted); letter-spacing: 0.02em; pointer-events: none;
+    opacity: 0; transition: opacity 0.6s ease; white-space: nowrap;
+  }
+  body.ready .hint { opacity: 0.9; }
+  body.interacted .hint, body.editing .hint { opacity: 0; }
+
+  .loader {
+    position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none;
+    transition: opacity 0.7s ease;
+  }
+  body.ready .loader { opacity: 0; }
+  .loadbox { display: grid; gap: 12px; justify-items: center; width: min(260px, 70vw); }
+  #loadlabel { margin: 0; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-align: center; }
+  body.failed #loadlabel { text-transform: none; letter-spacing: 0; font-size: 14px; color: var(--text); max-width: 34ch; }
+  .track { width: 100%; height: 2px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  #loadbar { height: 100%; width: 100%; background: var(--accent); transform-origin: 0 50%; transform: scaleX(0.02); transition: transform 0.35s ease; }
+
+  /* character panel */
+  .editor {
+    position: fixed; right: 20px; top: calc(env(safe-area-inset-top, 0px) + 20px); bottom: calc(env(safe-area-inset-bottom, 0px) + 66px);
+    width: 312px; max-width: calc(100vw - 32px); box-sizing: border-box;
+    display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+    animation: ed-in 0.22s ease both;
+  }
+  .editor[hidden] { display: none; }
+  @keyframes ed-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .ed-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 12px 10px 18px; border-bottom: 1px solid var(--line); }
+  .ed-head h2 { margin: 0; font-family: var(--serif); font-style: italic; font-weight: 400; font-size: 26px; line-height: 1; }
+  .ed-x {
+    width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 9px;
+    background: transparent; color: var(--muted); cursor: pointer;
+  }
+  .ed-x:hover { color: var(--text); background: rgba(236, 231, 225, 0.06); }
+  .ed-x svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 1.6; fill: none; stroke-linecap: round; }
+  .ed-body { overflow-y: auto; padding: 4px 18px 18px; display: grid; gap: 4px; overscroll-behavior: contain; }
+  .ed-sec { display: grid; gap: 10px; padding: 14px 0 12px; border-bottom: 1px solid var(--line); }
+  .ed-sec:last-child { border-bottom: 0; }
+  .ed-sec h3 { margin: 0; font-size: 10.5px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+  .ed-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .ed-row label { font-size: 13px; color: var(--text); }
+  .ed-val, .ed-row output { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .ed-slider { display: grid; gap: 6px; }
+  .ed-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+  .editor input[type="range"] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 22px; margin: 0; background: transparent; cursor: pointer;
+  }
+  .editor input[type="range"]::-webkit-slider-runnable-track { height: 8px; border-radius: 8px; background: var(--track, var(--line)); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25); }
+  .editor input[type="range"]::-moz-range-track { height: 8px; border-radius: 8px; background: var(--track, var(--line)); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25); }
+  .editor input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 18px; height: 18px; margin-top: -5px; border-radius: 50%;
+    background: var(--thumb, #ece7e1); border: 2px solid #ece7e1; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  }
+  .editor input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%; background: var(--thumb, #ece7e1); border: 2px solid #ece7e1; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  }
+  .editor input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+  .ed-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ed-slot { display: grid; gap: 10px; }
+  .ed-slot + .ed-slot { padding-top: 6px; }
+  .ed-sub { font-size: 13px; color: var(--text); }
+  .ed-swatches[hidden] { display: none; }
+  .ed-chip {
+    font: 500 12.5px/1 var(--sans); color: var(--muted); background: transparent; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .ed-chip:hover { color: var(--text); border-color: rgba(236, 231, 225, 0.24); }
+  .ed-chip[aria-pressed="true"] { color: var(--text); background: var(--accent-soft); border-color: rgba(201, 164, 106, 0.55); }
+  .ed-chip i { width: 10px; height: 10px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3); }
+  .ed-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 8px; }
+  .ed-sw {
+    position: relative; width: 100%; aspect-ratio: 1; max-width: 100%; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
+    background: var(--sw); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10), 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+  .ed-sw[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--panel-solid), 0 0 0 4px var(--accent); }
+  .ed-sw:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .ed-custom { display: grid; place-items: center; background: conic-gradient(from 90deg, #c0504d, #c9a46a, #7fae84, #5f84a8, #8a6aa8, #c0504d); }
+  .ed-custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: 0; padding: 0; }
+  .ed-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ed-btn {
+    font: 500 12.5px/1 var(--sans); color: var(--text); background: rgba(236, 231, 225, 0.06); cursor: pointer;
+    border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px;
+  }
+  .ed-btn:hover { background: rgba(236, 231, 225, 0.10); }
+  .ed-btn:focus-visible, .ed-chip:focus-visible, .ed-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .editor textarea {
+    width: 100%; box-sizing: border-box; resize: vertical; min-height: 110px;
+    font: 12px/1.45 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; color: var(--text);
+    background: rgba(0, 0, 0, 0.28); border: 1px solid var(--line); border-radius: 10px; padding: 10px;
+  }
+  .editor textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .ed-note, .ed-msg { margin: 0; font-size: 12px; color: var(--muted); text-wrap: pretty; }
+  .ed-msg:empty, #po-credit:empty { display: none; }
+  .ed-sec[hidden] { display: none; }
+  .po-groups { display: grid; gap: 2px; }
+  .po-group summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 2px; cursor: pointer;
+    list-style: none; font-size: 13px; color: var(--text); border-radius: 6px;
+  }
+  .po-group summary::-webkit-details-marker { display: none; }
+  .po-group summary::after {
+    content: ""; width: 7px; height: 7px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
+    transform: rotate(45deg) translateY(-2px); transition: transform 0.15s ease; margin-right: 4px;
+  }
+  .po-group[open] summary::after { transform: rotate(225deg) translateY(-1px); }
+  .po-group summary:hover { color: var(--text); background: rgba(236, 231, 225, 0.04); }
+  .po-group summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .po-group summary .po-n { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .po-group .ed-chips { padding: 4px 0 10px; }
+  .po-play { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .ed-btn:disabled { opacity: 0.45; cursor: default; }
+  .bar button[hidden] { display: none; }
+  .ed-shape { display: grid; gap: 12px; }
+  .ed-shape input[type="range"] {
+    --track: linear-gradient(90deg, rgba(236, 231, 225, 0.09) calc(50% - 1px), rgba(236, 231, 225, 0.55) calc(50% - 1px) calc(50% + 1px), rgba(236, 231, 225, 0.09) calc(50% + 1px));
+  }
+  .ed-link {
+    font: 500 12px/1 var(--sans); color: var(--muted); background: transparent; border: 0; padding: 4px 0; cursor: pointer;
+    text-decoration: underline; text-decoration-color: rgba(236, 231, 225, 0.25); text-underline-offset: 3px;
+  }
+  .ed-link:hover:not(:disabled) { color: var(--text); }
+  .ed-link:disabled { opacity: 0.4; cursor: default; text-decoration: none; }
+  .ed-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  .ed-msg[data-kind="error"] { color: #e0a08c; }
+
+  @media (max-width: 720px) {
+    .editor {
+      left: 12px; right: 12px; width: auto; max-width: none; top: auto;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + var(--bar-h, 96px) + 20px); max-height: 50vh;
+    }
+    .ed-head { padding: 10px 8px 8px 16px; }
+    .ed-head h2 { font-size: 22px; }
+    .ed-body { padding: 0 16px 14px; }
+    .ed-swatches { grid-template-columns: repeat(auto-fill, minmax(30px, 1fr)); }
+  }
+  @media (max-width: 720px) {
+    .title { left: 16px; top: calc(env(safe-area-inset-top, 0px) + 16px); }
+    .title h1 { font-size: 32px; }
+    .caption { font-size: 12.5px; }
+    .bar { flex-wrap: wrap; justify-content: center; width: calc(100vw - 32px); bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); }
+    .group-label { display: none; }
+    .sep { display: none; }
+    .bar button { padding: 9px 10px; font-size: 12.5px; }
+    .status { right: 16px; top: calc(env(safe-area-inset-top, 0px) + 20px); bottom: auto; }
+    .hint { bottom: calc(env(safe-area-inset-bottom, 0px) + var(--bar-h, 96px) + 22px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bar, .status, .hint, .loader, #loadbar { transition: none; }
+    .editor { animation: none; }
+  }
+</style>
+
+<div id="stage"><canvas id="c" tabindex="0" aria-label="Interactive 3D figure of anny's body model. Drag to rotate and scroll to zoom."></canvas></div>
+
+<header class="title">
+  <p class="eyebrow">Anny, the human body model</p>
+  <h1>Anny Viewer</h1>
+  <p class="caption">anny's body at the default setting of its sliders, with medium tousled hair. The Character panel holds anny's sliders, and your browser renders the figure live with about 56,000 hair strands.</p>
+</header>
+
+<nav class="bar" aria-label="Viewer controls">
+  <span class="group-label" aria-hidden="true">Light</span>
+  <div class="group" role="group" aria-label="Lighting">
+    <button type="button" data-preset="studio" aria-pressed="true">Studio</button>
+    <button type="button" data-preset="window" aria-pressed="false">Window</button>
+    <button type="button" data-preset="chiaroscuro" aria-pressed="false">Chiaroscuro</button>
+    <button type="button" data-preset="backlight" aria-pressed="false">Backlight</button>
+  </div>
+  <span class="sep" aria-hidden="true"></span>
+  <div class="group" role="group" aria-label="View">
+    <button type="button" data-frame="body" aria-pressed="true">Body</button>
+    <button type="button" data-frame="face" aria-pressed="false">Face</button>
+    <button type="button" id="toggle-hair" aria-pressed="true">Hair</button>
+    <button type="button" id="toggle-turn" aria-pressed="false">Turntable</button>
+  </div>
+  <span class="sep" aria-hidden="true"></span>
+  <button type="button" id="toggle-poser" aria-expanded="false" aria-controls="poser" hidden>Pose</button>
+  <button type="button" id="toggle-editor" aria-expanded="false" aria-controls="editor">Character</button>
+</nav>
+
+<aside class="editor" id="editor" aria-labelledby="ed-title" hidden>
+  <div class="ed-head">
+    <h2 id="ed-title">Character</h2>
+    <button type="button" class="ed-x" id="ed-close" aria-label="Close the character panel"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+  </div>
+  <div class="ed-body">
+    <section class="ed-sec" aria-labelledby="ed-l-looks">
+      <h3 id="ed-l-looks">Looks</h3>
+      <div class="ed-chips" id="ed-looks"></div>
+    </section>
+    <section class="ed-sec" id="ed-shape-sec" aria-labelledby="ed-l-shape" hidden>
+      <div class="ed-row"><h3 id="ed-l-shape">Body</h3><button type="button" class="ed-link" id="ed-shape-reset">Reset body</button></div>
+      <p class="ed-note">These are anny's phenotype sliders. Each one runs from 0 to 1, and anny's default is 0.5.</p>
+      <div class="ed-shape" id="ed-shape"></div>
+    </section>
+    <section class="ed-sec" aria-labelledby="ed-l-skin">
+      <h3 id="ed-l-skin">Skin</h3>
+      <div class="ed-slider">
+        <div class="ed-row"><label for="ed-tone">Tone</label><output id="ed-tone-v" for="ed-tone"></output></div>
+        <input type="range" id="ed-tone" min="0" max="1" step="0.01" value="0.35">
+        <div class="ed-ends" aria-hidden="true"><span>Fair</span><span>Deep</span></div>
+      </div>
+      <div class="ed-slider">
+        <div class="ed-row"><label for="ed-under">Undertone</label><output id="ed-under-v" for="ed-under"></output></div>
+        <input type="range" id="ed-under" min="-1" max="1" step="0.01" value="0">
+        <div class="ed-ends" aria-hidden="true"><span>Cool</span><span>Warm</span></div>
+      </div>
+    </section>
+    <section class="ed-sec" aria-labelledby="ed-l-hair">
+      <div class="ed-row"><h3 id="ed-l-hair">Hair</h3><span class="ed-val" id="ed-hair-v"></span></div>
+      <div class="ed-swatches" id="ed-hair" role="group" aria-labelledby="ed-l-hair"></div>
+    </section>
+    <section class="ed-sec" aria-labelledby="ed-l-eyes">
+      <div class="ed-row"><h3 id="ed-l-eyes">Eyes</h3><span class="ed-val" id="ed-eyes-v"></span></div>
+      <div class="ed-swatches" id="ed-eyes" role="group" aria-labelledby="ed-l-eyes"></div>
+    </section>
+    <section class="ed-sec" aria-labelledby="ed-l-preset">
+      <h3 id="ed-l-preset">Preset</h3>
+      <p class="ed-note">A preset is a short JSON text. Copy it to keep this look and these slider values, and paste one to load it.</p>
+      <div class="ed-actions">
+        <button type="button" class="ed-btn" id="ed-copy">Copy preset</button>
+        <button type="button" class="ed-btn" id="ed-paste">Paste preset</button>
+        <button type="button" class="ed-btn" id="ed-reset">Reset</button>
+      </div>
+      <textarea id="ed-json" rows="7" spellcheck="false" aria-label="Preset JSON" hidden></textarea>
+      <p class="ed-msg" id="ed-msg" role="status"></p>
+    </section>
+  </div>
+</aside>
+
+<aside class="editor" id="poser" aria-labelledby="po-title" hidden>
+  <div class="ed-head">
+    <h2 id="po-title">Pose</h2>
+    <button type="button" class="ed-x" id="po-close" aria-label="Close the pose panel"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+  </div>
+  <div class="ed-body">
+    <section class="ed-sec" aria-labelledby="po-l-anims">
+      <div class="ed-row"><h3 id="po-l-anims">Animations</h3><span class="ed-val" id="po-state"></span></div>
+      <div class="ed-chips" id="po-anims" role="group" aria-labelledby="po-l-anims"></div>
+      <div class="po-play">
+        <button type="button" class="ed-btn" id="po-play" aria-pressed="true">Pause</button>
+        <div class="ed-chips" id="po-speed" role="group" aria-label="Speed">
+          <button type="button" class="ed-chip" data-speed="0.5" aria-pressed="false">Half speed</button>
+          <button type="button" class="ed-chip" data-speed="1" aria-pressed="true">Full speed</button>
+        </div>
+      </div>
+      <p class="ed-note">The view sharpens while the figure holds still. Pause an animation to see any moment at full quality.</p>
+    </section>
+    <section class="ed-sec" aria-labelledby="po-l-poses">
+      <h3 id="po-l-poses">Poses</h3>
+      <div class="po-groups" id="po-poses"></div>
+      <p class="ed-note" id="po-credit"></p>
+    </section>
+    <section class="ed-sec" aria-labelledby="po-l-tissue" id="po-tissue-sec" hidden>
+      <h3 id="po-l-tissue">Soft tissue</h3>
+      <div class="ed-chips" id="po-tissue" role="group" aria-labelledby="po-l-tissue">
+        <button type="button" class="ed-chip" data-corr="on" aria-pressed="true">On</button>
+        <button type="button" class="ed-chip" data-corr="off" aria-pressed="false">Off</button>
+      </div>
+      <p class="ed-note">Corrective shapes from a soft-tissue simulation keep the volume of the shoulders, elbows, hips and knees as they bend. Switch them off to compare with plain skinning.</p>
+    </section>
+  </div>
+</aside>
+
+<p class="hint">Drag to turn the figure. Scroll or pinch toward any point to move closer.</p>
+<p id="status" class="status" aria-live="polite">Refining</p>
+
+<div class="loader" aria-live="polite">
+  <div class="loadbox">
+    <p id="loadlabel">Loading</p>
+    <div class="track"><div id="loadbar"></div></div>
+  </div>
+</div>

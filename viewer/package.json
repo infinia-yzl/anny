@@ -1,0 +1,21 @@
+{
+  "name": "anny-viewer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The web viewer of anny: skin, eyes and hair shading, poses and anny's phenotype sliders.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "meshoptimizer": "^1.2.0",
+    "three": "0.186.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.186.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0"
+  },
+  "license": "Apache-2.0"
+}
