@@ -1,0 +1,1085 @@
+{
+ "format": "portrait-of-a-boy/correctives@1",
+ "conventions": {
+  "units": "metres and degrees",
+  "axes": "X to the left of the figure, Y up, Z forward; every bone rests with the world axes",
+  "shapes": "morph targets on the body mesh, in the rest pose, added before skinning",
+  "hinge": "angle between the vectors head(bones[1]) - head(bones[0]) and head(bones[2]) - head(bones[1]), from world positions; the weights interpolate linearly between neighbouring keys and stay at the first or last key outside them; a key with shape null has no shape",
+  "cone": "d = normalize(inverse(rotation(frame)) * (head(end) - head(bone))), from world transforms; for each triangle solve d = a*t0 + b*t1 + c*t2 and divide by a + b + c; the triangle with the largest smallest coordinate wins; negative coordinates become 0 and the rest are divided by their sum; the weight of a target is its coordinate",
+  "girdle": {
+   "note": "The shoulder key poses move the clavicle and shoulder01 with the arm by this rule. Animations that move the girdle in the same way match the shapes best.",
+   "angles": "d is the shoulder direction of the cone driver; e = acos(-d.y) is the elevation from straight down and p = atan2(d.z, s * d.x) is the plane (0 out to the side, 90 forward), with s = 1 for .L and -1 for .R",
+   "raise_deg": "up = 0.26 * x * x / (x + 20) - 2.929, with x = max(0, e - 20)",
+   "forward_deg": "prot = 10 * max(sin(e) sin(p), 0) + 10 * max(-sin(e) cos(p), 0) - 6 * max(-sin(e) sin(p), 0) - 0.044",
+   "bones": "left side: clavicle.L turns by 0.6 * up about Z and then by prot about -Y, and shoulder01.L turns by 0.4 * up about Z, each relative to its parent; the right side turns the other way about Z and about Y"
+  }
+ },
+ "joints": [
+  {
+   "name": "elbow.L",
+   "type": "hinge",
+   "bones": [
+    "upperarm01.L",
+    "lowerarm01.L",
+    "wrist.L"
+   ],
+   "keys": [
+    {
+     "angle": 0.0,
+     "shape": "elbow_000.L"
+    },
+    {
+     "angle": 45.202,
+     "shape": null
+    },
+    {
+     "angle": 90.0,
+     "shape": "elbow_090.L"
+    },
+    {
+     "angle": 130.0,
+     "shape": "elbow_130.L"
+    }
+   ]
+  },
+  {
+   "name": "knee.L",
+   "type": "hinge",
+   "bones": [
+    "upperleg01.L",
+    "lowerleg01.L",
+    "foot.L"
+   ],
+   "keys": [
+    {
+     "angle": 0.0,
+     "shape": "knee_000.L"
+    },
+    {
+     "angle": 10.749,
+     "shape": null
+    },
+    {
+     "angle": 50.0,
+     "shape": "knee_050.L"
+    },
+    {
+     "angle": 90.0,
+     "shape": "knee_090.L"
+    },
+    {
+     "angle": 130.0,
+     "shape": "knee_130.L"
+    }
+   ]
+  },
+  {
+   "name": "shoulder.L",
+   "type": "cone",
+   "bone": "upperarm01.L",
+   "end": "lowerarm01.L",
+   "frame": "spine01",
+   "targets": [
+    {
+     "name": "rest",
+     "dir": [
+      0.66473,
+      -0.747071,
+      0.004359
+     ],
+     "shape": null
+    },
+    {
+     "name": "down",
+     "dir": [
+      0.0819,
+      -0.996195,
+      0.029809
+     ],
+     "shape": "shoulder_down.L"
+    },
+    {
+     "name": "side",
+     "dir": [
+      1.0,
+      -0.0,
+      0.0
+     ],
+     "shape": "shoulder_side.L"
+    },
+    {
+     "name": "up",
+     "dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "shape": "shoulder_up.L"
+    },
+    {
+     "name": "forward",
+     "dir": [
+      0.0,
+      -0.0,
+      1.0
+     ],
+     "shape": "shoulder_forward.L"
+    },
+    {
+     "name": "forward_up",
+     "dir": [
+      0.0,
+      0.707107,
+      0.707107
+     ],
+     "shape": "shoulder_forward_up.L"
+    },
+    {
+     "name": "side_forward",
+     "dir": [
+      0.707107,
+      -0.0,
+      0.707107
+     ],
+     "shape": "shoulder_side_forward.L"
+    },
+    {
+     "name": "back",
+     "dir": [
+      0.0,
+      -0.707107,
+      -0.707107
+     ],
+     "shape": "shoulder_back.L"
+    },
+    {
+     "name": "across",
+     "dir": [
+      -0.866025,
+      -0.0,
+      0.5
+     ],
+     "shape": "shoulder_across.L"
+    },
+    {
+     "name": "across_low",
+     "dir": [
+      -0.55667,
+      -0.766044,
+      0.321394
+     ],
+     "shape": "shoulder_across_low.L"
+    },
+    {
+     "name": "forward_low",
+     "dir": [
+      0.0,
+      -0.707107,
+      0.707107
+     ],
+     "shape": "shoulder_forward_low.L"
+    },
+    {
+     "name": "side_up",
+     "dir": [
+      0.719846,
+      0.642788,
+      0.262003
+     ],
+     "shape": "shoulder_side_up.L"
+    },
+    {
+     "name": "back_high",
+     "dir": [
+      0.0,
+      -0.258819,
+      -0.965926
+     ],
+     "shape": "shoulder_back_high.L"
+    },
+    {
+     "name": "back_side",
+     "dir": [
+      0.663414,
+      -0.5,
+      -0.55667
+     ],
+     "shape": "shoulder_back_side.L"
+    },
+    {
+     "name": "up_in",
+     "dir": [
+      -0.42101,
+      0.906308,
+      0.036834
+     ],
+     "shape": null
+    },
+    {
+     "name": "back_up",
+     "dir": [
+      0.0,
+      0.866025,
+      -0.5
+     ],
+     "shape": null
+    }
+   ],
+   "triangles": [
+    [
+     14,
+     12,
+     8
+    ],
+    [
+     9,
+     8,
+     12
+    ],
+    [
+     10,
+     9,
+     1
+    ],
+    [
+     10,
+     4,
+     8
+    ],
+    [
+     10,
+     8,
+     9
+    ],
+    [
+     15,
+     14,
+     3
+    ],
+    [
+     15,
+     12,
+     14
+    ],
+    [
+     15,
+     3,
+     11
+    ],
+    [
+     15,
+     11,
+     2
+    ],
+    [
+     15,
+     2,
+     13
+    ],
+    [
+     15,
+     13,
+     12
+    ],
+    [
+     0,
+     13,
+     2
+    ],
+    [
+     0,
+     10,
+     1
+    ],
+    [
+     7,
+     12,
+     13
+    ],
+    [
+     7,
+     9,
+     12
+    ],
+    [
+     7,
+     1,
+     9
+    ],
+    [
+     7,
+     0,
+     1
+    ],
+    [
+     7,
+     13,
+     0
+    ],
+    [
+     6,
+     2,
+     11
+    ],
+    [
+     6,
+     4,
+     10
+    ],
+    [
+     6,
+     0,
+     2
+    ],
+    [
+     6,
+     10,
+     0
+    ],
+    [
+     5,
+     11,
+     3
+    ],
+    [
+     5,
+     3,
+     14
+    ],
+    [
+     5,
+     4,
+     6
+    ],
+    [
+     5,
+     6,
+     11
+    ],
+    [
+     5,
+     8,
+     4
+    ],
+    [
+     5,
+     14,
+     8
+    ]
+   ]
+  },
+  {
+   "name": "hip.L",
+   "type": "cone",
+   "bone": "upperleg01.L",
+   "end": "lowerleg01.L",
+   "frame": "root",
+   "targets": [
+    {
+     "name": "rest",
+     "dir": [
+      0.113121,
+      -0.986324,
+      0.119869
+     ],
+     "shape": null
+    },
+    {
+     "name": "flex45",
+     "dir": [
+      0.0,
+      -0.707107,
+      0.707107
+     ],
+     "shape": "hip_flex45.L"
+    },
+    {
+     "name": "flex90",
+     "dir": [
+      0.0,
+      -0.0,
+      1.0
+     ],
+     "shape": "hip_flex90.L"
+    },
+    {
+     "name": "flex125",
+     "dir": [
+      0.0,
+      0.573576,
+      0.819152
+     ],
+     "shape": "hip_flex125.L"
+    },
+    {
+     "name": "flex90_out",
+     "dir": [
+      0.571394,
+      0.087156,
+      0.816035
+     ],
+     "shape": "hip_flex90_out.L"
+    },
+    {
+     "name": "flex125_out",
+     "dir": [
+      0.409576,
+      0.573576,
+      0.709406
+     ],
+     "shape": "hip_flex125_out.L"
+    },
+    {
+     "name": "back",
+     "dir": [
+      0.0,
+      -0.906308,
+      -0.422618
+     ],
+     "shape": "hip_back.L"
+    },
+    {
+     "name": "out",
+     "dir": [
+      0.707107,
+      -0.707107,
+      0.0
+     ],
+     "shape": "hip_out.L"
+    },
+    {
+     "name": "in",
+     "dir": [
+      -0.309017,
+      -0.951057,
+      0.0
+     ],
+     "shape": "hip_in.L"
+    },
+    {
+     "name": "flex45_out",
+     "dir": [
+      0.5,
+      -0.707107,
+      0.5
+     ],
+     "shape": "hip_flex45_out.L"
+    },
+    {
+     "name": "back_out",
+     "dir": [
+      0.409576,
+      -0.866025,
+      -0.286788
+     ],
+     "shape": "hip_back_out.L"
+    }
+   ],
+   "triangles": [
+    [
+     2,
+     3,
+     8
+    ],
+    [
+     1,
+     2,
+     8
+    ],
+    [
+     1,
+     4,
+     2
+    ],
+    [
+     5,
+     4,
+     7
+    ],
+    [
+     5,
+     3,
+     2
+    ],
+    [
+     5,
+     2,
+     4
+    ],
+    [
+     0,
+     1,
+     8
+    ],
+    [
+     0,
+     8,
+     6
+    ],
+    [
+     10,
+     7,
+     0
+    ],
+    [
+     10,
+     0,
+     6
+    ],
+    [
+     9,
+     0,
+     7
+    ],
+    [
+     9,
+     1,
+     0
+    ],
+    [
+     9,
+     7,
+     4
+    ],
+    [
+     9,
+     4,
+     1
+    ]
+   ]
+  },
+  {
+   "name": "elbow.R",
+   "type": "hinge",
+   "bones": [
+    "upperarm01.R",
+    "lowerarm01.R",
+    "wrist.R"
+   ],
+   "keys": [
+    {
+     "angle": 0.0,
+     "shape": "elbow_000.R"
+    },
+    {
+     "angle": 45.202,
+     "shape": null
+    },
+    {
+     "angle": 90.0,
+     "shape": "elbow_090.R"
+    },
+    {
+     "angle": 130.0,
+     "shape": "elbow_130.R"
+    }
+   ]
+  },
+  {
+   "name": "knee.R",
+   "type": "hinge",
+   "bones": [
+    "upperleg01.R",
+    "lowerleg01.R",
+    "foot.R"
+   ],
+   "keys": [
+    {
+     "angle": 0.0,
+     "shape": "knee_000.R"
+    },
+    {
+     "angle": 10.749,
+     "shape": null
+    },
+    {
+     "angle": 50.0,
+     "shape": "knee_050.R"
+    },
+    {
+     "angle": 90.0,
+     "shape": "knee_090.R"
+    },
+    {
+     "angle": 130.0,
+     "shape": "knee_130.R"
+    }
+   ]
+  },
+  {
+   "name": "shoulder.R",
+   "type": "cone",
+   "bone": "upperarm01.R",
+   "end": "lowerarm01.R",
+   "frame": "spine01",
+   "targets": [
+    {
+     "name": "rest",
+     "dir": [
+      -0.66473,
+      -0.747071,
+      0.004359
+     ],
+     "shape": null
+    },
+    {
+     "name": "down",
+     "dir": [
+      -0.0819,
+      -0.996195,
+      0.029809
+     ],
+     "shape": "shoulder_down.R"
+    },
+    {
+     "name": "side",
+     "dir": [
+      -1.0,
+      -0.0,
+      0.0
+     ],
+     "shape": "shoulder_side.R"
+    },
+    {
+     "name": "up",
+     "dir": [
+      -0.0,
+      1.0,
+      0.0
+     ],
+     "shape": "shoulder_up.R"
+    },
+    {
+     "name": "forward",
+     "dir": [
+      -0.0,
+      -0.0,
+      1.0
+     ],
+     "shape": "shoulder_forward.R"
+    },
+    {
+     "name": "forward_up",
+     "dir": [
+      -0.0,
+      0.707107,
+      0.707107
+     ],
+     "shape": "shoulder_forward_up.R"
+    },
+    {
+     "name": "side_forward",
+     "dir": [
+      -0.707107,
+      -0.0,
+      0.707107
+     ],
+     "shape": "shoulder_side_forward.R"
+    },
+    {
+     "name": "back",
+     "dir": [
+      -0.0,
+      -0.707107,
+      -0.707107
+     ],
+     "shape": "shoulder_back.R"
+    },
+    {
+     "name": "across",
+     "dir": [
+      0.866025,
+      -0.0,
+      0.5
+     ],
+     "shape": "shoulder_across.R"
+    },
+    {
+     "name": "across_low",
+     "dir": [
+      0.55667,
+      -0.766044,
+      0.321394
+     ],
+     "shape": "shoulder_across_low.R"
+    },
+    {
+     "name": "forward_low",
+     "dir": [
+      -0.0,
+      -0.707107,
+      0.707107
+     ],
+     "shape": "shoulder_forward_low.R"
+    },
+    {
+     "name": "side_up",
+     "dir": [
+      -0.719846,
+      0.642788,
+      0.262003
+     ],
+     "shape": "shoulder_side_up.R"
+    },
+    {
+     "name": "back_high",
+     "dir": [
+      -0.0,
+      -0.258819,
+      -0.965926
+     ],
+     "shape": "shoulder_back_high.R"
+    },
+    {
+     "name": "back_side",
+     "dir": [
+      -0.663414,
+      -0.5,
+      -0.55667
+     ],
+     "shape": "shoulder_back_side.R"
+    },
+    {
+     "name": "up_in",
+     "dir": [
+      0.42101,
+      0.906308,
+      0.036834
+     ],
+     "shape": null
+    },
+    {
+     "name": "back_up",
+     "dir": [
+      -0.0,
+      0.866025,
+      -0.5
+     ],
+     "shape": null
+    }
+   ],
+   "triangles": [
+    [
+     14,
+     8,
+     12
+    ],
+    [
+     9,
+     12,
+     8
+    ],
+    [
+     10,
+     1,
+     9
+    ],
+    [
+     10,
+     8,
+     4
+    ],
+    [
+     10,
+     9,
+     8
+    ],
+    [
+     15,
+     3,
+     14
+    ],
+    [
+     15,
+     14,
+     12
+    ],
+    [
+     15,
+     11,
+     3
+    ],
+    [
+     15,
+     2,
+     11
+    ],
+    [
+     15,
+     13,
+     2
+    ],
+    [
+     15,
+     12,
+     13
+    ],
+    [
+     0,
+     2,
+     13
+    ],
+    [
+     0,
+     1,
+     10
+    ],
+    [
+     7,
+     13,
+     12
+    ],
+    [
+     7,
+     12,
+     9
+    ],
+    [
+     7,
+     9,
+     1
+    ],
+    [
+     7,
+     1,
+     0
+    ],
+    [
+     7,
+     0,
+     13
+    ],
+    [
+     6,
+     11,
+     2
+    ],
+    [
+     6,
+     10,
+     4
+    ],
+    [
+     6,
+     2,
+     0
+    ],
+    [
+     6,
+     0,
+     10
+    ],
+    [
+     5,
+     3,
+     11
+    ],
+    [
+     5,
+     14,
+     3
+    ],
+    [
+     5,
+     6,
+     4
+    ],
+    [
+     5,
+     11,
+     6
+    ],
+    [
+     5,
+     4,
+     8
+    ],
+    [
+     5,
+     8,
+     14
+    ]
+   ]
+  },
+  {
+   "name": "hip.R",
+   "type": "cone",
+   "bone": "upperleg01.R",
+   "end": "lowerleg01.R",
+   "frame": "root",
+   "targets": [
+    {
+     "name": "rest",
+     "dir": [
+      -0.113121,
+      -0.986324,
+      0.119869
+     ],
+     "shape": null
+    },
+    {
+     "name": "flex45",
+     "dir": [
+      -0.0,
+      -0.707107,
+      0.707107
+     ],
+     "shape": "hip_flex45.R"
+    },
+    {
+     "name": "flex90",
+     "dir": [
+      -0.0,
+      -0.0,
+      1.0
+     ],
+     "shape": "hip_flex90.R"
+    },
+    {
+     "name": "flex125",
+     "dir": [
+      -0.0,
+      0.573576,
+      0.819152
+     ],
+     "shape": "hip_flex125.R"
+    },
+    {
+     "name": "flex90_out",
+     "dir": [
+      -0.571394,
+      0.087156,
+      0.816035
+     ],
+     "shape": "hip_flex90_out.R"
+    },
+    {
+     "name": "flex125_out",
+     "dir": [
+      -0.409576,
+      0.573576,
+      0.709406
+     ],
+     "shape": "hip_flex125_out.R"
+    },
+    {
+     "name": "back",
+     "dir": [
+      -0.0,
+      -0.906308,
+      -0.422618
+     ],
+     "shape": "hip_back.R"
+    },
+    {
+     "name": "out",
+     "dir": [
+      -0.707107,
+      -0.707107,
+      0.0
+     ],
+     "shape": "hip_out.R"
+    },
+    {
+     "name": "in",
+     "dir": [
+      0.309017,
+      -0.951057,
+      0.0
+     ],
+     "shape": "hip_in.R"
+    },
+    {
+     "name": "flex45_out",
+     "dir": [
+      -0.5,
+      -0.707107,
+      0.5
+     ],
+     "shape": "hip_flex45_out.R"
+    },
+    {
+     "name": "back_out",
+     "dir": [
+      -0.409576,
+      -0.866025,
+      -0.286788
+     ],
+     "shape": "hip_back_out.R"
+    }
+   ],
+   "triangles": [
+    [
+     2,
+     8,
+     3
+    ],
+    [
+     1,
+     8,
+     2
+    ],
+    [
+     1,
+     2,
+     4
+    ],
+    [
+     5,
+     7,
+     4
+    ],
+    [
+     5,
+     2,
+     3
+    ],
+    [
+     5,
+     4,
+     2
+    ],
+    [
+     0,
+     8,
+     1
+    ],
+    [
+     0,
+     6,
+     8
+    ],
+    [
+     10,
+     0,
+     7
+    ],
+    [
+     10,
+     6,
+     0
+    ],
+    [
+     9,
+     7,
+     0
+    ],
+    [
+     9,
+     0,
+     1
+    ],
+    [
+     9,
+     4,
+     7
+    ],
+    [
+     9,
+     1,
+     4
+    ]
+   ]
+  }
+ ]
+}
