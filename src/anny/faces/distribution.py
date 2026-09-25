@@ -8,8 +8,8 @@ A distribution of anny's face-shape values, calibrated against anthropometric da
 For a body of given phenotypes, the face values follow a Gaussian:
 
 - its mean and covariance are stored at anchor ages (anny's age scale) for a male body
-  (gender 0) and a female body (gender 1), and interpolate linearly in age and gender;
-- the mean shifts linearly with weight and muscle (the regression of the ICT-FaceKit fits);
+  (gender 0) and a female body (gender 1), and interpolate linearly in age and gender; anny's
+  own phenotype shapes carry the effect of weight and muscle on the face;
 - with anny's race phenotypes (``phenotypes="all"``), the mean adds the race offsets that
   ANSUR II calibrates, weighted by the race values.
 
@@ -72,8 +72,6 @@ class FaceShapeDistribution(torch.nn.Module):
         buf("means", tensors["mean"][..., idx])
         # the rows of the Cholesky factor keep the marginal distribution of a subset of labels
         buf("scale_trils", tensors["scale_tril"][..., idx, :])
-        buf("weight_muscle_regression", tensors["weight_muscle_regression"][idx])
-        buf("weight_muscle_centre", tensors["weight_muscle_centre"])
         buf("race_offsets", tensors["race_offsets"][..., idx])
         lo = [model.face_shape_ranges[k][0] for k in model.face_shape_labels]
         hi = [model.face_shape_ranges[k][1] for k in model.face_shape_labels]
@@ -113,10 +111,6 @@ class FaceShapeDistribution(torch.nn.Module):
         w = wa[:, :, None] * wg[:, None, :]  # (B, A, 2)
         mean = torch.einsum("bag, agf -> bf", w, self.means)
         tril = torch.einsum("bag, agfk -> bfk", w, self.scale_trils)
-        wm = torch.stack(
-            [self._value(params, "weight"), self._value(params, "muscle")], -1
-        )
-        mean = mean + (wm - self.weight_muscle_centre) @ self.weight_muscle_regression.T
         if all(r in self.phenotype_labels for r in RACES):
             race = torch.stack([self._value(params, r) for r in RACES], -1)
             race = torch.nan_to_num(

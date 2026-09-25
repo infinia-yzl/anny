@@ -202,13 +202,21 @@ def _plane_basis(normal):
     return e1, np.cross(normal, e1)
 
 
-def _hull(points2: np.ndarray) -> np.ndarray:
-    from scipy.spatial import ConvexHull
+def _hull(points2: np.ndarray) -> np.ndarray | None:
+    """the convex hull of a section, or None when the plane misses the mesh"""
+    from scipy.spatial import ConvexHull, QhullError
 
-    return points2[ConvexHull(points2).vertices]
+    if len(points2) < 3:
+        return None
+    try:
+        return points2[ConvexHull(points2).vertices]
+    except QhullError:
+        return None
 
 
-def _perimeter(poly: np.ndarray) -> float:
+def _perimeter(poly: np.ndarray | None) -> float:
+    if poly is None:
+        return float("nan")
     return float(np.linalg.norm(np.roll(poly, -1, 0) - poly, axis=1).sum())
 
 
@@ -222,9 +230,11 @@ def _project_on_polygon(poly: np.ndarray, p2) -> tuple[int, float, np.ndarray]:
     return k, float(t[k]), q[k]
 
 
-def _hull_arc(poly: np.ndarray, a2, b2, through2) -> float:
+def _hull_arc(poly: np.ndarray | None, a2, b2, through2) -> float:
     """length of the closed polygon between the projections of a2 and b2, on the side of the
-    projection of through2"""
+    projection of through2 (NaN without a section)"""
+    if poly is None:
+        return float("nan")
     n = len(poly)
     edge_len = np.linalg.norm(np.roll(poly, -1, 0) - poly, axis=1)
     cum = np.concatenate([[0.0], np.cumsum(edge_len)])
@@ -253,7 +263,7 @@ def section_measurements(
     The circumferences and arcs of ANSUR II (mm) for one rest body: vertices (V, 3), triangles
     (T, 3), landmarks (K, 3). ``neck_axis`` is (base, top) of the neck; ``head_vertices`` selects
     the head and the neck (above the base of the neck), and the tape passes in front of the
-    ``pinna_vertices``.
+    ``pinna_vertices``. A plane that misses the head gives NaN.
     """
     at = {k: landmarks[labels.index(k)] for k in labels}
     out = {}

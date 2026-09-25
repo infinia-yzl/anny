@@ -6,9 +6,12 @@ Build the calibrated distribution of anny's face shapes
 (``data/shape_calibration/face_prior.safetensors``, read by :mod:`anny.faces.distribution`).
 
 1. **ICT prior.** A Gaussian over (gender, weight, muscle, face values) of the fits of
-   :mod:`anny.faces.authoring.fit_3d`, with Ledoit–Wolf shrinkage. Conditioning on gender,
-   weight and muscle gives the face values: a mean that moves linearly with them and a fixed
-   covariance.
+   :mod:`anny.faces.authoring.fit_3d`, with Ledoit–Wolf shrinkage. The face values with gender,
+   weight and muscle held at their mean give the starting mean and the covariance: the fitted
+   phenotypes mostly trade off against the face shapes (a heavier fitted muscle goes with a
+   deeper head shape, for example), so a regression on them would count anny's own phenotype
+   shapes twice. The ear shapes, which the fits leave out, start from a zero mean and an
+   independent SD of ``UNSEEN_SD``.
 2. **Moment matching.** At each anchor age and for each sex, the Gaussian moves so that the
    measurements of the simulated bodies (:mod:`anny.faces.measurements`) meet the data:
 
@@ -19,12 +22,15 @@ Build the calibrated distribution of anny's face shapes
      that the growth of each measurement follows the data;
    - below 3 years: the head circumference of the CDC growth charts.
 
-   The update is the Gaussian conditioning of the face values on the measurements, linearised
-   by finite differences: the mean moves by ``K (target - predicted)`` with
-   ``K = S J^T (J S J^T + N)^-1``, and the covariance changes only in the measured directions,
-   so that ``J S' J^T`` equals the data covariance minus the part that the rest of the body
-   (height, weight, muscle, proportions) explains. The directions that no measurement sees keep
-   the ICT covariance.
+   The mean moves by linearised Gaussian conditioning of the face values on the measurements:
+   ``K (target - simulated)`` with ``K = S J^T (J S J^T + N)^-1``, where J comes from finite
+   differences and the simulated mean from bodies and faces drawn from the current Gaussian,
+   over three rounds. The spread changes by one variance factor per group of face shapes (head,
+   forehead, brows, eyes, nose, cheeks, mouth, chin, ears, detail), within ``VARIANCE_BOUNDS``,
+   so that the predicted SD of each measurement, from the face and from the rest of the body
+   (height, weight, muscle, proportions), meets the data. The factors keep the correlations of
+   the ICT fits, and the bounds keep a measurement that the face shapes barely move from
+   inflating their spread.
 3. **Race offsets.** For users of anny's race phenotypes, the adult means of the ANSUR II race
    groups (White, Black and Asian for anny's caucasian, african and asian) give offsets of the
    mean, relative to their average.
@@ -53,6 +59,7 @@ from safetensors.torch import save_file
 import anny
 from anny.faces.authoring import sources
 from anny.faces.distribution import DEFAULT_PATH, RACES
+from anny.models.face_shapes import face_shape_parameter
 from anny.faces.measurements import (
     ANSUR_MEASUREMENTS,
     ANSUR_SECTION_MEASUREMENTS,
@@ -89,6 +96,12 @@ TDFN_TO_ANSUR = {
     "morphfaceheight": "mentonsellionlength",
 }
 ANSUR_RACES = {"caucasian": 1.0, "african": 2.0, "asian": 4.0}
+# face shapes with less than this share of their offsets on the fitted vertices are unseen by
+# the ICT fits: their prior is centred on 0 with this SD, and ANSUR II calibrates the ears
+UNSEEN_SHARE = 0.05
+UNSEEN_SD = 0.35
+# bounds of the variance factor of each group of face shapes (SD factors from 1/2 to 2)
+VARIANCE_BOUNDS = (0.25, 4.0)
 
 
 def tdfn_names() -> list[str]:
@@ -168,6 +181,10 @@ class Simulator:
         self.measure = CraniofacialMeasurements(self.model)
         self.shape = SimpleShapeDistribution(self.model)
         self.labels = self.model.phenotype_labels
+        groups = [face_shape_parameter(k).group for k in self.model.face_shape_labels]
+        order = list(dict.fromkeys(groups))
+        self.group_index = np.array([order.index(g) for g in groups])
+        self.groups = (self.group_index, len(order))
         self.one_sided = np.array(
             [
                 self.model.face_shape_ranges[k][0] >= 0
@@ -232,7 +249,11 @@ class Simulator:
                 )
                 values = self.measure(o, sections=sections)
             out.append(np.stack([_tdfn_value(values, n).numpy() for n in names], 1))
-        return np.concatenate(out)
+        out = np.concatenate(out)
+        if np.isnan(out).any():
+            bad = [n for n, v in zip(names, np.isnan(out).any(0)) if v]
+            raise ValueError(f"sections that miss the head: {bad}")
+        return out
 
 
 # ------------------------------------------------------------------ Gaussian tools
@@ -249,11 +270,6 @@ def ledoit_wolf(X: np.ndarray) -> np.ndarray:
     shrink = b2 / d2
     C = shrink * m * np.eye(p) + (1 - shrink) * S
     return C * np.outer(sd, sd)
-
-
-def psd(C: np.ndarray, floor: float) -> np.ndarray:
-    w, V = np.linalg.eigh(0.5 * (C + C.T))
-    return (V * np.maximum(w, floor)) @ V.T
 
 
 def jacobian(sim: Simulator, phen: torch.Tensor, face: np.ndarray, names, h=0.2):
@@ -281,33 +297,62 @@ def moment_match(
     phen_samples,
     names,
     target_mean,
-    target_cov,
+    target_sd,
     noise_sd,
-    rounds=2,
+    rounds=3,
+    seed=0,
 ):
-    """the Gaussian (mu, S) of the face values moved to meet the target measurements"""
+    """
+    the Gaussian (mu, S) of the face values moved to meet the target measurements. Each round
+    sets the spread by one variance factor per group of face shapes (``variance_factors``),
+    draws a face from the Gaussian for each body of ``phen_samples``, and moves the mean by the
+    gain of linearised Gaussian conditioning times the gap between the targets and the mean of
+    the simulated measurements (the rectified shapes make that mean differ from the
+    measurements of the mean face).
+    """
+    S0 = S
+    z = np.random.default_rng(seed).standard_normal((len(phen_samples), len(mu)))
     # one-sided shapes act from 0 up, so their means stay at 0 or above
     mu = np.where(sim.one_sided, np.maximum(mu, 0.0), mu)
     for _ in range(rounds):
-        m_pred, J = jacobian(sim, phen_mean, mu, names)
-        P = J @ S @ J.T
-        N = np.diag(noise_sd**2)
-        K = S @ J.T @ np.linalg.inv(P + N)
-        mu = mu + K @ (target_mean - m_pred)
+        _, J = jacobian(sim, phen_mean, mu, names)
+        # the part of the measurement variance that the rest of the body explains
+        other = sim(
+            phen_samples, torch.tensor(np.repeat(mu[None], len(phen_samples), 0)), names
+        )
+        factors = variance_factors(J, S0, other.var(0), target_sd**2, sim.groups)
+        d = np.sqrt(factors[sim.group_index])
+        S = S0 * np.outer(d, d)
+        faces = mu + z @ np.linalg.cholesky(S + 1e-10 * np.eye(len(mu))).T
+        simulated = sim(phen_samples, torch.tensor(faces), names).mean(0)
+        K = S @ J.T @ np.linalg.inv(J @ S @ J.T + np.diag(noise_sd**2))
+        mu = mu + K @ (target_mean - simulated)
         mu = np.where(sim.one_sided, np.maximum(mu, 0.0), mu)
-    m_pred, J = jacobian(sim, phen_mean, mu, names)
-    # the part of the measurement covariance that the rest of the body explains
-    other = sim(
-        phen_samples, torch.tensor(np.repeat(mu[None], len(phen_samples), 0)), names
-    )
-    C_other = np.cov(other.T)
-    P = J @ S @ J.T
-    floor = 1e-3 * np.diag(target_cov).mean()
-    C_face = psd(target_cov - C_other, floor)
-    K0 = S @ J.T @ np.linalg.inv(P + 1e-6 * np.trace(P) / len(P) * np.eye(len(P)))
-    S = S - K0 @ P @ K0.T + K0 @ C_face @ K0.T
-    S = psd(S, 1e-8)
-    return mu, S, m_pred
+    return mu, S, simulated
+
+
+def variance_factors(J, S, var_other, target_var, groups, pull=0.1) -> np.ndarray:
+    """
+    one variance factor per group of face shapes, within VARIANCE_BOUNDS, so that the predicted
+    variance of each measurement (J S' J^T from the face plus the variance from the rest of the
+    body) meets its target in the least-squares sense of log ratios; ``pull`` keeps the factors
+    that the measurements do not see near 1
+    """
+    from scipy.optimize import minimize
+
+    index, count = groups
+
+    def predicted(log_f):
+        d = np.exp(0.5 * log_f[index])
+        return np.einsum("mi, ij, mj -> m", J * d, S, J * d) + var_other
+
+    def loss(log_f):
+        r = np.log(predicted(log_f)) - np.log(target_var)
+        return (r**2).sum() + pull * (log_f**2).sum()
+
+    bounds = [tuple(np.log(VARIANCE_BOUNDS))] * count
+    result = minimize(loss, np.zeros(count), method="L-BFGS-B", bounds=bounds)
+    return np.exp(result.x)
 
 
 # ------------------------------------------------------------------ slider ranges
@@ -343,13 +388,33 @@ def widen_ranges(labels, calibrated: dict, race_offsets: np.ndarray, z: float = 
 
 
 # ------------------------------------------------------------------ calibration
-def ict_prior(fits: dict, labels: list[str]):
-    """mean and covariance of the face values given (gender, weight, muscle), from the ICT fits"""
+def unseen_shapes(model, fits: dict, labels: list[str]) -> np.ndarray:
+    """whether each face shape puts less than UNSEEN_SHARE of its offsets (squared) on the
+    vertices of the ICT fits: the ear shapes, since the fits leave out the ears"""
+    fitted = np.zeros(len(model.template_vertices), bool)
+    fitted[fits["vertex_ids"][fits["corr_valid"].astype(bool)]] = True
+    rows = list(model.blendshape_labels)
+    B = model.blendshapes.detach().cpu().numpy()
+    unseen = []
+    for name in labels:
+        idx = [rows.index(x) for x in face_shape_parameter(name).row_labels]
+        energy = (B[idx] ** 2).sum(-1).sum(0)
+        unseen.append(energy[fitted].sum() < UNSEEN_SHARE * energy.sum())
+    return np.array(unseen)
+
+
+def ict_prior(fits: dict, labels: list[str], unseen: np.ndarray):
+    """
+    mean and covariance of the face values of the ICT fits with (gender, weight, muscle) held
+    at their mean; the shapes that the fits do not see get a zero mean and an independent SD of
+    UNSEEN_SD
+    """
     train = ~fits["held_out"]
     phen_labels = list(fits["phenotype_labels"])
     cond = [phen_labels.index(k) for k in ("gender", "weight", "muscle")]
     face_labels = list(fits["face_labels"])
-    order = [face_labels.index(k) for k in labels]
+    seen = np.nonzero(~unseen)[0]
+    order = [face_labels.index(labels[i]) for i in seen]
     X = np.concatenate(
         [fits["phenotype"][train][:, cond], fits["face"][train][:, order]], 1
     )
@@ -357,17 +422,16 @@ def ict_prior(fits: dict, labels: list[str]):
     S = ledoit_wolf(X)
     S11, S12, S22 = S[:3, :3], S[:3, 3:], S[3:, 3:]
     B = S12.T @ np.linalg.inv(S11)
+    F = len(labels)
+    mean_face = np.zeros(F)
+    cov = np.diag(np.full(F, UNSEEN_SD**2))
+    mean_face[seen] = mu[3:]
+    cov[np.ix_(seen, seen)] = S22 - B @ S12
     return dict(
         mean_phen=mu[:3],
-        mean_face=mu[3:],
-        regression=B,  # (F, 3): gender, weight, muscle
-        cov=S22 - B @ S12,
+        mean_face=mean_face,
+        cov=cov,
     )
-
-
-def conditional_mean(prior, gender, weight, muscle):
-    x = np.array([gender, weight, muscle]) - prior["mean_phen"]
-    return prior["mean_face"] + prior["regression"] @ x
 
 
 def run(samples: int = 400, seed: int = 0):
@@ -375,7 +439,11 @@ def run(samples: int = 400, seed: int = 0):
     sim = Simulator()
     labels = list(sim.model.face_shape_labels)
     fits = dict(np.load(sources.cache_dir() / "ict_fits.npz"))
-    prior = ict_prior(fits, labels)
+    unseen = unseen_shapes(sim.model, fits, labels)
+    print(
+        f"shapes that the ICT fits do not see: {[labels[i] for i in np.nonzero(unseen)[0]]}"
+    )
+    prior = ict_prior(fits, labels, unseen)
     pooled = tdfn_table()
     tnames = tdfn_names()
     report = dict(anchors=[])
@@ -401,38 +469,17 @@ def run(samples: int = 400, seed: int = 0):
             adult_mean.append(p[1])
             adult_sd.append(p[2])
         adult_mean, adult_sd = np.array(adult_mean), np.array(adult_sd)
-        k = len(ANSUR_MEASUREMENTS)
         phen_mean, phen_rand = phen_sets(sex, ADULT_YEARS)
-        mu0 = conditional_mean(
-            prior,
-            GENDER[sex],
-            float(phen_mean[0, sim.labels.index("weight")]),
-            float(phen_mean[0, sim.labels.index("muscle")]),
-        )
-        # the target covariance: ANSUR II in full, and the 3D Facial Norms SDs with the
-        # correlations that anny predicts
-        pred0 = sim(
-            phen_rand,
-            torch.tensor(np.repeat(mu0[None], len(phen_rand), 0)),
-            adult_names,
-        )
-        _, J0 = jacobian(sim, phen_mean, mu0, adult_names)
-        C_pred = J0 @ prior["cov"] @ J0.T + np.cov(pred0.T)
-        d = np.sqrt(np.diag(C_pred))
-        R = C_pred / np.outer(d, d)
-        C_target = R * np.outer(adult_sd, adult_sd)
-        C_target[:k, :k] = C_ansur
-        noise = 0.15 * adult_sd
         mu_a, S_a, m_pred = moment_match(
             sim,
-            mu0,
+            prior["mean_face"],
             prior["cov"],
             phen_mean,
             phen_rand,
             adult_names,
             adult_mean,
-            C_target,
-            noise,
+            adult_sd,
+            0.15 * adult_sd,
         )
         calibrated[(sex, ADULT_YEARS)] = (mu_a, S_a)
         report["anchors"].append(
@@ -458,7 +505,7 @@ def run(samples: int = 400, seed: int = 0):
             phen_rand,
             list(ANSUR_MEASUREMENTS),
             m_old,
-            C_old,
+            np.sqrt(np.diag(C_old)),
             0.15 * np.sqrt(np.diag(C_old)),
         )
         calibrated[(sex, OLDER_YEARS)] = (mu_o, S_o)
@@ -489,15 +536,8 @@ def run(samples: int = 400, seed: int = 0):
                 sd.append(p[2] * adult_target[name] / tdfn_adult[name][1])
             mean, sd = np.array(mean), np.array(sd)
             phen_mean, phen_rand = phen_sets(sex, years)
-            pred = sim(
-                phen_rand, torch.tensor(np.repeat(mu_a[None], len(phen_rand), 0)), names
-            )
-            _, Jg = jacobian(sim, phen_mean, mu_a, names)
-            C_pred = Jg @ S_a @ Jg.T + np.cov(pred.T)
-            dd = np.sqrt(np.diag(C_pred))
-            C_target = C_pred / np.outer(dd, dd) * np.outer(sd, sd)
             mu_g, S_g, _ = moment_match(
-                sim, mu_a, S_a, phen_mean, phen_rand, names, mean, C_target, 0.15 * sd
+                sim, mu_a, S_a, phen_mean, phen_rand, names, mean, sd, 0.15 * sd
             )
             calibrated[(sex, years)] = (mu_g, S_g)
             report["anchors"].append(
@@ -524,7 +564,7 @@ def run(samples: int = 400, seed: int = 0):
                 phen_rand,
                 ["headcircumference"],
                 np.array([hc]),
-                np.array([[hc_sd**2]]),
+                np.array([hc_sd]),
                 np.array([0.15 * hc_sd]),
             )
             calibrated[(sex, years)] = (mu_i, S_i)
@@ -581,8 +621,6 @@ def run(samples: int = 400, seed: int = 0):
         gender_anchors=torch.tensor([GENDER["male"], GENDER["female"]]),
         mean=torch.tensor(mean),
         scale_tril=torch.tensor(tril),
-        weight_muscle_regression=torch.tensor(prior["regression"][:, 1:3]),
-        weight_muscle_centre=torch.tensor(prior["mean_phen"][1:3]),
         race_offsets=torch.tensor(race_offsets),
     )
     meta = dict(

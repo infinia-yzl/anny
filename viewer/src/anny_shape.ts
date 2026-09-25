@@ -145,8 +145,6 @@ export interface FacePrior {
   age_anchors: number[];
   gender_anchors: number[];
   means: number[][][];                    // (A, 2, F)
-  weight_muscle_regression: number[][];   // (F, 2)
-  weight_muscle_centre: number[];
   rank: number;
 }
 
@@ -256,8 +254,6 @@ export function facePriorParameters(face: FaceData, values: Record<string, numbe
       for (let i = 0; i < F * R; i++) factor[i] += w * face.prior[o + i];
     }
   }
-  const dw = val('weight') - p.weight_muscle_centre[0], dm = val('muscle') - p.weight_muscle_centre[1];
-  for (let f = 0; f < F; f++) mean[f] += p.weight_muscle_regression[f][0] * dw + p.weight_muscle_regression[f][1] * dm;
   return { mean, factor };
 }
 

@@ -276,10 +276,6 @@ def face_prior_tables(model, rank: int = 24) -> tuple[dict, np.ndarray]:
         age_anchors=d.age_anchors.tolist(),
         gender_anchors=d.gender_anchors.tolist(),
         means=np.round(means, 5).tolist(),
-        weight_muscle_regression=np.round(
-            d.weight_muscle_regression.cpu().numpy(), 5
-        ).tolist(),
-        weight_muscle_centre=d.weight_muscle_centre.tolist(),
         rank=rank,
         variance_kept=min(kept),
     )
