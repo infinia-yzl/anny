@@ -310,6 +310,24 @@ scene.apply_transform(trimesh_scene_transform)
 scene.show()
 
 # %% [markdown]
+# #### Benchmark against photographs
+#
+# `python -m anny.faces.authoring.benchmark` compares anny's faces with 9,827 near-frontal, neutral
+# photos of FairFace. MediaPipe measures 13 face proportions both on the photos and on renders of
+# anny's populations from the viewer page (2,347 of 2,700 renders kept):
+#
+# - the calibrated faces spread like the photos (median SD ratio 0.78, against 0.15 for anny's own
+#   faces), and they bring the height and width proportions of the face closer to the photos;
+# - the proportions of the eyes and the lips move further away (median |SMD| over all proportions
+#   0.84, against 0.71 for anny's own faces), although the same eyes meet 3D Facial Norms in 3D:
+#   MediaPipe finds the eye corners and the lips differently on renders and on photos;
+# - a classifier still tells the renders from the photos (C2ST AUC 0.99; 0.79 for faces drawn
+#   uniformly over the slider ranges, whose wide spread covers the scatter of the photos);
+# - fitted to the landmarks of 1,107 photos, anny with its face shapes has half the landmark error
+#   (normalised mean error 0.033 of the eye width, against 0.062 without face shapes), with the
+#   same error in every age group (0.033 to 0.036) and race group (0.033 to 0.034).
+
+# %% [markdown]
 # ## Facial actions
 #
 # Full-body and head models can optionally expose facial actions.

@@ -14,10 +14,11 @@ Highlights:
   experiment, and they follow the phenotype sliders.
 - **Face and head shapes.** `Anny(face_shapes="all")` adds 103 named, symmetric shapes of the
   head and the face and 10 detail shapes from the 3D faces of ICT-FaceKit (`face_shape_kwargs`),
-  scaled with the size of the head. A face-shape
-  distribution, calibrated against measured faces from free sources, draws realistic faces for
-  any age and gender, and the viewer's Character panel gains a Face section with a Random face
-  button.
+  scaled with the size of the head. A face-shape distribution, calibrated against measured faces
+  from free sources, draws realistic faces for any age and gender, and the viewer's Character
+  panel gains a Face section with a Random face button. At each age, the median gap of the head and face measurements to ANSUR II, 3D Facial
+  Norms and the CDC charts falls from 0.9 to 1.9 SD (4 to 5 SD for infant head circumference) to
+  0.4 SD or less; fitted to 1,107 FairFace photos, the face shapes halve anny's landmark error.
 
 ### Added
 
