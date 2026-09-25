@@ -33,9 +33,10 @@ class TestDriverWeights(unittest.TestCase):
             [[0.0, 0.0, -1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]
         )
         triangles = torch.tensor([[0, 1, 2], [0, 2, 3]])
-        # directions inside the cone of the keys (the upper side and the bottom)
+        # directions inside the cone of the keys (y >= 0 and z <= 0)
         d = torch.randn(50, 3)
         d[:, 1] = d[:, 1].abs()
+        d[:, 2] = -d[:, 2].abs()
         d = torch.nn.functional.normalize(d, dim=-1)
         w = cone_key_weights(d, targets.expand(50, -1, -1), triangles)
         self.assertTrue(torch.allclose(w.sum(1), torch.ones(50, dtype=w.dtype)))
