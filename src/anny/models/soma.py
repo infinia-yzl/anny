@@ -18,6 +18,9 @@ from anny.utils.warp_mesh_utils import point_to_mesh_distance_and_face_uvs
 from anny.paths import get_anny_root_dir
 from anny.models import retopology
 
+# nvidia/SOMA-X HuggingFace asset revision matching py-soma-x==0.1.0 (later assets are incompatible).
+SOMA_ASSETS_REVISION = "6db1b4e8d737db240e680ca5358ae2897f2d9427"
+
 
 def _load_soma_rig():
     """Load soma rig data, preferring .safetensors and falling back to legacy .pt."""

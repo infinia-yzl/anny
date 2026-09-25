@@ -49,7 +49,7 @@ examples = [
     "notebook",
     "scipy",
     "jupytext",
-    "py-soma-x==0.1.0"
+    "py-soma-x==0.1.0"  # keep in sync with anny.models.soma.SOMA_ASSETS_REVISION
 ]
 smpl = [
     "smplx",
