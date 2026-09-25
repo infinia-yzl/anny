@@ -199,7 +199,9 @@ scene.show()  # This will open a window to visualize the scene with all the face
 # `face_shapes` loads 103 named, symmetric shapes of the head and the face, built from the MakeHuman
 # face targets: head archetypes (oval, round, square, ...), the size and the position of the eyes,
 # the nose, the mouth, the chin, the cheeks and the ears. A value of +1 applies the positive target
-# and -1 the negative one; the head archetypes and `chin-triangle` run from 0 to 1.
+# and -1 the negative one; the head archetypes and `chin-triangle` run from 0 to 1. Ten detail
+# shapes (`detail-1` to `detail-10`) complete them: the symmetric principal components of what the
+# named shapes miss of the 3D faces of ICT-FaceKit, where a value of 1 is 3 standard deviations.
 #
 # Each group of shapes scales with the size of the matching part of the head, measured on
 # craniofacial landmarks, so the offsets that MakeHuman authored on an adult stay in proportion on a

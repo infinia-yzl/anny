@@ -13,7 +13,8 @@ Highlights:
 - **Poses, soft tissue and hair for anny.** These parts come from the `3D Model`
   experiment, and they follow the phenotype sliders.
 - **Face and head shapes.** `Anny(face_shapes="all")` adds 103 named, symmetric shapes of the
-  head and the face (`face_shape_kwargs`), scaled with the size of the head. A face-shape
+  head and the face and 10 detail shapes from the 3D faces of ICT-FaceKit (`face_shape_kwargs`),
+  scaled with the size of the head. A face-shape
   distribution, calibrated against measured faces from free sources, draws realistic faces for
   any age and gender, and the viewer's Character panel gains a Face section with a Random face
   button.
@@ -23,6 +24,8 @@ Highlights:
 - `Anny(face_shapes=..., scale_face_shapes=True)` and `forward(face_shape_kwargs=...)`: the
   face-shape parameters of `data/faces/face_shapes.json` (`scripts/make_face_shape_spec.py`),
   with `face_shape_labels`, `face_shape_groups`, `face_shape_ranges` and `face_shape_scales`.
+  The `detail` parameters come from `data/faces/detail_shapes.safetensors`
+  (`python -m anny.faces.authoring.detail`).
 - `anny.faces.measurements`: 51 craniofacial landmarks (`data/keypoints/craniofacial.json`,
   also through `KeypointsRegressor.craniofacial`), the 34 measurements of the 3D Facial Norms
   database and the head and face measurements of ANSUR II (`CraniofacialMeasurements`), and

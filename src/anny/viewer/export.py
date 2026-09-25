@@ -206,6 +206,8 @@ def _face_ends(name: str) -> list[str]:
     from anny.models.face_shapes import face_shape_parameter
 
     p = face_shape_parameter(name)
+    if p.source == "ict":
+        return ["-", "+"]
     if not p.negative:
         return ["None", "Full"]
     words = [t.split("/")[-1].split("-")[-1] for t in (p.negative[0], p.positive[0])]

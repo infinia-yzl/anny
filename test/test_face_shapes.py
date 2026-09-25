@@ -35,9 +35,12 @@ class TestFaceShapes(unittest.TestCase):
         names = [p.name for p in spec]
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(self.model.face_shape_labels, names)
-        self.assertEqual(len(names), 103)
+        self.assertEqual(sum(p.source == "makehuman" for p in spec), 103)
+        self.assertEqual(
+            [p.name for p in spec if p.source == "ict"][:2], ["detail-1", "detail-2"]
+        )
         for p in spec:
-            self.assertEqual(p.range[0] < 0, bool(p.negative))
+            self.assertEqual(p.range[0] < 0, bool(p.negative) or p.source == "ict")
 
     def test_zero_values_leave_the_body(self):
         batch = 4
@@ -98,7 +101,13 @@ class TestFaceShapes(unittest.TestCase):
         dist, mirror = torch.cdist(mirrored, P).min(dim=1)
         pairs = dist < 1e-6
         self.assertGreater(pairs.float().mean().item(), 0.95)
-        for name in ("eye-scale", "cheek-bones", "ear-lobe", "nose-scale-horiz"):
+        for name in (
+            "eye-scale",
+            "cheek-bones",
+            "ear-lobe",
+            "nose-scale-horiz",
+            "detail-1",
+        ):
             offsets = (
                 model(face_shape_kwargs={name: 1.0})["rest_vertices"][0] - rest0
             )[head]

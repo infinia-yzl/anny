@@ -825,7 +825,7 @@ function faceLabel(name: string, group: string) {
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 const FACE_GROUP_TITLES: Record<string, string> = { head: 'Head', forehead: 'Forehead', brows: 'Brows', eyes: 'Eyes', nose: 'Nose',
-  cheeks: 'Cheeks', mouth: 'Mouth', chin: 'Chin and jaw', ears: 'Ears' };
+  cheeks: 'Cheeks', mouth: 'Mouth', chin: 'Chin and jaw', ears: 'Ears', detail: 'Detail' };
 function sameValues(a: any, b: any) {
   if (!a || !b) return false;
   return BODY.sliders.every((s: any) => Math.abs((a[s.name] ?? 0.5) - (b[s.name] ?? 0.5)) < 1e-6);

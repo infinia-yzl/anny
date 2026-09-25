@@ -10,7 +10,8 @@ Fit anny's face shapes to the ICT-FaceKit identity space (see :mod:`anny.faces.a
    (:mod:`anny.faces.authoring.nicp`) lays anny's head on the ICT surface. The closest ICT
    point of each vertex of anny's head then corresponds to it. The ears, the eye and mouth
    cavities and the eyes stay out: closest points are unreliable in the folds of the ear, and
-   ANSUR II calibrates the ears.
+   ANSUR II calibrates the ears. The fits also leave out the neck (the vertices skinned mostly
+   to the neck bones), whose shape in the scans follows the posture.
 2. **Fits.** For each random ICT identity (weights from a standard normal over the 100 modes),
    anny's face values, gender, weight, muscle, adult age and a rigid transform are fitted to the
    corresponding points by least squares with a small ridge penalty (Adam in PyTorch).
@@ -40,9 +41,14 @@ from anny.faces.authoring import ict, nicp
 from anny.faces.authoring.base_mesh import base_mesh, read_target
 from anny.faces.authoring.sources import cache_dir
 from anny.faces.measurements import craniofacial_landmark_vertices
+from anny.models.face_shapes import face_shape_spec
 from anny.shape_distribution import SimpleShapeDistribution
 
 FIT_PHENOTYPES = ("gender", "age", "muscle", "weight")
+# weight of the smoothness of the face offsets (their mean squared Laplacian) against the mean
+# squared distance: the MakeHuman targets have sharp borders, and without it the fits of the
+# scans crease the jaw and notch the chin; the detail shapes then take the smooth remainder
+SMOOTHNESS = 4.0
 ADULT_YEARS = (18.0, 67.0)
 
 
@@ -55,7 +61,9 @@ def adult_age_range(model) -> tuple[float, float]:
 
 
 def fitting_model() -> anny.Anny:
-    return anny.Anny(face_shapes="all").to(dtype=torch.float64)
+    """anny with the MakeHuman face shapes (the detail shapes come from these fits)"""
+    names = [p.name for p in face_shape_spec() if p.source == "makehuman"]
+    return anny.Anny(face_shapes=names).to(dtype=torch.float64)
 
 
 def head_vertices(model) -> np.ndarray:
@@ -80,6 +88,20 @@ def head_vertices(model) -> np.ndarray:
     return np.nonzero(keep)[0]
 
 
+def on_the_head(model, vertex_ids) -> np.ndarray:
+    """whether each vertex has most of its skinning weight on the head bone or its descendants.
+    The fits leave out the neck: the neck of the ICT scans varies with the posture and the build,
+    which belong to anny's body."""
+    subtree = {model.bone_labels.index("head")}
+    for i, parent in enumerate(model.bone_parents):
+        if parent in subtree:
+            subtree.add(i)
+    in_subtree = torch.zeros(len(model.bone_labels), dtype=torch.bool)
+    in_subtree[list(subtree)] = True
+    weights = model.vertex_bone_weights * in_subtree[model.vertex_bone_indices]
+    return (weights.sum(-1) > 0.5).numpy()[np.asarray(vertex_ids)]
+
+
 class HeadModel(torch.nn.Module):
     """rest positions of a subset of vertices for phenotype and face values"""
 
@@ -98,6 +120,50 @@ class HeadModel(torch.nn.Module):
             phenotype, empty, empty, face
         )
         return self.template[None] + (coeffs @ self.B).view(n, -1, 3)
+
+    def face_offsets(self, phenotype: torch.Tensor, face: torch.Tensor) -> torch.Tensor:
+        """the offsets (B, H, 3) that the face shapes add to the rest positions"""
+        n = phenotype.shape[0]
+        empty = phenotype.new_zeros((n, 0))
+        coeffs = self.model._get_phenotype_blendshape_coefficients(
+            phenotype, empty, empty, face
+        )
+        rows = len(self.model.face_shape_row_parameter)
+        return (coeffs[:, -rows:] @ self.B[-rows:]).view(n, -1, 3)
+
+
+def head_laplacian(model, vertex_ids) -> torch.Tensor:
+    """the uniform graph Laplacian (H, H) of the mesh restricted to the given vertices"""
+    faces = model.faces.numpy()
+    edges = np.concatenate(
+        [faces[:, [i, (i + 1) % faces.shape[1]]] for i in range(faces.shape[1])]
+    )
+    local = -np.ones(len(model.template_vertices), np.int64)
+    local[vertex_ids] = np.arange(len(vertex_ids))
+    edges = local[edges]
+    edges = np.unique(np.sort(edges[(edges >= 0).all(1)], axis=1), axis=0)
+    h = len(vertex_ids)
+    rows = np.concatenate([edges[:, 0], edges[:, 1]])
+    cols = np.concatenate([edges[:, 1], edges[:, 0]])
+    degree = np.bincount(rows, minlength=h).astype(np.float64)
+    values = 1.0 / np.maximum(degree[rows], 1.0)
+    indices = np.concatenate([np.stack([rows, cols]), np.stack([np.arange(h)] * 2)], 1)
+    values = np.concatenate([values, -np.ones(h)])
+    return torch.sparse_coo_tensor(
+        torch.from_numpy(indices), torch.from_numpy(values), (h, h)
+    ).coalesce()
+
+
+def smoothness_loss(head: HeadModel, laplacian: torch.Tensor, weight: float):
+    """the extra loss of fit(): weight times the mean squared Laplacian of the face offsets"""
+
+    def loss(phenotype, face, rotation, translation):
+        D = head.face_offsets(phenotype, face)
+        n, h = D.shape[:2]
+        LD = torch.sparse.mm(laplacian, D.transpose(0, 1).reshape(h, -1))
+        return weight * (LD**2).sum() / h
+
+    return loss
 
 
 @dataclasses.dataclass
@@ -289,7 +355,8 @@ def targets_for(ict_model, reg, weights: np.ndarray) -> torch.Tensor:
     return torch.tensor(pts)
 
 
-def run(samples=10000, held_out=1000, batch=500, seed=0, steps=300):
+def run(samples=10000, held_out=1000, batch=500, seed=0, steps=300, smoothness=None):
+    smoothness = SMOOTHNESS if smoothness is None else smoothness
     torch.set_num_threads(max(1, torch.get_num_threads()))
     model = fitting_model()
     ict_model = ict.load()
@@ -299,7 +366,14 @@ def run(samples=10000, held_out=1000, batch=500, seed=0, steps=300):
     ids = reg["vertex_ids"]
     head = HeadModel(model, ids)
     age_range = adult_age_range(model)
-    weights = torch.tensor(reg["valid"], dtype=torch.float64)
+    fitted = reg["valid"] & on_the_head(model, ids)
+    print(f"fitted vertices: {fitted.sum()} (without the neck)")
+    weights = torch.tensor(fitted, dtype=torch.float64)
+    smooth = (
+        smoothness_loss(head, head_laplacian(model, ids), smoothness)
+        if smoothness > 0
+        else None
+    )
     rng = np.random.default_rng(seed)
     total = samples + held_out
     beta = rng.standard_normal((total, ict_model.modes.shape[0]))
@@ -314,6 +388,7 @@ def run(samples=10000, held_out=1000, batch=500, seed=0, steps=300):
             age_range,
             steps=steps,
             init=reg["neutral_fit"],
+            extra_loss=smooth,
         )
         for k in out:
             out[k].append(getattr(f, k).numpy())
@@ -327,13 +402,14 @@ def run(samples=10000, held_out=1000, batch=500, seed=0, steps=300):
         vertex_ids=ids,
         corr_triangles=reg["triangles"],
         corr_bary=reg["bary"],
-        corr_valid=reg["valid"],
+        corr_valid=fitted,
         align_rotation=reg["rotation"],
         align_translation=reg["translation"],
         held_out=np.arange(total) >= samples,
         phenotype_labels=np.array(model.phenotype_labels),
         face_labels=np.array(model.face_shape_labels),
         age_range=np.array(age_range),
+        smoothness=np.array(smoothness),
     )
     np.savez(cache_dir() / "ict_fits.npz", **result)
     report(result, model, ict_model, head)
@@ -365,10 +441,12 @@ def report(result, model, ict_model, head) -> dict:
     fitted0 = X0 @ result["rotation"][0].T + result["translation"][0]
     variation = ((targets - target0[None]) ** 2).sum(-1) @ w
     unexplained = (((targets - fitted) - (target0 - fitted0)[None]) ** 2).sum(-1) @ w
+    rms = np.sqrt(((targets - fitted) ** 2).sum(-1) @ w)
     info = dict(
         held_out=len(held),
-        rms_mm_median=float(1000 * np.median(result["rms"][held])),
-        rms_mm_p90=float(1000 * np.percentile(result["rms"][held], 90)),
+        face_parameters=int(result["face"].shape[1]),
+        rms_mm_median=float(1000 * np.median(rms)),
+        rms_mm_p90=float(1000 * np.percentile(rms, 90)),
         ict_variation_rms_mm=float(1000 * np.sqrt(variation.mean())),
         explained_variance=float(1 - unexplained.sum() / variation.sum()),
         face_values_beyond_range=float((np.abs(result["face"][held]) > 1).mean()),
@@ -387,8 +465,15 @@ def main():
     parser.add_argument("--held-out", type=int, default=1000)
     parser.add_argument("--batch", type=int, default=500)
     parser.add_argument("--steps", type=int, default=300)
+    parser.add_argument("--smoothness", type=float, default=SMOOTHNESS)
     args = parser.parse_args()
-    run(args.samples, args.held_out, args.batch, steps=args.steps)
+    run(
+        args.samples,
+        args.held_out,
+        args.batch,
+        steps=args.steps,
+        smoothness=args.smoothness,
+    )
 
 
 if __name__ == "__main__":

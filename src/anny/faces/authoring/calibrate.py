@@ -28,6 +28,10 @@ Build the calibrated distribution of anny's face shapes
 3. **Race offsets.** For users of anny's race phenotypes, the adult means of the ANSUR II race
    groups (White, Black and Asian for anny's caucasian, african and asian) give offsets of the
    mean, relative to their average.
+4. **Slider ranges.** The range of each face shape in ``data/faces/face_shapes.json`` widens
+   from [-1, 1] (or [0, 1]) to hold the central 99 % of the distribution at every anchor, sex and
+   race, rounded outward to 0.5. The ICT fits need some shapes beyond 1: for example, the mean
+   ICT face has less deep-set eyes and a narrower nose base than anny's default face.
 
 Usage::
 
@@ -306,6 +310,38 @@ def moment_match(
     return mu, S, m_pred
 
 
+# ------------------------------------------------------------------ slider ranges
+def widen_ranges(labels, calibrated: dict, race_offsets: np.ndarray, z: float = 2.576):
+    """the slider ranges of face_shapes.json, widened to hold the calibrated distribution"""
+    from anny.models.face_shapes import FACES_DIR, face_shape_spec
+
+    lo = np.full(len(labels), np.inf)
+    hi = np.full(len(labels), -np.inf)
+    for (sex, _), (mu, S) in calibrated.items():
+        sd = np.sqrt(np.diag(S))
+        offsets = race_offsets[SEXES.index(sex)]
+        shift_lo = np.minimum(offsets.min(0), 0.0)
+        shift_hi = np.maximum(offsets.max(0), 0.0)
+        lo = np.minimum(lo, mu + shift_lo - z * sd)
+        hi = np.maximum(hi, mu + shift_hi + z * sd)
+    path = FACES_DIR / "face_shapes.json"
+    with open(path) as f:
+        spec = json.load(f)
+    ranges = {}
+    for p in spec["parameters"]:
+        i = labels.index(p["name"])
+        one_sided = p.get("source", "makehuman") == "makehuman" and not p["negative"]
+        low = 0.0 if one_sided else min(-1.0, np.floor(2 * lo[i]) / 2)
+        high = max(1.0, np.ceil(2 * hi[i]) / 2)
+        p["range"] = [float(low), float(high)]
+        ranges[p["name"]] = p["range"]
+    with open(path, "w") as f:
+        json.dump(spec, f, indent=1)
+        f.write("\n")
+    face_shape_spec.cache_clear()
+    return ranges
+
+
 # ------------------------------------------------------------------ calibration
 def ict_prior(fits: dict, labels: list[str]):
     """mean and covariance of the face values given (gender, weight, muscle), from the ICT fits"""
@@ -523,6 +559,11 @@ def run(samples: int = 400, seed: int = 0):
         deltas = np.array(deltas)
         race_offsets[si] = deltas - deltas.mean(0)
         print(f"{sex} race offsets: done ({time.time() - t0:.0f} s)")
+
+    # ---------------- slider ranges
+    report["ranges"] = widen_ranges(labels, calibrated, race_offsets)
+    wide = {k: v for k, v in report["ranges"].items() if v[1] > 1 or v[0] < -1}
+    print(f"widened ranges: {wide}")
 
     # ---------------- save
     years = sorted({y for (_, y) in calibrated})

@@ -453,6 +453,11 @@ def _get_builder_metadata(
             continue
 
         all_kwargs[param.name] = value
+    # load_data always loads the face-shape rows, whose data files can change within a data version
+    if "face_shapes" in all_kwargs or f.__name__ == "load_data":
+        from anny.models.face_shapes import face_shape_data_digest
+
+        all_kwargs["face_shape_data"] = face_shape_data_digest()
     return all_kwargs
 
 

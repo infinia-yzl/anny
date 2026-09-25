@@ -30,6 +30,7 @@ uv sync --extra viewer --extra faces
 uv run python -m anny.faces.authoring.sources       # download the data sources into ANNY_CACHE_DIR/faces
 uv run python -m anny.faces.authoring.landmarks     # data/keypoints/craniofacial.json
 uv run python -m anny.faces.authoring.fit_3d        # fit anny's face shapes to ICT-FaceKit identities
+uv run python -m anny.faces.authoring.detail        # data/faces/detail_shapes.safetensors, from the fit residuals
 uv run python -m anny.faces.authoring.mediapipe_map # data/keypoints/mediapipe.json
 uv run python -m anny.faces.authoring.calibrate     # data/shape_calibration/face_prior.safetensors
 uv run python -m anny.faces.authoring.benchmark     # benchmark.html in ANNY_CACHE_DIR/faces
@@ -83,7 +84,7 @@ cd viewer && npx tsc --noEmit         # type-check the page
 | Correctives | `correctives/` | `SoftTissueCorrectives` (hinge and cone drivers, shapes scaled with the local size; `data/correctives/`); `correctives/authoring/` holds the simulation, the fit and `evaluate` |
 | Hair | `hair/` | `StrandBinding` ties strands to the skin at roots and tips; `hair/authoring/` grows the groom, brows and lashes |
 | Viewer data | `viewer/` | `python -m anny.viewer build` writes the page data to `viewer/build/` and runs the node build of `viewer/` |
-| Face shapes | `models/face_shapes.py`, `faces/` | 103 named, symmetric face-shape parameters (`Anny(face_shapes=...)`, `face_shape_kwargs`), scaled per group with the size of the head; craniofacial landmarks and the measurements of 3D Facial Norms and ANSUR II (`faces/measurements.py`); a face-shape distribution calibrated against measured faces (`faces/distribution.py`); `faces/authoring/` fetches the sources, fits the ICT-FaceKit identity space, calibrates the distribution and benchmarks against FairFace photos |
+| Face shapes | `models/face_shapes.py`, `faces/` | 103 named, symmetric face-shape parameters and 10 detail shapes from ICT-FaceKit (`Anny(face_shapes=...)`, `face_shape_kwargs`), scaled per group with the size of the head; craniofacial landmarks and the measurements of 3D Facial Norms and ANSUR II (`faces/measurements.py`); a face-shape distribution calibrated against measured faces (`faces/distribution.py`); `faces/authoring/` fetches the sources, fits the ICT-FaceKit identity space, calibrates the distribution and benchmarks against FairFace photos |
 
 ### Phenotype System
 
@@ -95,7 +96,11 @@ Phenotypes are blended linearly between discrete anchor states defined in `src/a
 `data/faces/face_shapes.json` sums the left and right MakeHuman targets of the head, forehead, brows,
 eyes, nose, cheeks, mouth, chin and ears into rows `face_shape:{name}.pos` and `.neg`; +1 applies the
 positive targets, -1 the negative ones, and the head archetypes and `chin-triangle` run from 0 to 1.
-The rows of a group scale with the size of that part of the head (`Anny.face_shape_scales`),
+The `detail` parameters (`source: "ict"` in the spec) come from `data/faces/detail_shapes.safetensors`:
+the symmetric principal components of the residuals of the ICT-FaceKit fits, written by
+`python -m anny.faces.authoring.detail`. The model cache key carries a digest of both files
+(`face_shape_data_digest`), and the calibration widens the slider ranges to hold the calibrated
+distribution. The rows of a group scale with the size of that part of the head (`Anny.face_shape_scales`),
 measured on the craniofacial landmarks of `data/keypoints/craniofacial.json`, which `ModelData`
 stores for the template and every blend shape. The `anny` and `soma` rig caches carry the face rows;
 `scripts/precompute_rig_caches.py --append` adds rows for new blend shapes and leaves the others

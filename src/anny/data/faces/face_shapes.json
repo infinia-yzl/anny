@@ -9,7 +9,8 @@
   "cheeks",
   "mouth",
   "chin",
-  "ears"
+  "ears",
+  "detail"
  ],
  "parameters": [
   {
@@ -1501,6 +1502,116 @@
     -1.0,
     1.0
    ]
+  },
+  {
+   "name": "detail-1",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-2",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-3",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-4",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-5",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-6",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-7",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-8",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-9",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-10",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
   }
  ]
 }

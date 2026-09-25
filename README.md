@@ -100,7 +100,7 @@ output = SoftTissueCorrectives(model)(output)  # corrected output["vertices"]
 
 ### Face and head shapes
 
-`anny.Anny(face_shapes="all")` adds 103 named, symmetric shapes of the head and the face, built from the MakeHuman face targets: head archetypes (oval, round, square and others), and the size, the position and the form of the eyes, the brows, the nose, the cheeks, the mouth, the chin and the ears. Each group of shapes scales with the size of the matching part of the head, so the shapes stay in proportion on a child. `anny.faces.distribution.FaceShapeDistribution` draws face values for any age, gender, weight and muscle, from a distribution calibrated against measured faces, and `anny.faces.measurements` measures heads as the 3D Facial Norms database and the ANSUR II survey do:
+`anny.Anny(face_shapes="all")` adds 103 named, symmetric shapes of the head and the face, built from the MakeHuman face targets: head archetypes (oval, round, square and others), and the size, the position and the form of the eyes, the brows, the nose, the cheeks, the mouth, the chin and the ears. Ten detail shapes complete them: they are the symmetric principal components of what the named shapes miss of the 3D faces of ICT-FaceKit. Each group of shapes scales with the size of the matching part of the head, so the shapes stay in proportion on a child. `anny.faces.distribution.FaceShapeDistribution` draws face values for any age, gender, weight and muscle, from a distribution calibrated against measured faces, and `anny.faces.measurements` measures heads as the 3D Facial Norms database and the ANSUR II survey do:
 
 ```python
 import anny, torch
