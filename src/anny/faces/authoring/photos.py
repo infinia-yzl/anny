@@ -174,8 +174,7 @@ def fairface_detections(
 ) -> dict:
     """
     MediaPipe on the FairFace photos of a split, with their labels (cached). ``ages`` limits
-    the detection to some age groups (indices of ``AGE_YEARS``), for the groups that the
-    validation split leaves short.
+    the detection to some age groups (indices of ``AGE_YEARS``).
     """
     tag = "" if ages is None else "_ages" + "".join(str(a) for a in sorted(ages))
     path = cache_dir() / f"fairface_{split}{tag}_mediapipe.npz"
@@ -210,17 +209,9 @@ def fairface_detections(
     return det
 
 
-# the age groups (0-2, 50-59, 60-69 and 70+) with fewer than about 100 kept photos per sex in
-# the validation split; the benchmark adds their photos from the train split
-SHORT_AGE_GROUPS = [0, 6, 7, 8]
-
-
 def real_photos() -> dict:
-    """detections of the validation split and of the short age groups of the train split"""
-    parts = [
-        fairface_detections("validation"),
-        fairface_detections("train", SHORT_AGE_GROUPS),
-    ]
+    """detections of the FairFace photos of both splits"""
+    parts = [fairface_detections("validation"), fairface_detections("train")]
     det = {
         k: np.concatenate([p[k] for p in parts]) for k in parts[0] if k != "score_names"
     }
