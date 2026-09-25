@@ -23,8 +23,8 @@
     "head/head-scale-vert-decr"
    ],
    "range": [
-    -1.5,
-    1.5
+    -1.0,
+    1.0
    ]
   },
   {
@@ -37,7 +37,7 @@
     "head/head-fat-decr"
    ],
    "range": [
-    -1.5,
+    -2.0,
     1.0
    ]
   },
@@ -125,7 +125,7 @@
     "head/head-age-decr"
    ],
    "range": [
-    -1.5,
+    -2.0,
     1.0
    ]
   },
@@ -192,7 +192,7 @@
    ],
    "range": [
     -1.0,
-    1.0
+    1.5
    ]
   },
   {
@@ -205,7 +205,7 @@
     "forehead/forehead-trans-backward"
    ],
    "range": [
-    -1.0,
+    -1.5,
     2.5
    ]
   },
@@ -219,7 +219,7 @@
     "forehead/forehead-scale-vert-decr"
    ],
    "range": [
-    -1.0,
+    -1.5,
     1.0
    ]
   },
@@ -291,8 +291,8 @@
     "eyes/r-eye-corner1-down"
    ],
    "range": [
-    -2.5,
-    2.5
+    -2.0,
+    3.0
    ]
   },
   {
@@ -324,7 +324,7 @@
    ],
    "range": [
     -4.0,
-    1.0
+    1.5
    ]
   },
   {
@@ -339,8 +339,8 @@
     "eyes/r-eye-push1-in"
    ],
    "range": [
-    -1.5,
-    3.0
+    -2.5,
+    2.5
    ]
   },
   {
@@ -388,7 +388,7 @@
    ],
    "range": [
     -1.5,
-    1.5
+    2.0
    ]
   },
   {
@@ -403,8 +403,8 @@
     "eyes/r-eye-bag-decr"
    ],
    "range": [
-    -3.0,
-    1.0
+    -2.5,
+    1.5
    ]
   },
   {
@@ -420,7 +420,7 @@
    ],
    "range": [
     -6.5,
-    3.0
+    3.5
    ]
   },
   {
@@ -499,7 +499,7 @@
     "eyes/r-eye-bag-in"
    ],
    "range": [
-    -1.5,
+    -1.0,
     1.0
    ]
   },
@@ -516,7 +516,7 @@
    ],
    "range": [
     -2.5,
-    1.5
+    2.0
    ]
   },
   {
@@ -531,8 +531,8 @@
     "eyes/r-eye-trans-in"
    ],
    "range": [
-    -3.5,
-    2.5
+    -3.0,
+    3.0
    ]
   },
   {
@@ -547,8 +547,8 @@
     "eyes/l-eye-eyefold-concave"
    ],
    "range": [
-    -1.5,
-    3.0
+    -1.0,
+    3.5
    ]
   },
   {
@@ -673,7 +673,7 @@
     "nose/nose-trans-backward"
    ],
    "range": [
-    -1.5,
+    -1.0,
     2.5
    ]
   },
@@ -688,7 +688,7 @@
    ],
    "range": [
     -1.0,
-    1.5
+    1.0
    ]
   },
   {
@@ -743,7 +743,7 @@
     "nose/nose-greek-decr"
    ],
    "range": [
-    -1.5,
+    -1.0,
     2.0
    ]
   },
@@ -800,7 +800,7 @@
    ],
    "range": [
     -1.0,
-    2.0
+    1.5
    ]
   },
   {
@@ -842,7 +842,7 @@
    ],
    "range": [
     -1.0,
-    2.0
+    1.5
    ]
   },
   {
@@ -890,7 +890,7 @@
    ],
    "range": [
     -2.5,
-    1.5
+    1.0
    ]
   },
   {
@@ -919,7 +919,7 @@
     "mouth/mouth-lowerlip-height-decr"
    ],
    "range": [
-    -1.5,
+    -2.0,
     1.0
    ]
   },
@@ -933,7 +933,7 @@
     "mouth/mouth-scale-horiz-decr"
    ],
    "range": [
-    -1.5,
+    -1.0,
     2.0
    ]
   },
@@ -975,8 +975,8 @@
     "mouth/mouth-scale-depth-decr"
    ],
    "range": [
-    -3.0,
-    2.5
+    -3.5,
+    2.0
    ]
   },
   {
@@ -989,7 +989,7 @@
     "mouth/mouth-lowerlip-volume-decr"
    ],
    "range": [
-    -2.5,
+    -2.0,
     2.5
    ]
   },
@@ -1003,7 +1003,7 @@
     "mouth/mouth-angles-down"
    ],
    "range": [
-    -1.5,
+    -1.0,
     2.5
    ]
   },
@@ -1045,8 +1045,8 @@
     "mouth/mouth-trans-backward"
    ],
    "range": [
-    -3.5,
-    4.5
+    -3.0,
+    3.5
    ]
   },
   {
@@ -1073,7 +1073,7 @@
     "mouth/mouth-scale-vert-decr"
    ],
    "range": [
-    -2.5,
+    -2.0,
     1.5
    ]
   },
@@ -1115,7 +1115,7 @@
     "mouth/mouth-upperlip-volume-decr"
    ],
    "range": [
-    -1.5,
+    -1.0,
     1.5
    ]
   },
@@ -1157,7 +1157,7 @@
     "mouth/mouth-upperlip-middle-down"
    ],
    "range": [
-    -3.0,
+    -3.5,
     1.0
    ]
   },
@@ -1241,7 +1241,7 @@
     "chin/chin-height-decr"
    ],
    "range": [
-    -2.0,
+    -1.5,
     1.5
    ]
   },
@@ -1269,8 +1269,8 @@
     "chin/chin-bones-decr"
    ],
    "range": [
-    -3.5,
-    2.5
+    -4.0,
+    2.0
    ]
   },
   {
@@ -1284,7 +1284,7 @@
    ],
    "range": [
     -2.0,
-    2.5
+    3.0
    ]
   },
   {
@@ -1324,7 +1324,7 @@
    ],
    "range": [
     -2.0,
-    3.5
+    3.0
    ]
   },
   {
@@ -1371,7 +1371,7 @@
     "ears/r-ear-trans-backward"
    ],
    "range": [
-    -2.0,
+    -1.5,
     1.0
    ]
   },
@@ -1404,7 +1404,7 @@
    ],
    "range": [
     -1.0,
-    1.0
+    1.5
    ]
   },
   {
@@ -1483,7 +1483,7 @@
     "ears/r-ear-scale-depth-decr"
    ],
    "range": [
-    -2.0,
+    -1.5,
     1.0
    ]
   },
@@ -1500,7 +1500,7 @@
    ],
    "range": [
     -1.0,
-    1.5
+    1.0
    ]
   },
   {
@@ -1509,8 +1509,8 @@
    "positive": [],
    "negative": [],
    "range": [
-    -2.5,
-    3.0
+    -3.0,
+    5.0
    ],
    "source": "ict"
   },
@@ -1520,8 +1520,8 @@
    "positive": [],
    "negative": [],
    "range": [
-    -3.0,
-    1.5
+    -4.0,
+    2.0
    ],
    "source": "ict"
   },
@@ -1532,7 +1532,7 @@
    "negative": [],
    "range": [
     -1.0,
-    4.5
+    5.5
    ],
    "source": "ict"
   },
@@ -1542,7 +1542,7 @@
    "positive": [],
    "negative": [],
    "range": [
-    -2.0,
+    -2.5,
     4.0
    ],
    "source": "ict"
@@ -1553,8 +1553,8 @@
    "positive": [],
    "negative": [],
    "range": [
-    -3.5,
-    1.5
+    -4.0,
+    2.0
    ],
    "source": "ict"
   },
@@ -1564,8 +1564,8 @@
    "positive": [],
    "negative": [],
    "range": [
-    -3.5,
-    2.5
+    -4.0,
+    4.0
    ],
    "source": "ict"
   },
@@ -1575,8 +1575,8 @@
    "positive": [],
    "negative": [],
    "range": [
-    -2.0,
-    4.0
+    -3.0,
+    5.5
    ],
    "source": "ict"
   },
@@ -1597,8 +1597,8 @@
    "positive": [],
    "negative": [],
    "range": [
-    -4.0,
-    1.0
+    -4.5,
+    1.5
    ],
    "source": "ict"
   },
@@ -1608,8 +1608,8 @@
    "positive": [],
    "negative": [],
    "range": [
-    -1.0,
-    7.0
+    -2.0,
+    7.5
    ],
    "source": "ict"
   }
