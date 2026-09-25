@@ -31,6 +31,7 @@ from scipy.spatial import cKDTree
 
 from anny.paths import get_anny_cache_path
 from anny.poses.authoring import posing as P
+from anny.poses.authoring.rig import authoring_rig
 from anny.utils.subdivision import quads_to_triangles
 
 
@@ -95,6 +96,18 @@ def separate_crossings(V, T, rounds=20):
 # Y = keep the surface vertices, a = max volume
 TET_SWITCHES = "pq1.8/12YQa2e-7"
 IX, H, TL = P.IDX, P.HEADS, P.TAILS
+
+
+def ring_size(V, quads):
+    """mean length of the edges around each vertex of a quad mesh"""
+    E = np.concatenate(
+        [quads[:, [0, 1]], quads[:, [1, 2]], quads[:, [2, 3]], quads[:, [3, 0]]]
+    )
+    E = np.unique(np.sort(E, 1), axis=0)
+    length = np.linalg.norm(V[E[:, 0]] - V[E[:, 1]], axis=1)
+    total = np.bincount(E.ravel(), np.repeat(length, 2), minlength=len(V))
+    count = np.bincount(E.ravel(), minlength=len(V))
+    return total / np.maximum(count, 1)
 
 
 def seg_param(p, a, b):
@@ -165,9 +178,10 @@ def unit_volume(S, iters=60, tol=1e-9):
     return out
 
 
-def hinge_axis(upper, lower, end):
+def hinge_axis(upper, lower, end, heads=None):
     """rest hinge axis of a limb joint (normal of the plane of the two bones), and the two bone directions"""
-    a, b, c = H[IX[upper]], H[IX[lower]], H[IX[end]]
+    heads = H if heads is None else heads
+    a, b, c = heads[IX[upper]], heads[IX[lower]], heads[IX[end]]
     u, f = unit(b - a), unit(c - b)
     return unit(np.cross(u, f)), u, f
 
@@ -239,7 +253,24 @@ class Sim:
         _, near = cKDTree(Vb).query(self.X0)
         self.si, self.sw = si[near], sw[near]
         self.si[: self.ns], self.sw[: self.ns] = si, sw
+        # The cores, the creases and the regions are measured on anny's default body. For another
+        # body (rig.authoring_phenotype) each node goes to the default body through its nearest
+        # surface vertex, with its offset scaled by the size of the body around that vertex, and
+        # the masks look at these default positions (Xd) and the default joints (H0, TL0).
+        default = authoring_rig()
+        self.H0, self.TL0 = default.heads, default.tails
+        self.size_ratio = P.RIG.hip_height / default.hip_height
+        scale = np.ones(len(Vb))
+        if P.RIG is default:
+            self.Xd = self.X0
+        else:
+            c0 = default.preview["coarse"]
+            V0 = c0["V"][c0["used"]]
+            scale = ring_size(Vb, Fq) / ring_size(V0, Fq)
+            self.Xd = V0[near] + (self.X0 - Vb[near]) / scale[near][:, None]
+            self.Xd[: self.ns] = V0
         self.depth = self._depth()
+        self.depth_default = self.depth / scale[near]
         self._cores()
         self._creases(Wb)
         # per-element operators on the whole mesh
@@ -288,7 +319,7 @@ class Sim:
     def _cores(self):
         """fix[i]: bone index for nodes in a rigid core, -3 - k for helper k, -2 for skinned nodes,
         -1 for soft tissue"""
-        X = self.X0
+        X, H, TL, depth = self.Xd, self.H0, self.TL0, self.depth_default
         fix = -np.ones(len(X), int)
         self.helper_names = list(HELPERS)
         y = X[:, 1]
@@ -321,7 +352,9 @@ class Sim:
                 H[IX[f"lowerarm01.{s}"]],
                 H[IX[f"wrist.{s}"]],
             )
-            h, u, f = hinge_axis(f"upperarm01.{s}", f"lowerarm01.{s}", f"wrist.{s}")
+            h, u, f = hinge_axis(
+                f"upperarm01.{s}", f"lowerarm01.{s}", f"wrist.{s}", heads=H
+            )
             # humerus: head, shaft, and the condyles along the hinge axis at the elbow
             split = seg_param(H[IX[f"upperarm02.{s}"]][None], sh, el)[0][0]
             take(sphere(sh, 0.013), f"upperarm01.{s}", f"humerus.{s}")
@@ -351,7 +384,9 @@ class Sim:
                 H[IX[f"lowerleg01.{s}"]],
                 H[IX[f"foot.{s}"]],
             )
-            h, u, f = hinge_axis(f"upperleg01.{s}", f"lowerleg01.{s}", f"foot.{s}")
+            h, u, f = hinge_axis(
+                f"upperleg01.{s}", f"lowerleg01.{s}", f"foot.{s}", heads=H
+            )
             fwd = unit(np.cross(np.array([1.0, 0, 0]), u))
             fwd = fwd if fwd[2] > 0 else -fwd
             side = unit(np.cross(u, fwd))
@@ -396,7 +431,7 @@ class Sim:
                     continue
                 take(capsule(H[IX[bn]], TL[IX[bn]], r, 0.0, 0.75), bn, f"girdle.{s}")
         # ribcage: the deep part of the chest follows the upper spine
-        rib = (y > 0.1) & (y < 0.335) & (np.abs(X[:, 0]) < 0.09) & (self.depth > 0.022)
+        rib = (y > 0.1) & (y < 0.335) & (np.abs(X[:, 0]) < 0.09) & (depth > 0.022)
         take(rib & (y >= 0.21), "spine01", "ribcage")
         take(rib & (y < 0.21), "spine02", "ribcage")
         for bn in ("spine05", "spine04", "spine03", "spine02", "spine01"):
@@ -407,7 +442,7 @@ class Sim:
             np.linalg.norm(X - hipR, axis=1) > 0.024
         )
         low = y < hipL[1] - 0.01
-        pel = (y > hipL[1] - 0.06) & (y < hipL[1] + 0.055) & (self.depth > 0.02) & away
+        pel = (y > hipL[1] - 0.06) & (y < hipL[1] + 0.055) & (depth > 0.02) & away
         pel &= np.where(low, np.abs(X[:, 0]) < 0.045, np.abs(X[:, 0]) < hipL[0] + 0.005)
         take(pel, "root", "pelvis")
         self.fix = fix
@@ -415,7 +450,7 @@ class Sim:
 
     def _creases(self, Wb):
         """surface nodes on the inner side of each crease, with the side of the halving plane they belong to"""
-        X = self.X0[: self.ns]
+        X, H = self.Xd[: self.ns], self.H0
         self.creases = {}
         for name, cr in CREASES.items():
             c0 = H[IX[cr["lower"][0]]]
@@ -473,6 +508,7 @@ class Sim:
             c=np.concatenate(cs),
             n=np.concatenate(ns),
             s=np.concatenate(ss),
+            gap=CONTACT_GAP * self.size_ratio,
         )
 
     # ------------------------------------------------------------------ regions
@@ -488,7 +524,7 @@ class Sim:
         if name in self.regions:
             return self.regions[name]
         t0 = time.time()
-        inside = self.REGION_BOXES[name](self.X0)
+        inside = self.REGION_BOXES[name](self.Xd)
         free = np.where((self.fix == -1) & inside)[0]
         isfree = np.zeros(len(self.X0), bool)
         isfree[free] = True
@@ -623,7 +659,7 @@ class Sim:
     def _contact_local(C, xf):
         """projection of the contact nodes to their side of the plane, and the contact energy"""
         x = xf[C["rows"]]
-        g = C["s"] * np.einsum("ij,ij->i", x - C["c"], C["n"]) - CONTACT_GAP
+        g = C["s"] * np.einsum("ij,ij->i", x - C["c"], C["n"]) - C["gap"]
         push = np.minimum(g, 0.0)
         p = x - (push * C["s"])[:, None] * C["n"]
         return p, 0.5 * CONTACT_W * float((push**2).sum())
