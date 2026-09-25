@@ -25,12 +25,13 @@ Build the calibrated distribution of anny's face shapes
    The mean moves by linearised Gaussian conditioning of the face values on the measurements:
    ``K (target - simulated)`` with ``K = S J^T (J S J^T + N)^-1``, where J comes from finite
    differences and the simulated mean from bodies and faces drawn from the current Gaussian,
-   over six rounds. The spread changes by one variance factor per group of face shapes (head,
-   forehead, brows, eyes, nose, cheeks, mouth, chin, ears, detail), within ``VARIANCE_BOUNDS``,
-   so that the predicted SD of each measurement, from the face and from the rest of the body
-   (height, weight, muscle, proportions), meets the data. The factors keep the correlations of
-   the ICT fits, and the bounds keep a measurement that the face shapes barely move from
-   inflating their spread.
+   over six rounds. The mean stays within a Mahalanobis radius of ``TRUST_RADIUS`` around the
+   mean of the ICT fits (random faces lie at about 10), so that it remains a plausible face; a
+   gap that it cannot close stays as a bias of anny's body and is reported. The spread is the
+   ICT covariance with one variance factor per group of face shapes (head, forehead, brows,
+   eyes, nose, cheeks, mouth, chin, ears, detail), within ``VARIANCE_BOUNDS``, so that the
+   predicted SD of each measurement, from the face and from the rest of the body (height,
+   weight, muscle, proportions), meets the data.
 3. **Race offsets.** For users of anny's race phenotypes, the adult means of the ANSUR II race
    groups (White, Black and Asian for anny's caucasian, african and asian) give offsets of the
    mean, relative to their average.
@@ -100,8 +101,11 @@ ANSUR_RACES = {"caucasian": 1.0, "african": 2.0, "asian": 4.0}
 # the ICT fits: their prior is centred on 0 with this SD, and ANSUR II calibrates the ears
 UNSEEN_SHARE = 0.05
 UNSEEN_SD = 0.35
-# bounds of the variance factor of each group of face shapes (SD factors from 1/2 to 2)
-VARIANCE_BOUNDS = (0.25, 4.0)
+# bounds of the variance factor of each group of face shapes on the ICT covariance (SD factors
+# from 0.71 to 1.41), and the Mahalanobis radius around the ICT mean within which the calibrated
+# means stay: the anthropometric data move the faces only as far as faces of the fits reach
+VARIANCE_BOUNDS = (0.5, 2.0)
+TRUST_RADIUS = 3.0
 
 
 def tdfn_names() -> list[str]:
@@ -289,10 +293,19 @@ def jacobian(sim: Simulator, phen: torch.Tensor, face: np.ndarray, names, h=0.2)
     return values[0], J
 
 
+def within_trust(mu: np.ndarray, prior: dict) -> np.ndarray:
+    """the mean pulled back into the ball of Mahalanobis radius TRUST_RADIUS around the mean of
+    the ICT fits, under their covariance: a mean face well inside the faces of the fits (whose
+    random draws lie at a radius of about the square root of the number of shapes)"""
+    d = mu - prior["mean_face"]
+    m = float(np.sqrt(d @ prior["precision"] @ d))
+    return mu if m <= TRUST_RADIUS else prior["mean_face"] + d * (TRUST_RADIUS / m)
+
+
 def moment_match(
     sim,
     mu,
-    S,
+    prior,
     phen_mean,
     phen_samples,
     names,
@@ -303,14 +316,15 @@ def moment_match(
     seed=0,
 ):
     """
-    the Gaussian (mu, S) of the face values moved to meet the target measurements. Each round
-    sets the spread by one variance factor per group of face shapes (``variance_factors``),
-    draws a face from the Gaussian for each body of ``phen_samples``, and moves the mean by the
-    gain of linearised Gaussian conditioning times the gap between the targets and the mean of
-    the simulated measurements (the rectified shapes make that mean differ from the
-    measurements of the mean face).
+    the Gaussian (mu, S) of the face values moved, from the mean mu and the ICT prior, to meet
+    the target measurements. Each round sets the spread by one variance factor per group of face
+    shapes on the ICT covariance (``variance_factors``), draws a face from the Gaussian for each
+    body of ``phen_samples``, and moves the mean by the gain of linearised Gaussian
+    conditioning times the gap between the targets and the mean of the simulated measurements
+    (the rectified shapes make that mean differ from the measurements of the mean face). The
+    mean stays within the trust region of ``within_trust``.
     """
-    S0 = S
+    S0 = prior["cov"]
     z = np.random.default_rng(seed).standard_normal((len(phen_samples), len(mu)))
     # one-sided shapes act from 0 up, so their means stay at 0 or above
     mu = np.where(sim.one_sided, np.maximum(mu, 0.0), mu)
@@ -326,7 +340,7 @@ def moment_match(
         faces = mu + z @ np.linalg.cholesky(S + 1e-10 * np.eye(len(mu))).T
         simulated = sim(phen_samples, torch.tensor(faces), names).mean(0)
         K = S @ J.T @ np.linalg.inv(J @ S @ J.T + np.diag(noise_sd**2))
-        mu = mu + K @ (target_mean - simulated)
+        mu = within_trust(mu + K @ (target_mean - simulated), prior)
         mu = np.where(sim.one_sided, np.maximum(mu, 0.0), mu)
     return mu, S, simulated
 
@@ -431,6 +445,7 @@ def ict_prior(fits: dict, labels: list[str], unseen: np.ndarray):
         mean_phen=mu[:3],
         mean_face=mean_face,
         cov=cov,
+        precision=np.linalg.inv(cov),
     )
 
 
@@ -473,7 +488,7 @@ def run(samples: int = 400, seed: int = 0):
         mu_a, S_a, m_pred = moment_match(
             sim,
             prior["mean_face"],
-            prior["cov"],
+            prior,
             phen_mean,
             phen_rand,
             adult_names,
@@ -500,7 +515,7 @@ def run(samples: int = 400, seed: int = 0):
         mu_o, S_o, _ = moment_match(
             sim,
             mu_a,
-            S_a,
+            prior,
             phen_mean,
             phen_rand,
             list(ANSUR_MEASUREMENTS),
@@ -537,7 +552,7 @@ def run(samples: int = 400, seed: int = 0):
             mean, sd = np.array(mean), np.array(sd)
             phen_mean, phen_rand = phen_sets(sex, years)
             mu_g, S_g, _ = moment_match(
-                sim, mu_a, S_a, phen_mean, phen_rand, names, mean, sd, 0.15 * sd
+                sim, mu_a, prior, phen_mean, phen_rand, names, mean, sd, 0.15 * sd
             )
             calibrated[(sex, years)] = (mu_g, S_g)
             report["anchors"].append(
@@ -552,14 +567,14 @@ def run(samples: int = 400, seed: int = 0):
             print(f"{sex} {years:g} years: done ({time.time() - t0:.0f} s)")
 
         # ---------------- infants: CDC head circumference, from the 3-year anchor
-        mu_3, S_3 = calibrated[(sex, 3.0)]
+        mu_3 = calibrated[(sex, 3.0)][0]
         for years in [y for y in ANCHOR_YEARS if y < 3]:
             hc, hc_sd = cdc_head_circumference(sex, 12 * years)
             phen_mean, phen_rand = phen_sets(sex, years)
             mu_i, S_i, _ = moment_match(
                 sim,
                 mu_3,
-                S_3,
+                prior,
                 phen_mean,
                 phen_rand,
                 ["headcircumference"],
@@ -594,11 +609,29 @@ def run(samples: int = 400, seed: int = 0):
                 noise = np.diag(
                     (0.15 * np.sqrt(np.diag(C_r))) ** 2 + np.diag(C_r) / n_r
                 )
-                mu_r = mu_r + S_a @ J.T @ np.linalg.solve(P + noise, m_r - m_pred)
+                mu_r = within_trust(
+                    mu_r + S_a @ J.T @ np.linalg.solve(P + noise, m_r - m_pred), prior
+                )
             deltas.append(mu_r - mu_a)
         deltas = np.array(deltas)
         race_offsets[si] = deltas - deltas.mean(0)
         print(f"{sex} race offsets: done ({time.time() - t0:.0f} s)")
+
+    # the Mahalanobis distance of each calibrated mean from the mean of the ICT fits
+    report["mean_shift"] = [
+        dict(
+            sex=sex,
+            years=y,
+            distance=float(
+                np.sqrt(
+                    (mu - prior["mean_face"])
+                    @ prior["precision"]
+                    @ (mu - prior["mean_face"])
+                )
+            ),
+        )
+        for (sex, y), (mu, _) in sorted(calibrated.items())
+    ]
 
     # ---------------- slider ranges
     report["ranges"] = widen_ranges(labels, calibrated, race_offsets)
