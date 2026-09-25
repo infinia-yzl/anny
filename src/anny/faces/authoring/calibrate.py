@@ -23,7 +23,8 @@ Build the calibrated distribution of anny's face shapes
    - below 3 years: the head circumference of the CDC growth charts.
 
    The fit is a Gauss-Newton MAP estimate (``map_mean``) with measurement noise of 15 % of the
-   target SD and an independent normal prior of SD ``MEAN_SD`` on each named symmetric shape;
+   target SD and an independent normal prior of SD ``MEAN_SD`` on each named symmetric shape
+   (``MEAN_SD_GROUP`` for the head and the brows);
    the detail shapes keep a zero mean. The adults, the children and the infants start from
    anny's default face, so that each age keeps anny's own proportions for that age wherever
    the data allow; the older adults, whose only targets are those of ANSUR II, start from the
@@ -109,8 +110,11 @@ UNSEEN_SD = 0.35
 VARIANCE_BOUNDS = (0.25, 2.0)
 # SD of the prior of the calibrated means, around anny's default face, on each named symmetric
 # shape: the MakeHuman shapes look plausible within their ranges of 1, and larger prior SDs
-# (tests: 0.5 and 0.8) fit the data only a little better
+# (tests: 0.5 and 0.8) fit the data only a little better. The skull shapes of the head group
+# carry the head measurements, so they may move further, and the brows much less: without that,
+# the fit lengthened the heads of women (glabella to opisthocranion) by a forward brow ridge
 MEAN_SD = 0.3
+MEAN_SD_GROUP = {"head": 0.5, "brows": 0.1}
 
 
 def tdfn_names() -> list[str]:
@@ -483,7 +487,10 @@ def ict_prior(fits: dict, labels: list[str], unseen: np.ndarray, asymmetric=None
     # the prior of the calibrated means: the named symmetric shapes move, around anny's face
     named = np.array([face_shape_parameter(k).source == "makehuman" for k in labels])
     asymmetric = np.zeros(F, bool) if asymmetric is None else asymmetric
-    mean_sd = np.where(named & ~asymmetric, MEAN_SD, 0.0)
+    group_sd = np.array(
+        [MEAN_SD_GROUP.get(face_shape_parameter(k).group, MEAN_SD) for k in labels]
+    )
+    mean_sd = np.where(named & ~asymmetric, group_sd, 0.0)
     # the asymmetric shapes stay at 0 in the distribution
     cov[asymmetric] = 0.0
     cov[:, asymmetric] = 0.0
