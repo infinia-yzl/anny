@@ -83,19 +83,33 @@ def dense_skinning_weights(model) -> np.ndarray:
     return W
 
 
-def bone_tails(heads: np.ndarray, parents: np.ndarray) -> np.ndarray:
+# the child that continues a bone when it has several (as in the MakeHuman default skeleton)
+MAIN_CHILD = {
+    "root": "spine05",
+    "spine01": "neck01",
+    "wrist.L": "metacarpal3.L",
+    "wrist.R": "metacarpal3.R",
+    "foot.L": "toe3-1.L",
+    "foot.R": "toe3-1.R",
+}
+
+
+def bone_tails(heads: np.ndarray, parents: np.ndarray, names: list[str]) -> np.ndarray:
     """
-    Tails from the rig structure: the head of the only child, the mean of the heads of several
-    children, and for a bone without children its own length continued from its parent.
+    Tails from the rig structure: the head of the main child, the mean of the heads of several
+    children, and for a bone without children (the eyes aside) its own length continued from
+    its parent.
     """
     children = {}
     for i, p in enumerate(parents):
-        if p >= 0:
+        if p >= 0 and not names[i].startswith("eye."):
             children.setdefault(int(p), []).append(i)
     tails = heads.copy()
     for i in range(len(heads)):
         kids = children.get(i, [])
-        if kids:
+        if names[i] in MAIN_CHILD and MAIN_CHILD[names[i]] in names:
+            tails[i] = heads[names.index(MAIN_CHILD[names[i]])]
+        elif kids:
             tails[i] = heads[kids].mean(0)
         elif parents[i] >= 0:
             tails[i] = heads[i] + 0.7 * (heads[i] - heads[parents[i]])
@@ -137,7 +151,9 @@ def authoring_rig() -> AuthoringRig:
     T = np.concatenate([quads[:, [0, 1, 2]], quads[:, [0, 2, 3]]])
     sole = np.nonzero(V1[:, 1] < V1[:, 1].min() + 0.012)[0]
     # the coarse body (anny's own vertices), used to find anny vertex indices of regions
-    coarse_si, coarse_sw = top_weights(dense_skinning_weights(model))
+    # anny's own skinning weights, all of them
+    coarse_W = dense_skinning_weights(model)
+    coarse_si, coarse_sw = top_weights(coarse_W, model.vertex_bone_indices.shape[1])
     preview = dict(
         V=V1,
         T=T,
@@ -149,6 +165,9 @@ def authoring_rig() -> AuthoringRig:
         coarse=dict(
             V=scale * rest @ ANNY_TO_LEGACY.T + offset,
             used=used,
+            quads=faces,
+            base_index=model.base_mesh_vertex_indices.numpy(),
+            W=coarse_W,
             si=coarse_si,
             sw=coarse_sw,
         ),
@@ -157,7 +176,7 @@ def authoring_rig() -> AuthoringRig:
         names=names,
         parents=parents,
         heads=heads,
-        tails=bone_tails(heads, parents),
+        tails=bone_tails(heads, parents, names),
         floor=FLOOR,
         scale=float(scale),
         offset=offset,
