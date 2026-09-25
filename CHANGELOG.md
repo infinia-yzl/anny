@@ -2,6 +2,16 @@
 
 All notable changes to this project.
 
+## Unreleased
+
+### Fixed
+
+- Alternative topologies obtained by retopology (e.g. `smplx`) are now left/right
+  symmetric: target vertices on the midline are projected onto the intersection of the
+  source mesh with its symmetry plane, rather than onto the closest surface point, which
+  was ambiguous over concave midline regions. Cached model data is regenerated
+  automatically (data version bump).
+
 ## v0.6 - 2026-08-06
 
 Highlights:

@@ -861,6 +861,93 @@ def interpolate_model_data(
     )
 
 
+def _project_onto_symmetry_plane(
+    points: torch.Tensor,
+    vertices: torch.Tensor,
+    triangular_faces: torch.Tensor,
+    axis: int,
+    eps: float = 1e-6,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Project points onto the intersection of a triangle mesh with the plane ``x[axis] == 0``.
+
+    Each triangle meets the plane along a segment, possibly reduced to a point: an edge lying in the
+    plane, or the chord between two crossing points. Vertices closer than eps to the plane are
+    considered on it. Returns (reference_vertex_indices, weights, distances), where the (M, 3)
+    indices are the vertices of the triangle holding the closest point, and the (M, 3) weights are
+    its barycentric coordinates within that triangle.
+    """
+    offsets = vertices[triangular_faces][..., axis]
+    offsets = torch.where(offsets.abs() < eps, torch.zeros_like(offsets), offsets)
+    if (offsets == 0).all(dim=1).any():
+        raise ValueError(
+            f"Some triangles lie within the symmetry plane (axis={axis}), which is not supported."
+        )
+
+    # Candidate intersection points, as barycentric coordinates within their triangle: the three
+    # vertices, then the three edge crossings.
+    num_triangles = len(triangular_faces)
+    candidates = torch.zeros(
+        (num_triangles, 6, 3), dtype=vertices.dtype, device=vertices.device
+    )
+    candidates[:, :3] = torch.eye(3, dtype=vertices.dtype, device=vertices.device)
+    valid = torch.zeros((num_triangles, 6), dtype=torch.bool, device=vertices.device)
+    valid[:, :3] = offsets == 0
+    for i in range(3):
+        j = (i + 1) % 3
+        crossing = offsets[:, i] * offsets[:, j] < 0
+        t = offsets[:, i] / torch.where(
+            crossing, offsets[:, i] - offsets[:, j], torch.ones_like(offsets[:, i])
+        )
+        candidates[:, 3 + i, i] = 1.0 - t
+        candidates[:, 3 + i, j] = t
+        valid[:, 3 + i] = crossing
+
+    # Reduce each triangle's candidates to the two endpoints of its intersection segment. A triangle
+    # not lying in the plane meets it in at most two points: 0 (no intersection), 1 (it touches the
+    # plane at a single vertex), or 2 (an in-plane edge, a vertex and the crossing of the opposite
+    # edge, or two edge crossings).
+    count = valid.sum(dim=1)
+    assert int(count.max()) <= 2
+    # Stable descending sort of the validity flags moves the valid candidates first, in their
+    # original order; the first two are the segment endpoints, as barycentrics of shape (T, 2, 3).
+    order = valid.to(torch.int8).argsort(dim=1, descending=True, stable=True)[:, :2]
+    ends = candidates.gather(1, order[..., None].expand(-1, -1, 3))
+    # A single touching vertex is treated as a zero-length segment.
+    ends[:, 1] = torch.where(count[:, None] == 1, ends[:, 0], ends[:, 1])
+    # Keep only the S triangles that meet the plane.
+    kept = count > 0
+    if not kept.any():
+        raise ValueError(
+            f"The source mesh does not meet the symmetry plane (axis={axis})."
+        )
+    faces, ends = triangular_faces[kept], ends[kept]
+
+    # 3D segments [a, a + ab] of shape (S, 3), from their barycentric endpoints.
+    triangle_vertices = vertices[faces]
+    a = (ends[:, 0, :, None] * triangle_vertices).sum(dim=1)
+    ab = (ends[:, 1, :, None] * triangle_vertices).sum(dim=1) - a
+
+    # Point-to-segment projection of every point onto every segment, with the segment parameter t
+    # of shape (M, S) clamped to [0, 1]. Zero-length segments get t = 0, i.e. their single point.
+    squared_lengths = (ab * ab).sum(dim=-1)
+    t = (
+        torch.einsum("msd,sd->ms", points[:, None] - a[None], ab)
+        / torch.where(
+            squared_lengths > 0, squared_lengths, torch.ones_like(squared_lengths)
+        )[None]
+    )
+    t = t.clamp(0.0, 1.0)
+    distances = (points[:, None] - (a[None] + t[..., None] * ab[None])).norm(dim=-1)
+
+    # Closest segment for each point.
+    distances, segment_ids = distances.min(dim=1)
+    t = t.gather(1, segment_ids[:, None])
+    # Barycentric coordinates are affine, so interpolating those of the segment endpoints gives the
+    # coordinates of the projected point within the triangle holding that segment.
+    weights = (1.0 - t) * ends[segment_ids, 0] + t * ends[segment_ids, 1]
+    return faces[segment_ids], weights, distances
+
+
 def apply_retopology_from_mesh(
     data: ModelData,
     target_vertices: torch.Tensor,
@@ -868,12 +955,19 @@ def apply_retopology_from_mesh(
     source_vertices: torch.Tensor,
     source_faces,
     base_mesh_vertex_indices=None,
+    symmetry_axis: int | None = None,
 ) -> ModelData:
     """Apply retopology by projecting target vertices onto a source mesh to compute barycentric coordinates.
 
     source_vertices and source_faces define the reference mesh for projection; their vertex indices
     must share the same ordering as data. source_faces may be pre-triangulated (shape (N, 3)) or not.
     The new topology's template vertices are derived by bary-interpolating data.template_vertices.
+
+    With symmetry_axis set, target vertices lying in the plane ``target_vertices[:, symmetry_axis]
+    == 0`` are projected onto the intersection of the source surface with that plane, instead of
+    onto the whole surface. The closest surface point of such a vertex is otherwise ambiguous above
+    a concave midline region (two mirror candidates at the same distance), which breaks the
+    symmetry of the result. In convex regions both projections give the same point.
     """
     try:
         from anny.utils.warp_mesh_utils import point_to_mesh_distance_and_face_uvs
@@ -900,19 +994,35 @@ def apply_retopology_from_mesh(
         faces=source_triangular_faces,
         max_dist=1000.0,
     )
+
+    uvs = uvs.to(dtype=torch.float64)
+    u, v = uvs[:, 0], uvs[:, 1]
+    barycentric_coords = torch.stack([u, v, 1.0 - u - v], dim=1)
+    reference_vertex_indices = source_triangular_faces[face_ids]
+
+    if symmetry_axis is not None:
+        on_plane = target_vertices[:, symmetry_axis].abs() < 1e-6
+        if on_plane.any():
+            plane_indices, plane_coords, plane_distances = _project_onto_symmetry_plane(
+                points=target_vertices[on_plane].to(dtype=torch.float64),
+                vertices=source_vertices.to(dtype=torch.float64),
+                triangular_faces=source_triangular_faces,
+                axis=symmetry_axis,
+            )
+            reference_vertex_indices = reference_vertex_indices.clone()
+            reference_vertex_indices[on_plane] = plane_indices
+            barycentric_coords[on_plane] = plane_coords
+            distances = distances.clone()
+            distances[on_plane] = plane_distances.to(dtype=distances.dtype)
+
     assert distances.max() < 1.5e-2, (
         "Some vertices are too far from the reference model."
     )
 
-    uvs = uvs.to(dtype=torch.float64)
-    u, v = uvs[:, 0], uvs[:, 1]
-    w = 1.0 - u - v
-    barycentric_coords = [u, v, w]
-    reference_vertex_indices = source_triangular_faces[face_ids]
-    vertices = (
-        u[:, None] * data.template_vertices[reference_vertex_indices[:, 0]]
-        + v[:, None] * data.template_vertices[reference_vertex_indices[:, 1]]
-        + w[:, None] * data.template_vertices[reference_vertex_indices[:, 2]]
+    vertices = sum(
+        barycentric_coords[:, i, None]
+        * data.template_vertices[reference_vertex_indices[:, i]]
+        for i in range(3)
     )
 
     faces = _triangulate(target_vertices, target_faces)
