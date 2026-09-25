@@ -23,9 +23,9 @@ Build the calibrated distribution of anny's face shapes
    - below 3 years: the head circumference of the CDC growth charts.
 
    The fit is a Gauss-Newton MAP estimate (``map_mean``) with measurement noise of 15 % of the
-   target SD and an independent normal prior of SD ``MEAN_SD`` on each named symmetric shape
-   (``MEAN_SD_GROUP`` for the head and the brows);
-   the detail shapes keep a zero mean. The adults, the children and the infants start from
+   target SD (50 % for the arcs and circumferences, ``noise_sd``) and an independent normal
+   prior of SD ``MEAN_SD`` on each named symmetric shape (``MEAN_SD_GROUP`` for the head and
+   the brows); the detail shapes keep a zero mean. The adults, the children and the infants start from
    anny's default face, so that each age keeps anny's own proportions for that age wherever
    the data allow; the older adults, whose only targets are those of ANSUR II, start from the
    adult mean, and so do the race offsets. The prior
@@ -115,6 +115,17 @@ VARIANCE_BOUNDS = (0.25, 2.0)
 # the fit lengthened the heads of women (glabella to opisthocranion) by a forward brow ridge
 MEAN_SD = 0.3
 MEAN_SD_GROUP = {"head": 0.5, "brows": 0.1}
+# the measurement noise of the fits, as a share of the target SD: the tape measurements of
+# ANSUR II (arcs and circumferences) come from plane sections of the mesh, which follow the skin
+# less closely than a tape, so they weigh less than the distances between landmarks; with equal
+# weights the fit widened the lower face to lengthen the bitragion arcs
+NOISE = 0.15
+SECTION_NOISE = 0.5
+
+
+def noise_sd(names, sd) -> np.ndarray:
+    share = [SECTION_NOISE if n in ANSUR_SECTION_MEASUREMENTS else NOISE for n in names]
+    return np.array(share) * np.asarray(sd)
 
 
 def tdfn_names() -> list[str]:
@@ -550,7 +561,7 @@ def run(samples: int = 400, seed: int = 0):
             adult_names,
             adult_mean,
             adult_sd,
-            0.15 * adult_sd,
+            noise_sd(adult_names, adult_sd),
         )
         calibrated[(sex, ADULT_YEARS)] = (mu_a, S_a)
         report["anchors"].append(
@@ -577,7 +588,7 @@ def run(samples: int = 400, seed: int = 0):
             list(ANSUR_MEASUREMENTS),
             m_old,
             np.sqrt(np.diag(C_old)),
-            0.15 * np.sqrt(np.diag(C_old)),
+            noise_sd(ANSUR_MEASUREMENTS, np.sqrt(np.diag(C_old))),
         )
         calibrated[(sex, OLDER_YEARS)] = (mu_o, S_o)
         report["anchors"].append(
@@ -608,7 +619,15 @@ def run(samples: int = 400, seed: int = 0):
             mean, sd = np.array(mean), np.array(sd)
             phen_mean, phen_rand = phen_sets(sex, years)
             mu_g, S_g, _ = calibrate_anchor(
-                sim, prior, zero, phen_mean, phen_rand, names, mean, sd, 0.15 * sd
+                sim,
+                prior,
+                zero,
+                phen_mean,
+                phen_rand,
+                names,
+                mean,
+                sd,
+                noise_sd(names, sd),
             )
             calibrated[(sex, years)] = (mu_g, S_g)
             report["anchors"].append(
@@ -635,7 +654,7 @@ def run(samples: int = 400, seed: int = 0):
                 ["headcircumference"],
                 np.array([hc]),
                 np.array([hc_sd]),
-                np.array([0.15 * hc_sd]),
+                noise_sd(["headcircumference"], [hc_sd]),
             )
             calibrated[(sex, years)] = (mu_i, S_i)
             report["anchors"].append(
@@ -657,7 +676,10 @@ def run(samples: int = 400, seed: int = 0):
         for r in RACES:
             m_r, C_r, n_r = ansur_targets(sex, 17, 40, ANSUR_RACES[r])
             phen_mean, _ = phen_sets(sex, ADULT_YEARS, race=r)
-            noise = np.sqrt((0.15**2 + 1 / n_r) * np.diag(C_r))
+            noise = np.sqrt(
+                noise_sd(ANSUR_MEASUREMENTS, np.sqrt(np.diag(C_r))) ** 2
+                + np.diag(C_r) / n_r
+            )
             mu_r = map_mean(
                 sim, mu_a, prior, mu_a, phen_mean, list(ANSUR_MEASUREMENTS), m_r, noise
             )
