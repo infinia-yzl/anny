@@ -24,6 +24,13 @@ uv run python -m unittest test.test_various  # run a single test file
 bash build_doc.bash  # build HTML docs from the jupytext py:percent tutorials in tutorials/*.py
 ```
 
+### Web viewer
+```bash
+uv sync --extra viewer                # scipy, tetgen, embreex for the build
+uv run python -m anny.viewer build    # data (cached under ANNY_CACHE_DIR/viewer) and the page viewer/dist/anny_viewer.html
+cd viewer && npx tsc --noEmit         # type-check the page
+```
+
 ## Architecture
 
 ### Entry Points
@@ -31,7 +38,7 @@ bash build_doc.bash  # build HTML docs from the jupytext py:percent tutorials in
 `src/anny/models/__init__.py` exports the public API:
 - `Anny(...)` — the full-body model. `Anny` is a class (cf. `anny.SMPLX`); calling
   `anny.Anny(...)` builds a model and `isinstance(model, Anny)` holds for any Anny model.
-  Accepts `rig`, `topology`, `pose_parameterization`, `all_phenotypes`, and skinning options.
+  Accepts `rig`, `topology`, `pose_parameterization`, `phenotypes`, and skinning options.
 - `create_fullbody_model(...)` — deprecated legacy full-body factory. It preserves the old
   default rig preset (`rig="default"`) and old full-body defaults; prefer `Anny(...)`.
 - `create_hand_model()` / `create_head_model()` — isolated part models
@@ -58,8 +65,13 @@ bash build_doc.bash  # build HTML docs from the jupytext py:percent tutorials in
 | Collision | `utils/collision.py` | Self-intersection detection; warp-accelerated when available |
 | Model data | `models/model_data.py` | `ModelData` / `ModelMetadata` dataclasses; bundle template mesh, blend shapes, and rig data; safetensors serialization for caching |
 | Model transforms | `models/model_transforms.py` | `ModelData` → `ModelData` operations: retopology (from a mesh, or from linear combinations of template vertices), bone orientation conversion, mesh/skinning cleanups |
-| Parameter regression | `parameters_regressor.py` | Iterative pose+shape fitting to a target mesh |
+| Parameter regression | `anny_inverter.py` | `AnnyInverter`: iterative pose+shape fitting to a target mesh |
 | Anthropometry | `anthropometry.py` | Computes body measurements (height, volume, mass) from mesh |
+| Subdivision | `utils/subdivision.py` | Catmull-Clark as sparse linear operators; `MixedSubdivision` adds one level on a region (the head) |
+| Pose library | `poses/` | 50 poses and 7 clips as `local-ref` parameters (`data/poses/`), grounding, stool; `poses/authoring/` builds the library on the authoring rig |
+| Correctives | `correctives/` | `SoftTissueCorrectives` (hinge and cone drivers, shapes scaled with the local size; `data/correctives/`); `correctives/authoring/` holds the simulation, the fit and `evaluate` |
+| Hair | `hair/` | `StrandBinding` ties strands to the skin at roots and tips; `hair/authoring/` grows the groom, brows and lashes |
+| Viewer data | `viewer/` | `python -m anny.viewer build` writes the page data to `viewer/build/` and runs the node build of `viewer/` |
 
 ### Phenotype System
 
@@ -69,7 +81,16 @@ Phenotypes are blended linearly between discrete anchor states defined in `src/a
 
 Five built-in variants: `local-ref` (the `Anny()` default), `local-bone`, `local-bone-world`, `world`, `world-orient`. Selected via the `pose_parameterization` argument to `Anny()`. The deprecated `create_fullbody_model(...)` preserves the old `local-bone` default.
 
+### Authoring Rig and Viewer Frame
+
+The pose, corrective and hair authoring code (`*/authoring/`) works on the authoring rig of `poses/authoring/rig.py`: anny's default body in the frame of the legacy pose library (metres, Y up, X toward the figure's left, Z forward, uniform scale 0.8916 so that the left eye stands at a fixed height). The viewer page draws in the same frame. `authoring_rig(phenotype)` builds it for other slider values, and the `ANNY_AUTHORING_PHENOTYPE` environment variable (a JSON object) sets the body of the authoring tools, e.g. for `python -m anny.correctives.authoring.evaluate`.
+
+### Web Viewer
+
+`viewer/` is a node project (TypeScript, three.js, esbuild). `src/anny_shape.ts` and `src/subdivision.ts` repeat anny's coefficient maths and the subdivision, and `test/test_viewer_parity.py` checks them against Python. `src/body.ts` rebuilds the fine body for any slider setting, `src/shading.ts` holds the shaders, and `src/main.ts` holds the renderer and the panels. `npm run build` writes the single-file page `viewer/dist/anny_viewer.html`; `npx tsc --noEmit` type-checks.
+
 ### Optional Dependencies
 
 - `smplx` — required for `SMPL` and `SMPLX` model classes; install via `uv sync --extra smpl`
 - `trimesh`, `gradio`, `jsonargparse`, `requests` — needed only for examples and parameter regression tests
+- `scipy`, `tetgen`, `embreex` — needed for the viewer build and the authoring tools; install via `uv sync --extra viewer` (the page build also needs node 22 or later)

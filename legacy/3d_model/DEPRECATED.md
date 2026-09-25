@@ -11,7 +11,7 @@ anny now carries the parts of this experiment that anny did not have. Each part 
 | Soft-tissue correctives and their simulation (`build/correctives.py`, `build/sim.py`) | `src/anny/correctives/` |
 | Hair, brows and lashes (`build/hair2.py`, `build/brows_lashes.py`) | `src/anny/hair/` |
 | Bakes, skin regions, eyes and detail layers (`build/bake.py`, `build/regions.py`, `build/eyes.py`, `build/relief.py`) | `src/anny/viewer/` |
-| The viewer page (`web/app.js`, `web/shell.html`) | `viewer/` |
+| The viewer page (`web/app.js`, `web/shell.html`) | `viewer/`, with the shaders in `viewer/src/shading.ts` |
 
 The command below builds the new viewer page into `viewer/dist/anny_viewer.html`:
 
