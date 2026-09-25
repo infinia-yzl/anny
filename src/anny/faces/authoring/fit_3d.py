@@ -14,7 +14,8 @@ Fit anny's face shapes to the ICT-FaceKit identity space (see :mod:`anny.faces.a
    to the neck bones), whose shape in the scans follows the posture.
 2. **Fits.** For each random ICT identity (weights from a standard normal over the 100 modes),
    anny's face values, gender, weight, muscle, adult age and a rigid transform are fitted to the
-   corresponding points by least squares with a small ridge penalty (Adam in PyTorch).
+   corresponding points by least squares (Adam in PyTorch), with a small ridge penalty and a
+   smoothness penalty on the face offsets (``SMOOTHNESS``).
 3. **Report.** On held-out identities, the RMS residual and the share of the ICT identity
    variation that anny's face space explains.
 
@@ -46,9 +47,11 @@ from anny.shape_distribution import SimpleShapeDistribution
 
 FIT_PHENOTYPES = ("gender", "age", "muscle", "weight")
 # weight of the smoothness of the face offsets (their mean squared Laplacian) against the mean
-# squared distance: the MakeHuman targets have sharp borders, and without it the fits of the
-# scans crease the jaw and notch the chin; the detail shapes then take the smooth remainder
-SMOOTHNESS = 4.0
+# squared distance. The MakeHuman targets have sharp borders, and without it the fits of the
+# scans crease the jaw and notch the chin. At 16 the roughness on the jaw halves, and the named
+# shapes explain 86.5 % of the ICT variation instead of 88.1 %; with the detail shapes, which take
+# the smooth remainder, 95.8 % instead of 96.0 % (tests on 1,000 fits).
+SMOOTHNESS = 16.0
 ADULT_YEARS = (18.0, 67.0)
 
 
