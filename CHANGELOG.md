@@ -2,6 +2,44 @@
 
 All notable changes to this project.
 
+## Unreleased
+
+Highlights:
+
+- **Web viewer.** `viewer/dist/anny_viewer.html` renders anny in the browser with skin,
+  eye and hair shading. Its Character panel holds anny's phenotype sliders, and every part
+  of the page follows them: the fine body, the skeleton, the eyes, the hair and the
+  corrective shapes. `python -m anny.viewer build` rebuilds the page.
+- **Poses, soft tissue and hair for anny.** These parts come from the `3D Model`
+  experiment, and they follow the phenotype sliders.
+
+### Added
+
+- `anny.poses`: a library of 50 poses and 7 clips for the `anny` rig, as `local-ref` pose
+  parameters, with grounding on the floor and a stool for the seated poses.
+  `anny.poses.authoring` holds the tools that build it, including the MakeHuman BVH import.
+- `anny.correctives.SoftTissueCorrectives`: corrective shapes at the shoulders, the elbows,
+  the hips and the knees, scaled with the size of the body around each shape.
+  `anny.correctives.authoring` holds the soft-tissue simulation (TetGen and projective
+  dynamics), the fit of the shapes and `evaluate`, which compares plain skinning and the
+  shapes with a full simulation on any setting of the sliders.
+- `anny.hair.StrandBinding`: strands tied to the skin at their roots and, with
+  `tips=True`, at their tips. `anny.hair.authoring` grows the groom, the brows and the
+  lashes.
+- `anny.utils.subdivision`: Catmull-Clark subdivision as sparse linear operators, and
+  `MixedSubdivision`, which adds one level on a region such as the head.
+- `anny.viewer`: the data build of the page (fine body, detail layers, bakes, compressed
+  shape space, poses, correctives and hair) and its command line.
+- The `viewer` extra (`scipy`, `tetgen`, `embreex`) for the viewer build and the authoring
+  tools.
+
+### Removed
+
+- The `3D Model` experiment. Its parts now live in `anny.utils.subdivision`, `anny.poses`,
+  `anny.correctives`, `anny.hair`, `anny.viewer` and `viewer/`. Git history keeps the folder at
+  commit `b10538d`, including the CC0 pose packs that `anny.poses.authoring` rebuilds the
+  pose library from.
+
 ## v0.6 - 2026-08-06
 
 Highlights:

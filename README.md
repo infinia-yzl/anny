@@ -80,6 +80,35 @@ python -m anny.examples.interactive_demo
 
 <img src="docs/figures/interactive_demo.jpg" alt="Interactive demo" style="display:block;max-width:100%;max-height:24em;margin:auto"/>
 
+### Poses, soft tissue and hair
+
+Anny ships a pose library, corrective shapes for the joints and hair that follows the body. All of them follow the phenotype sliders:
+- `anny.poses` holds 50 poses and 7 animation clips for the `anny` rig as `local-ref` pose parameters. The root offset scales with the hip height of the body, the lowest point of the posed body stands on the floor, and the seated poses come with a stool that fits the body (`anny.poses.names()` lists the entries).
+- `anny.correctives.SoftTissueCorrectives(model)` adds corrective shapes at the shoulders, the elbows, the hips and the knees. A soft-tissue simulation made the shapes on the default body, and each shape scales with the size of the body around it.
+- `anny.hair.StrandBinding` ties hair strands to the skin at their roots and at their tips, so a groom made on one body follows every setting of the sliders.
+- `anny.utils.subdivision` holds Catmull-Clark subdivision as sparse linear operators, with a mixed subdivision that adds one level on the head.
+
+```python
+import anny, anny.poses
+from anny.correctives import SoftTissueCorrectives
+model = anny.Anny()
+phenotype = {"age": 0.3}
+posed = anny.poses.pose_parameters(model, "seated", phenotype_kwargs=phenotype)
+output = model(pose_parameters=posed["pose_parameters"], phenotype_kwargs=phenotype)
+output = SoftTissueCorrectives(model)(output)  # corrected output["vertices"]
+```
+
+### Web viewer
+
+`viewer/dist/anny_viewer.html` renders anny in a browser with WebGL2, from one file. It carries skin shading with subsurface scattering, eyes with a refractive cornea and about 56,000 hair strands. Its Character panel holds anny's phenotype sliders, which run from 0 to 1 with anny's default at 0.5, and its Pose panel plays the poses and clips of `anny.poses` with the corrective shapes. To rebuild the page (node 22 or later is needed):
+
+```bash
+uv sync --extra viewer
+uv run python -m anny.viewer build
+```
+
+The build caches its slow stages, such as the bakes and the hair groom, under the cache directory (see [Caching](#caching)). For hosts that limit the size of a file, `node viewer/build.mjs --parts <dir>` also writes the page with its model data in separate text files that the page fetches next to itself. The viewer grew from an earlier stand-alone experiment, the `3D Model` folder, which git history keeps at commit `b10538d`.
+
 ## Technical details
 
 ### Default `anny` rig

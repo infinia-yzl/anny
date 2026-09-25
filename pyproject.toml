@@ -55,6 +55,13 @@ smpl = [
     "smplx",
     "chumpy"
 ]
+# the viewer build (python -m anny.viewer build) and the authoring tools of the poses,
+# the correctives and the hair; the page itself also needs node 22 or later
+viewer = [
+    "scipy",
+    "tetgen",
+    "embreex"
+]
 dev = [
     "ruff==0.14.5",
     "build",
