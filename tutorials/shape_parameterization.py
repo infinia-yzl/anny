@@ -248,11 +248,23 @@ display(
 # %% [markdown]
 # #### Calibrated random faces
 #
-# `anny.faces.distribution.FaceShapeDistribution` draws face values for given phenotypes. Its
-# Gaussian comes from fits of anny to the identity space of ICT-FaceKit, calibrated so that anny's
-# head and face measurements match the ANSUR II survey (adults), the 3D Facial Norms database
-# (3 to 39 years) and the CDC growth charts (head circumference below 3 years). The sources and
-# their licences are in `src/anny/data/faces/SOURCES.md`.
+# `anny.faces.distribution.FaceShapeDistribution` draws face values for given phenotypes, from a
+# Gaussian at anchor ages for each sex:
+#
+# - its **spread** comes from fits of anny to 10,000 faces of the ICT-FaceKit identity space (the
+#   named shapes explain 86.5 % of the variation of held-out faces, and 95.7 % with the detail
+#   shapes), scaled per group of shapes to meet the SDs of the data;
+# - its **mean** moves from anny's own face for each age, as little as it can, to meet the head and
+#   face measurements of the ANSUR II survey (adults), the 3D Facial Norms database (3 to 40
+#   years) and the CDC growth charts (head circumference below 3 years).
+#
+# Against those data, the median standardised mean difference of the measurements at each age
+# falls from 0.9 to 1.9 SD for anny's own faces (4 to 5 SD for the head circumference of infants)
+# to 0.4 SD or less, and the median ratio of the SDs rises from 0.2–0.7 to 0.9–1.1. Two conflicts
+# remain: ANSUR II and 3D Facial Norms differ by 5 mm on the height of the face, and the face depths
+# of 3D Facial Norms, measured from the tragion, widen anny's face at the ears by 1 to 2 SD. The
+# sources and their licences are in `src/anny/data/faces/SOURCES.md`, and
+# `python -m anny.faces.authoring.benchmark` reports the comparison.
 
 # %%
 import anny.faces.distribution

@@ -106,7 +106,11 @@ stores for the template and every blend shape. The `anny` and `soma` rig caches 
 `scripts/precompute_rig_caches.py --append` adds rows for new blend shapes and leaves the others
 bit for bit. `anny.faces.distribution.FaceShapeDistribution` samples face values for given phenotypes
 from `data/shape_calibration/face_prior.safetensors`, built by `python -m anny.faces.authoring.calibrate`
-(sources and licences in `data/faces/SOURCES.md`).
+(sources and licences in `data/faces/SOURCES.md`): the covariance of the ICT fits with one variance
+factor per group, and means fitted by MAP around anny's default face (prior SD 0.3 per named shape)
+to the anthropometric targets of each anchor. Check changes to the calibration by rendering random
+faces in the viewer as well as by the measurement check: fits that meet the numbers can still give
+implausible faces.
 
 ### Pose Parameterization
 

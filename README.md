@@ -113,7 +113,7 @@ output = model(phenotype_kwargs=phenotype, face_shape_kwargs=faces)
 lengths = CraniofacialMeasurements(model)(output)["headlength"]  # mm
 ```
 
-The calibration uses only free sources that download without an account: the ICT-FaceKit identity space, ANSUR II, the 3D Facial Norms summary statistics, the CDC growth charts, and FairFace photographs with MediaPipe for the benchmark (see `src/anny/data/faces/SOURCES.md` and `python -m anny.faces.authoring.benchmark`).
+The distribution takes the spread of faces from fits of anny to the ICT-FaceKit identity space, and its mean moves from anny's own face for each age to meet the measurements of ANSUR II, 3D Facial Norms and the CDC growth charts: at each age, the median gap of the measurements falls from 0.9 to 1.9 SD for anny's own faces (4 to 5 SD for the head circumference of infants) to 0.4 SD or less. The calibration uses only free sources that download without an account: the ICT-FaceKit identity space, ANSUR II, the 3D Facial Norms summary statistics, the CDC growth charts, and FairFace photographs with MediaPipe for the benchmark (see `src/anny/data/faces/SOURCES.md` and `python -m anny.faces.authoring.benchmark`).
 
 ### Web viewer
 
