@@ -120,7 +120,9 @@ def authoring_rig() -> AuthoringRig:
     floor_anny = rest[used, 2].min()
     eye = heads_anny[names.index("eye.L")]
     scale = (EYE_HEIGHT - FLOOR) / (eye[2] - floor_anny)
+    # the middle plane of the body stays at x = 0
     offset = np.array([0.0, EYE_HEIGHT, EYE_DEPTH]) - scale * ANNY_TO_LEGACY @ eye
+    offset[0] = 0.0
     heads = scale * heads_anny @ ANNY_TO_LEGACY.T + offset
 
     # preview body: one level of subdivision with the skinning weights
