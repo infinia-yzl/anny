@@ -3,7 +3,8 @@
 # Apache License, Version 2.0
 """
 Posing tools: quaternions, forward kinematics, skinning, two-bone IK and grounding on the
-authoring rig (``rig.authoring_rig``). Ported from the legacy 3D Model build (build/posing.py).
+authoring rig (``rig.authoring_rig``, for the body of ``rig.authoring_phenotype``). Ported from the
+legacy 3D Model build (build/posing.py).
 
 Conventions (shared with the viewer):
 - Every bone rests with the world axes at its head. A pose gives each bone a local rotation q (x, y, z, w) relative
@@ -16,9 +17,9 @@ Units are metres in the legacy frame of the authoring rig.
 
 import numpy as np
 
-from .rig import authoring_rig
+from .rig import authoring_phenotype, authoring_rig
 
-RIG = authoring_rig()
+RIG = authoring_rig(authoring_phenotype())
 NAMES = list(RIG.names)
 IDX = {n: i for i, n in enumerate(NAMES)}
 PAR = RIG.parents.astype(int)

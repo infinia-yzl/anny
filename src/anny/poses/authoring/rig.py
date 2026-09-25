@@ -11,13 +11,19 @@ authoring rig puts anny's default body (every phenotype at 0.5) into the same fr
 uniformly so that the eye stands at the same height above the floor. Rotations do not change
 under a uniform scale, so the poses written in this frame carry over to anny as they are.
 
-``authoring_rig()`` builds the rig once per process.
+``authoring_rig()`` builds the rig once per process. ``authoring_rig(phenotype)`` builds it for
+another setting of anny's sliders, in the same frame: the scale and the horizontal place come
+from the default body, and the body stands on the same floor. The authoring tools use the body
+of ``authoring_phenotype()``, which reads the environment variable ANNY_AUTHORING_PHENOTYPE (a
+JSON object of slider values) for checks on other bodies.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import functools
+import json
+import os
 
 import numpy as np
 import torch
@@ -116,27 +122,45 @@ def bone_tails(heads: np.ndarray, parents: np.ndarray, names: list[str]) -> np.n
     return tails
 
 
-@functools.lru_cache(maxsize=1)
-def authoring_rig() -> AuthoringRig:
+PHENOTYPE_ENV = "ANNY_AUTHORING_PHENOTYPE"
+
+
+def authoring_phenotype() -> dict:
+    """Slider values of the authoring body: anny's defaults, or the JSON object in ANNY_AUTHORING_PHENOTYPE."""
+    text = os.environ.get(PHENOTYPE_ENV, "").strip()
+    return {str(k): float(v) for k, v in json.loads(text).items()} if text else {}
+
+
+def authoring_rig(phenotype: dict | None = None) -> AuthoringRig:
+    """The authoring rig for anny's default body, or for the given slider values (cached)."""
+    return _authoring_rig(tuple(sorted((phenotype or {}).items())))
+
+
+@functools.lru_cache(maxsize=4)
+def _authoring_rig(phenotype: tuple) -> AuthoringRig:
     import anny
     from anny.utils.subdivision import catmull_clark
 
     model = anny.Anny(topology="anny-quads").to(dtype=torch.float64)
-    with torch.no_grad():
-        output = model(phenotype_kwargs={})
-    rest = output["rest_vertices"][0].numpy()
-    heads_anny = output["rest_bone_heads"][0].numpy()
     names = list(model.bone_labels)
     parents = np.array([int(p) for p in model.bone_parents])
-
     faces = model.faces.numpy()[body_faces_mask(model)]
     used = np.unique(faces)
-    floor_anny = rest[used, 2].min()
-    eye = heads_anny[names.index("eye.L")]
-    scale = (EYE_HEIGHT - FLOOR) / (eye[2] - floor_anny)
+    with torch.no_grad():
+        default = model(phenotype_kwargs={})
+        output = model(phenotype_kwargs=dict(phenotype)) if phenotype else default
+    # the frame: anny's default body with its left eye at the height of the legacy eye
+    rest0 = default["rest_vertices"][0].numpy()
+    eye = default["rest_bone_heads"][0].numpy()[names.index("eye.L")]
+    scale = (EYE_HEIGHT - FLOOR) / (eye[2] - rest0[used, 2].min())
     # the middle plane of the body stays at x = 0
     offset = np.array([0.0, EYE_HEIGHT, EYE_DEPTH]) - scale * ANNY_TO_LEGACY @ eye
     offset[0] = 0.0
+    rest = output["rest_vertices"][0].numpy()
+    heads_anny = output["rest_bone_heads"][0].numpy()
+    floor_anny = rest[used, 2].min()
+    # every body stands on the floor of the frame
+    offset[1] = FLOOR - scale * floor_anny
     heads = scale * heads_anny @ ANNY_TO_LEGACY.T + offset
 
     # preview body: one level of subdivision with the skinning weights

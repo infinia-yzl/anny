@@ -48,6 +48,41 @@ class TestStrandBinding(unittest.TestCase):
         _, _, distance = closest_triangles(roots, V2, T)
         self.assertLess(distance.max(), 1e-12)
 
+    def test_tips_reproduce_the_groom(self):
+        V, T, strands = sphere_with_strands()
+        binding = StrandBinding(strands, V, T, tips=True)
+        self.assertLess(np.abs(binding.follow(V) - strands).max(), 1e-12)
+        a = np.radians(-40)
+        R = np.array([[1, 0, 0], [0, np.cos(a), -np.sin(a)], [0, np.sin(a), np.cos(a)]])
+        V2 = 1.4 * V @ R.T + np.array([0.0, 0.1, -0.2])
+        expected = 1.4 * strands @ R.T + np.array([0.0, 0.1, -0.2])
+        self.assertLess(np.abs(binding.follow(V2) - expected).max(), 1e-12)
+
+    def test_tips_stay_over_the_skin(self):
+        # strands that lie along the surface, 2 mm above it; the head grows longer along z
+        mesh = trimesh.creation.icosphere(subdivisions=4, radius=0.1)
+        V, T = np.asarray(mesh.vertices), np.asarray(mesh.faces)
+        rng = np.random.default_rng(3)
+        u = rng.normal(size=(200, 3))
+        u /= np.linalg.norm(u, axis=1, keepdims=True)
+        w = np.cross(u, rng.normal(size=(200, 3)))
+        w /= np.linalg.norm(w, axis=1, keepdims=True)
+        s = np.linspace(0, 1, 12)[None, :, None]
+        angle = np.radians(60) * s
+        direction = np.cos(angle) * u[:, None] + np.sin(angle) * w[:, None]
+        radius = 0.1 * (1 - 1e-9) + 0.002 * np.minimum(1, 5 * s)
+        strands = radius * direction
+        stretch = np.array([1.0, 1.0, 1.35])
+        V2 = V * stretch
+
+        def inside(P):
+            return ((P / stretch) ** 2).sum(-1) < 0.1**2
+
+        rigid = StrandBinding(strands, V, T).follow(V2)
+        bound = StrandBinding(strands, V, T, tips=True).follow(V2)
+        self.assertGreater(inside(rigid[:, -1]).sum(), 0)
+        self.assertEqual(inside(bound[:, -1]).sum(), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

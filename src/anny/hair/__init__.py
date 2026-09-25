@@ -11,6 +11,11 @@ the size of the scalp. For another body, the root follows the triangle, and the 
 with the triangle and scales with the size of the scalp. The same binding carries the brows and
 the lashes.
 
+With ``tips=True`` the tip of each strand is also tied to the skin triangle nearest to it, and
+the points blend from the frame of the root to the frame of the tip along the strand, with the
+weight ``t**2`` (``t`` runs from 0 at the root to 1 at the tip). The tips then keep their place
+over the skin under them, where a head of another shape would turn a rigid strand into the skin.
+
 Example::
 
     binding = StrandBinding(strands, V_default, triangles)
@@ -90,13 +95,20 @@ def scalp_size(roots: np.ndarray) -> float:
     return float(np.sqrt(((roots - roots.mean(0)) ** 2).sum(1).mean()))
 
 
+def tip_weight(t):
+    """weight of the tip frame at the fraction ``t`` of a strand (0 at the root, 1 at the tip)"""
+    return np.asarray(t, dtype=np.float64) ** 2
+
+
 class StrandBinding:
     """
     Polylines (n, points, 3) bound to a triangle mesh (V, T). The first point of each polyline
-    is its root.
+    is its root, and with ``tips=True`` the last point is bound as well (see the module).
     """
 
-    def __init__(self, strands: np.ndarray, V: np.ndarray, T: np.ndarray):
+    def __init__(
+        self, strands: np.ndarray, V: np.ndarray, T: np.ndarray, tips: bool = False
+    ):
         strands = np.asarray(strands, dtype=np.float64)
         self.T = np.asarray(T)
         self.triangles, self.barycentric, self.root_distance = closest_triangles(
@@ -104,16 +116,42 @@ class StrandBinding:
         )
         roots = self.roots(V)
         self.reference_size = scalp_size(roots)
-        frames = triangle_frames(V, self.T, self.triangles)
-        rel = strands - roots[:, None, :]
-        self.local = np.einsum("nij,nmj->nmi", frames, rel) / self.reference_size
+        self.local = self._local(strands, V, self.triangles, roots)
+        self.tip_triangles = None
+        if tips:
+            self.tip_triangles, self.tip_barycentric, self.tip_distance = (
+                closest_triangles(strands[:, -1], V, self.T)
+            )
+            self.tip_local = self._local(
+                strands, V, self.tip_triangles, self.tip_anchors(V)
+            )
+            self.weights = tip_weight(np.linspace(0.0, 1.0, strands.shape[1]))
+
+    def _local(self, strands, V, triangles, anchors):
+        frames = triangle_frames(V, self.T, triangles)
+        rel = strands - anchors[:, None, :]
+        return np.einsum("nij,nmj->nmi", frames, rel) / self.reference_size
 
     def roots(self, V: np.ndarray) -> np.ndarray:
         return np.einsum("nk,nkd->nd", self.barycentric, V[self.T[self.triangles]])
+
+    def tip_anchors(self, V: np.ndarray) -> np.ndarray:
+        """the points of the skin under the tips"""
+        return np.einsum(
+            "nk,nkd->nd", self.tip_barycentric, V[self.T[self.tip_triangles]]
+        )
 
     def follow(self, V: np.ndarray, scale: float | None = None) -> np.ndarray:
         """the strands on a mesh with the same triangles and new vertices V"""
         roots = self.roots(V)
         size = scalp_size(roots) if scale is None else scale * self.reference_size
         frames = triangle_frames(V, self.T, self.triangles)
-        return roots[:, None, :] + size * np.einsum("nji,nmj->nmi", frames, self.local)
+        out = roots[:, None, :] + size * np.einsum("nji,nmj->nmi", frames, self.local)
+        if self.tip_triangles is None:
+            return out
+        frames = triangle_frames(V, self.T, self.tip_triangles)
+        tips = self.tip_anchors(V)[:, None, :] + size * np.einsum(
+            "nji,nmj->nmi", frames, self.tip_local
+        )
+        w = self.weights[None, :, None]
+        return (1.0 - w) * out + w * tips

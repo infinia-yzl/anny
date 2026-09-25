@@ -35,7 +35,12 @@ from anny.utils.subdivision import quads_to_triangles
 
 
 def cache_file():
-    return get_anny_cache_path() / "correctives" / "sim_mesh.npz"
+    """the tetrahedra of the authoring body (one file per body)"""
+    import hashlib
+
+    V = P.preview_mesh()["coarse"]["V"]
+    key = hashlib.sha1(np.round(V, 6).tobytes()).hexdigest()[:16]
+    return get_anny_cache_path() / "correctives" / f"sim_mesh_{key}.npz"
 
 
 def crossing_vertices(V, T):

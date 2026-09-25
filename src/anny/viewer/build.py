@@ -521,6 +521,14 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
             name + "_bind", rb, "sparse", len(S), 20, body="head", fields=3, sort="none"
         )
         if name == "hair":
+            # the skin under each tip (anny.hair.StrandBinding with tips=True)
+            tri, bary_tip, _ = closest_triangles(S[:, -1], V, body.T)
+            tb = np.zeros((len(S), 20), np.uint8)
+            tb[:, 0:12] = body.T[tri].astype("<u4").view(np.uint8).reshape(-1, 12)
+            tb[:, 12:20] = bary_tip[:, :2].astype("<f4").view(np.uint8).reshape(-1, 8)
+            pk.add(
+                "hair_tip", tb, "sparse", len(S), 20, body="head", fields=3, sort="none"
+            )
             # every strand follows the skin under its root, with four bones
             W = np.zeros((len(S), len(space["bones"])))
             for k in range(3):

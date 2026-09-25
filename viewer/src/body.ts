@@ -19,7 +19,17 @@ export interface StrandSet {
   corners: Uint32Array;      // 3 fine vertices per strand root
   bary: Float32Array;        // 3 barycentric coordinates per strand root
   local: Float32Array;       // points in the frame of the root triangle, divided by the scalp size (total * 3)
-  frames: Float32Array;      // per strand on the current body, rows k = 0..2 of [scalp * (t1, t2, n) | root] (nS * 12)
+  // with a tip binding (anny.hair.StrandBinding with tips=True): the skin triangle under each tip, and the
+  // points in its frame; the points blend from the root frame to the tip frame with the weight t^2
+  tipCorners?: Uint32Array; tipBary?: Float32Array; tipLocal?: Float32Array;
+  frames: Float32Array;      // per strand on the current body, rows k = 0..2 of [scalp * (t1, t2, n) | anchor]:
+                             // 12 values for the root, then 12 for the tip with a tip binding
+}
+
+// the weight of the tip frame at point j of a strand of n points (as the hair shader reads it from a byte)
+export function tipWeight(j: number, n: number): number {
+  const t = Math.round(j / Math.max(n - 1, 1) * 255) / 255;
+  return t * t;
 }
 
 export function vertexNormals(P: Float32Array, I: Uint32Array, out?: Float32Array): Float32Array {
@@ -159,8 +169,8 @@ function triFrame(P: Float32Array, a: number, b: number, c: number, out: Float64
   let e1x = P[b * 3] - ax, e1y = P[b * 3 + 1] - ay, e1z = P[b * 3 + 2] - az;
   const e2x = P[c * 3] - ax, e2y = P[c * 3 + 1] - ay, e2z = P[c * 3 + 2] - az;
   let nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
-  let l = Math.hypot(e1x, e1y, e1z) || 1; e1x /= l; e1y /= l; e1z /= l;
-  l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+  let l = Math.sqrt(e1x * e1x + e1y * e1y + e1z * e1z) || 1; e1x /= l; e1y /= l; e1z /= l;
+  l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1; nx /= l; ny /= l; nz /= l;
   out[0] = e1x; out[1] = e1y; out[2] = e1z;
   out[3] = ny * e1z - nz * e1y; out[4] = nz * e1x - nx * e1z; out[5] = nx * e1y - ny * e1x;
   out[6] = nx; out[7] = ny; out[8] = nz;
@@ -306,51 +316,56 @@ export class AnnyBody {
   }
 
   // bind strands (points of anny's default body) to the fine triangles under their roots
-  // (frames: optional storage for StrandSet.frames, such as the data of a texture)
-  bindStrands(name: string, P: Float32Array, counts: Uint8Array, corners: Uint32Array, bary: Float32Array, frames?: Float32Array) {
-    const nS = counts.length, R = this.rest0, F = new Float64Array(9);
-    const roots = new Float64Array(nS * 3);
-    for (let i = 0; i < nS; i++) {
-      const a = corners[i * 3], b = corners[i * 3 + 1], c = corners[i * 3 + 2], u = bary[i * 3], v = bary[i * 3 + 1], w = bary[i * 3 + 2];
-      for (let k = 0; k < 3; k++) roots[i * 3 + k] = u * R[a * 3 + k] + v * R[b * 3 + k] + w * R[c * 3 + k];
-    }
+  // (frames: optional storage for StrandSet.frames, such as the data of a texture; tip: the skin under the tips)
+  bindStrands(name: string, P: Float32Array, counts: Uint8Array, corners: Uint32Array, bary: Float32Array, frames?: Float32Array,
+    tip?: { corners: Uint32Array; bary: Float32Array }) {
+    const nS = counts.length, R = this.rest0;
+    const roots = anchors(R, corners, bary, nS);
     if (name === 'hair') this.scalpRef = rmsSize(roots);
-    const local = new Float32Array(P.length);
+    const set: StrandSet = { counts, total: P.length / 3, corners, bary, local: this.toLocal(P, counts, corners, roots),
+      frames: frames || new Float32Array(nS * (tip ? 24 : 12)) };
+    if (tip) {
+      set.tipCorners = tip.corners; set.tipBary = tip.bary;
+      set.tipLocal = this.toLocal(P, counts, tip.corners, anchors(R, tip.corners, tip.bary, nS));
+    }
+    this.strands[name] = set;
+  }
+
+  // strand points in the frames of the given triangles (rest positions), relative to the anchors, per unit of scalp size
+  private toLocal(P: Float32Array, counts: Uint8Array, corners: Uint32Array, anchor: Float64Array): Float32Array {
+    const R = this.rest0, F = new Float64Array(9), local = new Float32Array(P.length);
     let p = 0;
-    for (let i = 0; i < nS; i++) {
+    for (let i = 0; i < counts.length; i++) {
       triFrame(R, corners[i * 3], corners[i * 3 + 1], corners[i * 3 + 2], F);
       for (let j = 0; j < counts[i]; j++, p++) {
-        const dx = P[p * 3] - roots[i * 3], dy = P[p * 3 + 1] - roots[i * 3 + 1], dz = P[p * 3 + 2] - roots[i * 3 + 2];
+        const dx = P[p * 3] - anchor[i * 3], dy = P[p * 3 + 1] - anchor[i * 3 + 1], dz = P[p * 3 + 2] - anchor[i * 3 + 2];
         for (let k = 0; k < 3; k++) local[p * 3 + k] = (F[k * 3] * dx + F[k * 3 + 1] * dy + F[k * 3 + 2] * dz) / this.scalpRef;
       }
     }
-    this.strands[name] = { counts, total: P.length / 3, corners, bary, local, frames: frames || new Float32Array(nS * 12) };
+    return local;
   }
 
   // the frame of each strand on the current body: a strand point is root + scalp * (t1 x + t2 y + n z) for its local
-  // coordinates (x, y, z), with the frame (t1, t2, n) of the triangle under the root (anny.hair.StrandBinding)
+  // coordinates (x, y, z), with the frame (t1, t2, n) of the triangle under the root (anny.hair.StrandBinding); with a
+  // tip binding, the frame of the triangle under the tip follows
   followStrands() {
     const P = this.pos, F = new Float64Array(9);
     const hair = this.strands.hair;
     if (!hair) return;
-    const roots = (s: StrandSet) => {
-      const nS = s.counts.length, out = new Float64Array(nS * 3);
-      for (let i = 0; i < nS; i++) {
-        const a = s.corners[i * 3], b = s.corners[i * 3 + 1], c = s.corners[i * 3 + 2], u = s.bary[i * 3], v = s.bary[i * 3 + 1], w = s.bary[i * 3 + 2];
-        for (let k = 0; k < 3; k++) out[i * 3 + k] = u * P[a * 3 + k] + v * P[b * 3 + k] + w * P[c * 3 + k];
-      }
-      return out;
-    };
-    const hr = roots(hair);
+    const hr = anchors(P, hair.corners, hair.bary, hair.counts.length);
     this.scalp = rmsSize(hr);
     const k = this.scalp;
     for (const s of Object.values(this.strands)) {
-      const R = s === hair ? hr : roots(s), nS = s.counts.length, M = s.frames;
-      for (let i = 0; i < nS; i++) {
-        triFrame(P, s.corners[i * 3], s.corners[i * 3 + 1], s.corners[i * 3 + 2], F);
-        for (let r = 0; r < 3; r++) {
-          const o = i * 12 + r * 4;
-          M[o] = F[r] * k; M[o + 1] = F[3 + r] * k; M[o + 2] = F[6 + r] * k; M[o + 3] = R[i * 3 + r];
+      const nS = s.counts.length, M = s.frames, stride = s.tipCorners ? 24 : 12;
+      const parts: [Uint32Array, Float64Array, number][] = [[s.corners, s === hair ? hr : anchors(P, s.corners, s.bary, nS), 0]];
+      if (s.tipCorners) parts.push([s.tipCorners, anchors(P, s.tipCorners, s.tipBary, nS), 12]);
+      for (const [C, A, off] of parts) {
+        for (let i = 0; i < nS; i++) {
+          triFrame(P, C[i * 3], C[i * 3 + 1], C[i * 3 + 2], F);
+          for (let r = 0; r < 3; r++) {
+            const o = i * stride + off + r * 4;
+            M[o] = F[r] * k; M[o + 1] = F[3 + r] * k; M[o + 2] = F[6 + r] * k; M[o + 3] = A[i * 3 + r];
+          }
         }
       }
     }
@@ -358,11 +373,17 @@ export class AnnyBody {
 
   // the points of a strand set on the current body (the page moves them on the GPU with the frames)
   strandPoints(name: string): Float32Array {
-    const s = this.strands[name], M = s.frames, L = s.local, out = new Float32Array(L.length);
+    const s = this.strands[name], M = s.frames, L = s.local, Q = s.tipLocal, stride = Q ? 24 : 12;
+    const out = new Float32Array(L.length);
     let p = 0;
     for (let i = 0; i < s.counts.length; i++) for (let j = 0; j < s.counts[i]; j++, p++) {
-      const x = L[p * 3], y = L[p * 3 + 1], z = L[p * 3 + 2];
-      for (let r = 0; r < 3; r++) { const o = i * 12 + r * 4; out[p * 3 + r] = M[o] * x + M[o + 1] * y + M[o + 2] * z + M[o + 3]; }
+      const w = Q ? tipWeight(j, s.counts[i]) : 0;
+      for (let r = 0; r < 3; r++) {
+        const o = i * stride + r * 4;
+        let v = M[o] * L[p * 3] + M[o + 1] * L[p * 3 + 1] + M[o + 2] * L[p * 3 + 2] + M[o + 3];
+        if (Q) v += w * (M[o + 12] * Q[p * 3] + M[o + 13] * Q[p * 3 + 1] + M[o + 14] * Q[p * 3 + 2] + M[o + 15] - v);
+        out[p * 3 + r] = v;
+      }
     }
     return out;
   }
@@ -389,6 +410,16 @@ export class AnnyBody {
     }
     return best;
   }
+}
+
+// barycentric points of triangles (one per strand)
+function anchors(P: Float32Array, corners: Uint32Array, bary: Float32Array, n: number): Float64Array {
+  const out = new Float64Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const a = corners[i * 3], b = corners[i * 3 + 1], c = corners[i * 3 + 2], u = bary[i * 3], v = bary[i * 3 + 1], w = bary[i * 3 + 2];
+    for (let k = 0; k < 3; k++) out[i * 3 + k] = u * P[a * 3 + k] + v * P[b * 3 + k] + w * P[c * 3 + k];
+  }
+  return out;
 }
 
 function rmsSize(P: Float64Array): number {

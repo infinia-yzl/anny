@@ -608,16 +608,28 @@ export const HAIR_VS = /* glsl */`
 ${SKIN_GLSL}
 attribute vec4 tangent4; attribute vec4 hattr; attribute float strand;
 uniform float uWidth; uniform float uTipWidth; uniform float uViewportH; uniform float uMinPix;
-// three texels per strand: the rows of [scalp size * frame of the root triangle | root] on the current body
+// per strand the rows of [scalp size * frame of the triangle under the root | root] on the current body, and with
+// HAIR_TIPS the same rows for the triangle under the tip (AnnyBody.followStrands)
 uniform highp sampler2D uStrands;
+#ifdef HAIR_TIPS
+attribute vec3 tipLocal;
+#define STRAND_TEXELS 6
+#else
+#define STRAND_TEXELS 3
+#endif
 varying vec3 vWPos; varying vec3 vT; varying vec4 vH; varying float vCov;
+vec4 strandTexel(int i) { int w = textureSize(uStrands, 0).x; return texelFetch(uStrands, ivec2(i % w, i / w), 0); }
 void main() {
-  // the point and its tangent keep their coordinates in the frame of the root triangle (AnnyBody.followStrands)
-  int ts = int(strand + 0.5) * 3, tw = textureSize(uStrands, 0).x;
-  vec4 m0 = texelFetch(uStrands, ivec2(ts % tw, ts / tw), 0);
-  vec4 m1 = texelFetch(uStrands, ivec2((ts + 1) % tw, (ts + 1) / tw), 0);
-  vec4 m2 = texelFetch(uStrands, ivec2((ts + 2) % tw, (ts + 2) / tw), 0);
+  // the point and its tangent keep their coordinates in the frame of the root triangle; with HAIR_TIPS the point
+  // blends toward its place in the frame of the tip triangle with the weight t^2 (anny.hair.StrandBinding)
+  int ts = int(strand + 0.5) * STRAND_TEXELS;
+  vec4 m0 = strandTexel(ts), m1 = strandTexel(ts + 1), m2 = strandTexel(ts + 2);
   vec3 rest = vec3(dot(m0.xyz, position) + m0.w, dot(m1.xyz, position) + m1.w, dot(m2.xyz, position) + m2.w);
+#ifdef HAIR_TIPS
+  vec4 n0 = strandTexel(ts + 3), n1 = strandTexel(ts + 4), n2 = strandTexel(ts + 5);
+  vec3 atTip = vec3(dot(n0.xyz, tipLocal) + n0.w, dot(n1.xyz, tipLocal) + n1.w, dot(n2.xyz, tipLocal) + n2.w);
+  rest = mix(rest, atTip, hattr.x * hattr.x);
+#endif
   vec3 tl = vec3(dot(m0.xyz, tangent4.xyz), dot(m1.xyz, tangent4.xyz), dot(m2.xyz, tangent4.xyz));
   mat4 S = skinMat();
   vec3 wp = (modelMatrix * (S * vec4(rest, 1.0))).xyz;

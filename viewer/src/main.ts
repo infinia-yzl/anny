@@ -652,24 +652,26 @@ function subsetStrands(S, ao, k) {
   for (let i = 0; i < nS; i++) { starts[i] = p; p += counts[i]; }
   let n = 0, total = 0;
   for (let i = 0; i < nS; i += k) { n++; total += counts[i]; }
-  const P2 = new Float32Array(total * 3), ao2 = new Float32Array(total), c2 = new Uint8Array(n);
+  const P2 = new Float32Array(total * 3), Q2 = S.Q ? new Float32Array(total * 3) : null, ao2 = new Float32Array(total), c2 = new Uint8Array(n);
   const sk2 = S.skin ? new Uint8Array(n * 8) : null;
   let q = 0, j = 0;
   for (let i = 0; i < nS; i += k, j++) {
     const c = counts[i]; c2[j] = c;
     P2.set(P.subarray(starts[i] * 3, (starts[i] + c) * 3), q * 3);
+    if (Q2) Q2.set(S.Q.subarray(starts[i] * 3, (starts[i] + c) * 3), q * 3);
     ao2.set(ao.subarray(starts[i], starts[i] + c), q);
     if (sk2) sk2.set(S.skin.subarray(i * 8, i * 8 + 8), j * 8);
     q += c;
   }
   const keep = Uint32Array.from({ length: n }, (_, q) => q * k);
-  return { S: { P: P2, counts: c2, nS: n, total, skin: sk2 }, ao: ao2, keep };
+  return { S: { P: P2, Q: Q2, counts: c2, nS: n, total, skin: sk2 }, ao: ao2, keep };
 }
 // S.P: the points in the frames of their root triangles; ids: the strand of each (for a subset of the strands)
 function buildRibbons(S, ao, seed, ids = null) {
   const { P, counts, nS, total } = S;
   const nv = total * 2;
   const pos = new Float32Array(nv * 3), tan = new Int8Array(nv * 4), ha = new Uint8Array(nv * 4), sid = new Float32Array(nv);
+  const Q = S.Q || null, tip = Q ? new Float32Array(nv * 3) : null;
   // skin: each strand takes the weights of the skin under its root (brows and lashes ride on the head bone)
   const skI = new Uint8Array(nv * 4), skW = new Uint8Array(nv * 4);
   { let v2 = 0;
@@ -695,6 +697,7 @@ function buildRibbons(S, ao, seed, ids = null) {
         pos[v * 3] = P[(p + j) * 3]; pos[v * 3 + 1] = P[(p + j) * 3 + 1]; pos[v * 3 + 2] = P[(p + j) * 3 + 2];
         tan[v * 4] = Math.round(tx * 127); tan[v * 4 + 1] = Math.round(ty * 127); tan[v * 4 + 2] = Math.round(tz * 127);
         ha[v * 4] = t; ha[v * 4 + 1] = s * 255; ha[v * 4 + 2] = r; ha[v * 4 + 3] = o; sid[v] = ids ? ids[i] : i;
+        if (tip) { tip[v * 3] = Q[(p + j) * 3]; tip[v * 3 + 1] = Q[(p + j) * 3 + 1]; tip[v * 3 + 2] = Q[(p + j) * 3 + 2]; }
       }
       if (j < n - 1) {
         const b0 = (p + j) * 2;
@@ -708,6 +711,7 @@ function buildRibbons(S, ao, seed, ids = null) {
   g.setAttribute('tangent4', new THREE.BufferAttribute(tan, 4, true));
   g.setAttribute('hattr', new THREE.BufferAttribute(ha, 4, true));
   g.setAttribute('strand', new THREE.BufferAttribute(sid, 1));
+  if (tip) g.setAttribute('tipLocal', new THREE.BufferAttribute(tip, 3));
   g.setAttribute('skinIndex', new THREE.BufferAttribute(skI, 4));
   g.setAttribute('skinWeight', new THREE.BufferAttribute(skW, 4, true));
   g.setIndex(new THREE.BufferAttribute(idx, 1));
@@ -1470,28 +1474,35 @@ function loadRememberedLook() {
 // vertex shader places the points, so a slider step moves ~58k frames instead of ~1.7M ribbon vertices.
 const HAIRSETS: any[] = [];
 const STRAND_TEX_W = 2048;
-function strandTexture(nS: number) {
-  const h = Math.ceil(nS * 3 / STRAND_TEX_W);
+// texels: 3 per strand (the root frame), or 6 with a tip binding (the root frame, then the tip frame)
+function strandTexture(nS: number, texels: number) {
+  const h = Math.ceil(nS * texels / STRAND_TEX_W);
   const tex = new THREE.DataTexture(new Float32Array(STRAND_TEX_W * h * 4), STRAND_TEX_W, h, THREE.RGBAFormat, THREE.FloatType);
   tex.minFilter = THREE.NearestFilter; tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false;
   tex.colorSpace = THREE.NoColorSpace; tex.needsUpdate = true;
   return tex;
 }
 function updateHairShape() { for (const h of HAIRSETS) h.tex.needsUpdate = true; }
-// bind a strand set to the skin; returns the ribbon source (local points) and the texture of its frames
-function strandBinding(B: any, name: string, S: any) {
-  const bb = B[name + '_bind'];
-  const nS = S.nS, dv = new DataView(bb.data.buffer, bb.data.byteOffset, bb.data.byteLength);
-  const corners = new Uint32Array(nS * 3), bary = new Float32Array(nS * 3);
-  for (let i = 0; i < nS; i++) {
+// triangles and barycentric coordinates of a binding record (3 corners, 2 coordinates)
+function bindingRecords(buf: any, n: number) {
+  const dv = new DataView(buf.data.buffer, buf.data.byteOffset, buf.data.byteLength);
+  const corners = new Uint32Array(n * 3), bary = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
     for (let k = 0; k < 3; k++) corners[i * 3 + k] = dv.getUint32(i * 20 + k * 4, true);
     const u = dv.getFloat32(i * 20 + 12, true), w = dv.getFloat32(i * 20 + 16, true);
     bary[i * 3] = u; bary[i * 3 + 1] = w; bary[i * 3 + 2] = 1 - u - w;
   }
-  const tex = strandTexture(nS);
-  BODY.anny.bindStrands(name, S.P, S.counts, corners, bary, (tex.image.data as Float32Array).subarray(0, nS * 12));
+  return { corners, bary };
+}
+// bind a strand set to the skin; returns the ribbon source (local points) and the texture of its frames
+function strandBinding(B: any, name: string, S: any) {
+  const nS = S.nS, root = bindingRecords(B[name + '_bind'], nS);
+  const tip = B[name + '_tip'] ? bindingRecords(B[name + '_tip'], nS) : undefined;
+  const texels = tip ? 6 : 3, tex = strandTexture(nS, texels);
+  BODY.anny.bindStrands(name, S.P, S.counts, root.corners, root.bary, (tex.image.data as Float32Array).subarray(0, nS * texels * 4), tip);
   HAIRSETS.push({ name, tex });
-  return { local: { P: BODY.anny.strands[name].local, counts: S.counts, nS, total: S.total, skin: S.skin }, tex };
+  const set = BODY.anny.strands[name];
+  return { local: { P: set.local, Q: set.tipLocal || null, counts: S.counts, nS, total: S.total, skin: S.skin }, tex, tips: !!tip };
 }
 
 let MeshoptDecoder: any = null;
@@ -1572,7 +1583,7 @@ async function init() {
   setProgress(0.75, 'Placing strands');
   await nextFrame();
   const lite = isSmall ? subsetStrands(hairB.local, hairAO, 2) : { S: hairB.local, ao: hairAO, keep: null };
-  const hairMesh = makeHairMesh(buildRibbons(lite.S, lite.ao, 17, lite.keep), { width: isSmall ? 0.00017 : 0.00012, tip: 0.45, color: [0.020, 0.0125, 0.0082], rough: 0.38, diff: 1.3, spec: 0.38, center }, ENV_DEFINES, hairB.tex);
+  const hairMesh = makeHairMesh(buildRibbons(lite.S, lite.ao, 17, lite.keep), { width: isSmall ? 0.00017 : 0.00012, tip: 0.45, color: [0.020, 0.0125, 0.0082], rough: 0.38, diff: 1.3, spec: 0.38, center }, hairB.tips ? Object.assign({ HAIR_TIPS: '' }, ENV_DEFINES) : ENV_DEFINES, hairB.tex);
   const browB = strandBinding(B, 'brows', decodeStrands(B, 'brows'));
   const browMesh = makeHairMesh(buildRibbons(browB.local, null, 5), { width: 0.00010, tip: 0.3, color: [0.016, 0.009, 0.006], rough: 0.62, spec: 0.15, diff: 1.3, center: [0, 0.515, 0.06] }, ENV_DEFINES, browB.tex);
   const lashB = strandBinding(B, 'lashes', decodeStrands(B, 'lashes'));
