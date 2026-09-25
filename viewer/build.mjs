@@ -114,3 +114,23 @@ const page = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
 fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, page);
 console.log('page', out, (page.length / 1e6).toFixed(1), 'MB');
+
+// --parts <dir>: the page and its data as separate files, for hosts that limit the size of a file (such as a Claude
+// artifact). The page carries no document tags, since such hosts wrap it in their own; the data goes to text files of
+// base64 under 15 MB each, split at multiples of 4 characters, which the page fetches next to itself.
+const partsAt = process.argv.indexOf('--parts');
+if (partsAt >= 0) {
+  const dirOut = path.resolve(here, process.argv[partsAt + 1] || path.join('build', 'artifact'));
+  const b64 = gz.toString('base64'), limit = 15e6 - (15e6 % 4);
+  const count = Math.ceil(b64.length / limit), size = Math.ceil(b64.length / count / 4) * 4;
+  const names = [];
+  fs.mkdirSync(path.join(dirOut, 'data'), { recursive: true });
+  for (let k = 0; k < count; k++) {
+    names.push(`data/model-${k + 1}.txt`);
+    fs.writeFileSync(path.join(dirOut, names[k]), b64.slice(k * size, (k + 1) * size));
+  }
+  const small = shell + '\n<script>\n' + ref + '\n</script>\n<script>window.MODEL_PARTS = ' + JSON.stringify(names) + ';</script>\n'
+    + '<script type="module">\n' + app.replace(/<\/script/g, '<\\/script') + '\n</script>\n';
+  fs.writeFileSync(path.join(dirOut, 'index.html'), small);
+  console.log('parts', dirOut, (small.length / 1e6).toFixed(1), 'MB page,', count, 'data files of', (size / 1e6).toFixed(1), 'MB');
+}

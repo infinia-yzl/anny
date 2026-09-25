@@ -107,7 +107,7 @@ uv sync --extra viewer
 uv run python -m anny.viewer build
 ```
 
-The build caches its slow stages, such as the bakes and the hair groom, under the cache directory (see [Caching](#caching)). The folder `legacy/3d_model` holds the earlier stand-alone experiment that the viewer grew from, and its `DEPRECATED.md` names the new home of each part.
+The build caches its slow stages, such as the bakes and the hair groom, under the cache directory (see [Caching](#caching)). For hosts that limit the size of a file, `node viewer/build.mjs --parts <dir>` also writes the page with its model data in separate text files that the page fetches next to itself. The folder `legacy/3d_model` holds the earlier stand-alone experiment that the viewer grew from, and its `DEPRECATED.md` names the new home of each part.
 
 ## Technical details
 

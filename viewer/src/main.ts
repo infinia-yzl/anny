@@ -1505,12 +1505,26 @@ function strandBinding(B: any, name: string, S: any) {
   return { local: { P: set.local, Q: set.tipLocal || null, counts: S.counts, nS, total: S.total, skin: S.skin }, tex, tips: !!tip };
 }
 
+// the model data as base64 text: inline in the single-file page, or in text files next to the page (the page of
+// build.mjs --parts, for hosts that limit the size of a file)
+async function modelData(): Promise<string> {
+  const w = window as any;
+  if (w.MODEL_B64) return w.MODEL_B64;
+  const parts: string[] = w.MODEL_PARTS || ['build/model.b64'];
+  const texts = await Promise.all(parts.map(async (url) => {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`the data file ${url} did not load (${r.status})`);
+    return r.text();
+  }));
+  return texts.join('');
+}
+
 let MeshoptDecoder: any = null;
 let MANIFEST: any = null;
 async function init() {
   setProgress(0.04, 'Decoding model');
   MeshoptDecoder = (window as any).MeshoptDecoderRef;
-  const b64 = (window as any).MODEL_B64 || await (await fetch('build/model.b64')).text();
+  const b64 = await modelData();
   await nextFrame();
   const raw = await gunzip(b64ToBytes(b64));
   setProgress(0.18, 'Unpacking geometry');
