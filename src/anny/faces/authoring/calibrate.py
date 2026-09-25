@@ -24,8 +24,10 @@ Build the calibrated distribution of anny's face shapes
 
    The fit is a Gauss-Newton MAP estimate (``map_mean``) with measurement noise of 15 % of the
    target SD and an independent normal prior of SD ``MEAN_SD`` on each named symmetric shape;
-   the detail shapes keep a zero mean. The adults start from anny's default face, and the
-   other anchors from the adult mean, so that the faces change smoothly with age. The prior
+   the detail shapes keep a zero mean. The adults, the children and the infants start from
+   anny's default face, so that each age keeps anny's own proportions for that age wherever
+   the data allow; the older adults, whose only targets are those of ANSUR II, start from the
+   adult mean, and so do the race offsets. The prior
    keeps the mean faces plausible: renders showed that means fitted without it, or around the
    mean of the ICT fits (whose nose and eye shapes the data contradict), reach the data only
    through implausible faces. Three rounds correct the targets for the bias of the population
@@ -103,8 +105,8 @@ ANSUR_RACES = {"caucasian": 1.0, "african": 2.0, "asian": 4.0}
 UNSEEN_SHARE = 0.05
 UNSEEN_SD = 0.35
 # bounds of the variance factor of each group of face shapes on the ICT covariance (SD factors
-# from 0.71 to 1.41)
-VARIANCE_BOUNDS = (0.5, 2.0)
+# from 0.5 to 1.41): the spread may shrink further than it grows
+VARIANCE_BOUNDS = (0.25, 2.0)
 # SD of the prior of the calibrated means, around anny's default face, on each named symmetric
 # shape: the MakeHuman shapes look plausible within their ranges of 1, and larger prior SDs
 # (tests: 0.5 and 0.8) fit the data only a little better
@@ -599,7 +601,7 @@ def run(samples: int = 400, seed: int = 0):
             mean, sd = np.array(mean), np.array(sd)
             phen_mean, phen_rand = phen_sets(sex, years)
             mu_g, S_g, _ = calibrate_anchor(
-                sim, prior, mu_a, phen_mean, phen_rand, names, mean, sd, 0.15 * sd
+                sim, prior, zero, phen_mean, phen_rand, names, mean, sd, 0.15 * sd
             )
             calibrated[(sex, years)] = (mu_g, S_g)
             report["anchors"].append(
@@ -613,15 +615,14 @@ def run(samples: int = 400, seed: int = 0):
             )
             print(f"{sex} {years:g} years: done ({time.time() - t0:.0f} s)")
 
-        # ---------------- infants: CDC head circumference, from the 3-year anchor
-        mu_3 = calibrated[(sex, 3.0)][0]
+        # ---------------- infants: CDC head circumference
         for years in [y for y in ANCHOR_YEARS if y < 3]:
             hc, hc_sd = cdc_head_circumference(sex, 12 * years)
             phen_mean, phen_rand = phen_sets(sex, years)
             mu_i, S_i, _ = calibrate_anchor(
                 sim,
                 prior,
-                mu_3,
+                zero,
                 phen_mean,
                 phen_rand,
                 ["headcircumference"],
