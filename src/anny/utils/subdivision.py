@@ -11,7 +11,7 @@ weights, corrective shapes) can be subdivided with the same map, in NumPy or in 
 
 :class:`MixedSubdivision` builds a mesh that uses one more level of subdivision in a region
 (typically the head) than elsewhere, joined without cracks. It follows the full-body build of
-the legacy 3D Model experiment (``legacy/3d_model``).
+the 3D Model experiment (commit ``b10538d`` in git history).
 
 Example::
 

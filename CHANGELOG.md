@@ -11,7 +11,7 @@ Highlights:
   of the page follows them: the fine body, the skeleton, the eyes, the hair and the
   corrective shapes. `python -m anny.viewer build` rebuilds the page.
 - **Poses, soft tissue and hair for anny.** These parts come from the `3D Model`
-  experiment, now in `legacy/3d_model`, and they follow the phenotype sliders.
+  experiment, and they follow the phenotype sliders.
 
 ### Added
 
@@ -33,10 +33,12 @@ Highlights:
 - The `viewer` extra (`scipy`, `tetgen`, `embreex`) for the viewer build and the authoring
   tools.
 
-### Deprecated
+### Removed
 
-- The `3D Model` folder moved to `legacy/3d_model`. Its `DEPRECATED.md` names the new home
-  of each part.
+- The `3D Model` experiment. Its parts now live in `anny.utils.subdivision`, `anny.poses`,
+  `anny.correctives`, `anny.hair`, `anny.viewer` and `viewer/`. Git history keeps the folder at
+  commit `b10538d`, including the CC0 pose packs that `anny.poses.authoring` rebuilds the
+  pose library from.
 
 ## v0.6 - 2026-08-06
 

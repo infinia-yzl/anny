@@ -11,7 +11,8 @@
 //  Eyes: refractive cornea, procedural iris, soft-box catchlights
 //  Hair: ~55k strands bound to the skin, Marschner-style shading, deep-opacity shadows
 //  Image: progressive temporal accumulation (soft shadows, AA, stochastic hair coverage)
-//  Ported from the legacy 3D Model viewer (legacy/3d_model/baseline_body/source.zip, web/app.js). The page draws anny
+//  Ported from the viewer of the 3D Model experiment (git commit b10538d, 3D Model/baseline_body/source.zip,
+//  web/app.js). The page draws anny
 //  in the frame of the legacy figure (anny.poses.authoring.rig), so the tuning of the lights and shaders carries over.
 // =====================================================================================
 // @ts-nocheck -- the renderer below is the legacy JavaScript; the new modules (anny_shape, subdivision, body) are typed

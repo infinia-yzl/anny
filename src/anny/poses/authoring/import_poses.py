@@ -18,9 +18,9 @@ The files differ in their axes (MakeHuman exports Y up, MPFB2 in Blender exports
     from anny.poses.authoring import import_poses as IP
     p = IP.load_pose(IP.pose_files()["standing01"])   # posing.Pose with .props and .stool when seated
 
-The pose packs are the zip files of the legacy 3D Model experiment
-(legacy/3d_model/baseline_body/*_cc0.zip); ANNY_POSE_PACKS can name another folder of packs.
-Ported from the legacy 3D Model build (build/import_poses.py).
+The pose packs are the CC0 zip files of the removed 3D Model experiment. Git history keeps them at
+commit b10538d in "3D Model/baseline_body", and ANNY_POSE_PACKS names the folder that holds them
+(see pack_dir). Ported from the legacy 3D Model build (build/import_poses.py).
 """
 
 import glob
@@ -36,17 +36,25 @@ from . import poselib as L
 from .posing import IDX, HEADS, TAILS, PAR, NAMES, NB
 
 
+PACKS = ["makehuman_system_poses"] + [f"poses0{k}" for k in range(1, 6)]
+RESTORE = (
+    "mkdir -p pose_packs && for f in "
+    + " ".join(PACKS)
+    + '; do git show "b10538d:3D Model/baseline_body/${f}_cc0.zip" > pose_packs/${f}_cc0.zip; done'
+)
+
+
 def pack_dir():
-    """folder of the CC0 pose packs (zip files)"""
+    """folder of the CC0 pose packs (zip files), named by ANNY_POSE_PACKS"""
     env = os.getenv("ANNY_POSE_PACKS")
-    if env:
-        return pathlib.Path(env)
-    return (
-        pathlib.Path(__file__).resolve().parents[4]
-        / "legacy"
-        / "3d_model"
-        / "baseline_body"
-    )
+    if not env or not list(pathlib.Path(env).glob("*_cc0.zip")):
+        raise FileNotFoundError(
+            "Rebuilding the pose library needs the CC0 pose packs. Git history keeps them at "
+            "commit b10538d; restore them from the root of the repository with\n    "
+            + RESTORE
+            + "\nand set ANNY_POSE_PACKS=pose_packs."
+        )
+    return pathlib.Path(env)
 
 
 def pack_files():

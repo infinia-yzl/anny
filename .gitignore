@@ -16,3 +16,5 @@ viewer/node_modules/
 viewer/build/
 # the built viewer page is part of the repository
 !viewer/dist/
+# CC0 pose packs restored from git history for rebuilding the pose library
+pose_packs/
