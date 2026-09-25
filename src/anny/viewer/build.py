@@ -180,9 +180,17 @@ def shape_space(model, compact):
     )
 
 
-def corrective_shapes(body, compact_of):
-    """the corrective shapes of anny on the fine body, in the legacy frame, with normal deltas"""
+def corrective_shapes(body, compact_of, weights):
+    """
+    The corrective shapes of anny on the fine body, in the legacy frame, with normal changes.
+
+    The normal change of a shape makes the skinned normal match the corrected surface at the
+    key pose of the shape: the normals of the posed, corrected surface turn back into the rest
+    pose through the blended bone rotation of each vertex. (On the rest body alone, a large
+    shape can fold the surface, and its normals there would point the wrong way.)
+    """
     from anny.correctives import DATA_DIR
+    from anny.correctives.authoring import train
     from safetensors.torch import load_file
 
     spec = json.load(open(DATA_DIR / "soft_tissue.json"))
@@ -190,8 +198,15 @@ def corrective_shapes(body, compact_of):
     base_to_anny = {
         int(b): i for i, b in enumerate(P.preview_mesh()["coarse"]["base_index"])
     }
+    keys = {}
+    for j, J in train.JOINTS.items():
+        names = J["keys"] if J["kind"] == "hinge" else list(J["targets"])
+        for k, nm in zip(names, train.shape_names(j)):
+            for side in "LR":
+                keys[f"{nm}.{side}"] = (j, k, side)
     V0, T = body.V, body.T
     N0 = vertex_normals(V0, T)
+    si, sw = weights["si"], weights["sw"]
     n_coarse = len(P.preview_mesh()["coarse"]["V"])
     shapes = []
     for info in spec["shapes"]:
@@ -202,20 +217,30 @@ def corrective_shapes(body, compact_of):
         D = np.zeros((n_coarse, 3))
         D[anny_idx] = P.RIG.scale * offsets @ M.T
         Df = body.subdivision(D)
-        keep = np.nonzero(np.linalg.norm(Df, axis=1) > 2e-5)[0]
+        moved = np.linalg.norm(Df, axis=1) > 2e-5
         # region of the normals: the moved vertices and their neighbours
-        region = np.zeros(len(V0), bool)
-        region[keep] = True
+        region = moved.copy()
         region[T[region[T].any(1)].ravel()] = True
-        N1 = vertex_normals(V0 + Df, T)
-        dN = np.where(region[:, None], N1 - N0, 0.0)
-        keep = np.nonzero(
-            region
-            & (
-                (np.linalg.norm(Df, axis=1) > 2e-5)
-                | (np.linalg.norm(dN, axis=1) > 4e-3)
-            )
-        )[0]
+        # every triangle around the region, skinned at the key pose with the shape on
+        tri = T[region[T].any(1)]
+        verts = np.unique(tri)
+        F = P.fk(train.key_pose(*keys[name]))
+        posed = np.zeros_like(V0)
+        posed[verts] = P.skin(F, V0[verts] + Df[verts], si[verts], sw[verts])
+        face = np.cross(
+            posed[tri[:, 1]] - posed[tri[:, 0]], posed[tri[:, 2]] - posed[tri[:, 0]]
+        )
+        acc = np.zeros_like(V0)
+        for c in range(3):
+            np.add.at(acc, tri[:, c], face)
+        ids = np.nonzero(region)[0]
+        # the blended bone rotation of each vertex, and the posed normal turned back through it
+        A = np.einsum("nk,nkij->nij", sw[ids], F[0][si[ids]])
+        n_rest = np.linalg.solve(A, acc[ids][:, :, None])[:, :, 0]
+        n_rest /= np.maximum(np.linalg.norm(n_rest, axis=1, keepdims=True), 1e-12)
+        dN = np.zeros_like(V0)
+        dN[ids] = n_rest - N0[ids]
+        keep = np.nonzero(region & (moved | (np.linalg.norm(dN, axis=1) > 4e-3)))[0]
         shapes.append(
             dict(
                 name=name,
@@ -457,7 +482,7 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
     )
 
     # ---------------- correctives (fine level, both sides)
-    shapes, drivers = corrective_shapes(body, compact_of)
+    shapes, drivers = corrective_shapes(body, compact_of, weights)
     recs, entries, off = [], [], 0
     for s in shapes:
         qd = np.round(s["D"] / 1e-5)
