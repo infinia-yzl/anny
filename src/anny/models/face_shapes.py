@@ -87,9 +87,11 @@ def face_shape_spec() -> tuple[FaceShapeParameter, ...]:
 
 
 def face_shape_data_digest() -> str:
-    """a digest of the files that the face-shape rows come from, for the model cache"""
+    """a digest of the files that the face-shape rows and the craniofacial landmarks of the
+    model data come from, for the model cache"""
     h = hashlib.sha256()
-    for path in (FACES_DIR / "face_shapes.json", DETAIL_PATH):
+    landmarks = get_anny_root_dir() / "data" / "keypoints" / "craniofacial.json"
+    for path in (FACES_DIR / "face_shapes.json", DETAIL_PATH, landmarks):
         if path.exists():
             h.update(path.read_bytes())
     return h.hexdigest()[:16]

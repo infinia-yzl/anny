@@ -209,7 +209,9 @@ def place() -> dict[str, list[int]]:
     L["eu.L"] = [
         _arg(_band(skull, 2, z_eye + 0.01, V[L["v"][0], 2] - 0.02), lambda P: -P[:, 0])
     ]
-    cheek = _band(_band(skull, 2, z_eye - 0.04, z_eye), 1, t[1] - 0.04, t[1] - 0.005)
+    # zygion: the widest point of the zygomatic arch, 15 to 35 mm in front of the tragion (the
+    # face keeps widening back to the tragus, over the jaw joint, where the arch has ended)
+    cheek = _band(_band(skull, 2, z_eye - 0.04, z_eye), 1, t[1] - 0.035, t[1] - 0.015)
     L["zy.L"] = [_arg(cheek, lambda P: -P[:, 0])]
     jaw = _band(_band(skull, 2, V[gn, 2], z_sto - 0.005), 1, t[1] - 0.035, t[1] + 0.005)
     # gonion: the corner of the jaw, the widest point low and far back on the jaw line
