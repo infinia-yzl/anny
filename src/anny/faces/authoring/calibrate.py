@@ -282,12 +282,15 @@ def moment_match(
     rounds=2,
 ):
     """the Gaussian (mu, S) of the face values moved to meet the target measurements"""
+    # one-sided shapes act from 0 up, so their means stay at 0 or above
+    mu = np.where(sim.one_sided, np.maximum(mu, 0.0), mu)
     for _ in range(rounds):
         m_pred, J = jacobian(sim, phen_mean, mu, names)
         P = J @ S @ J.T
         N = np.diag(noise_sd**2)
         K = S @ J.T @ np.linalg.inv(P + N)
         mu = mu + K @ (target_mean - m_pred)
+        mu = np.where(sim.one_sided, np.maximum(mu, 0.0), mu)
     m_pred, J = jacobian(sim, phen_mean, mu, names)
     # the part of the measurement covariance that the rest of the body explains
     other = sim(

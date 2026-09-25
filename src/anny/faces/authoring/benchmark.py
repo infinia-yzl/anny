@@ -135,12 +135,8 @@ def measurement_check(sim: Simulator, samples: int = 300) -> list[dict]:
 def photo_comparison(sim, per_group: int, renders: int, seed: int = 0) -> dict:
     regressor, _ = mediapipe_regressor(sim.model, list(range(468)) + [468, 473])
     regressor = regressor.to(dtype=torch.float64)
-    real = {}
-    for split in ("train", "validation"):
-        det = photos.fairface_detections(split)
-        ok = photos.keep(det)
-        real[split] = (det, ok)
-    det, ok = real["train"]
+    det = photos.real_photos()
+    ok = photos.keep(det)
     R_real = photos.ratios(det["landmarks"])
     names = list(R_real)
     X_real = _stack(R_real)

@@ -169,9 +169,16 @@ def keep(
     return ok
 
 
-def fairface_detections(split: str = "validation") -> dict:
-    """MediaPipe on the FairFace photos of a split, with their labels (cached)"""
-    path = cache_dir() / f"fairface_{split}_mediapipe.npz"
+def fairface_detections(
+    split: str = "validation", ages: list[int] | None = None
+) -> dict:
+    """
+    MediaPipe on the FairFace photos of a split, with their labels (cached). ``ages`` limits
+    the detection to some age groups (indices of ``AGE_YEARS``), for the groups that the
+    validation split leaves short.
+    """
+    tag = "" if ages is None else "_ages" + "".join(str(a) for a in sorted(ages))
+    path = cache_dir() / f"fairface_{split}{tag}_mediapipe.npz"
     if path.exists():
         with np.load(path, allow_pickle=False) as z:
             return {k: z[k] for k in z.files}
@@ -181,6 +188,9 @@ def fairface_detections(split: str = "validation") -> dict:
     detector, parts = Detector(), []
     for file in fetch_fairface(split):
         table = pq.read_table(file)
+        if ages is not None:
+            rows = np.flatnonzero(np.isin(table.column("age").to_numpy(), ages))
+            table = table.take(rows)
         images = (
             np.asarray(Image.open(io.BytesIO(b["bytes"])).convert("RGB"))
             for b in table.column("image").to_pylist()
@@ -197,6 +207,24 @@ def fairface_detections(split: str = "validation") -> dict:
     }
     det["score_names"] = parts[0]["score_names"]
     np.savez(path, **det)
+    return det
+
+
+# the age groups (0-2, 50-59, 60-69 and 70+) with fewer than about 100 kept photos per sex in
+# the validation split; the benchmark adds their photos from the train split
+SHORT_AGE_GROUPS = [0, 6, 7, 8]
+
+
+def real_photos() -> dict:
+    """detections of the validation split and of the short age groups of the train split"""
+    parts = [
+        fairface_detections("validation"),
+        fairface_detections("train", SHORT_AGE_GROUPS),
+    ]
+    det = {
+        k: np.concatenate([p[k] for p in parts]) for k in parts[0] if k != "score_names"
+    }
+    det["score_names"] = parts[0]["score_names"]
     return det
 
 

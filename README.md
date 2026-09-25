@@ -98,9 +98,26 @@ output = model(pose_parameters=posed["pose_parameters"], phenotype_kwargs=phenot
 output = SoftTissueCorrectives(model)(output)  # corrected output["vertices"]
 ```
 
+### Face and head shapes
+
+`anny.Anny(face_shapes="all")` adds 103 named, symmetric shapes of the head and the face, built from the MakeHuman face targets: head archetypes (oval, round, square and others), and the size, the position and the form of the eyes, the brows, the nose, the cheeks, the mouth, the chin and the ears. Each group of shapes scales with the size of the matching part of the head, so the shapes stay in proportion on a child. `anny.faces.distribution.FaceShapeDistribution` draws face values for any age, gender, weight and muscle, from a distribution calibrated against measured faces, and `anny.faces.measurements` measures heads as the 3D Facial Norms database and the ANSUR II survey do:
+
+```python
+import anny, torch
+from anny.faces.distribution import FaceShapeDistribution
+from anny.faces.measurements import CraniofacialMeasurements
+model = anny.Anny(face_shapes="all")
+phenotype = {"age": torch.full((4,), 0.8), "gender": torch.tensor([0.0, 0.0, 1.0, 1.0])}
+faces = FaceShapeDistribution(model).sample(phenotype)
+output = model(phenotype_kwargs=phenotype, face_shape_kwargs=faces)
+lengths = CraniofacialMeasurements(model)(output)["headlength"]  # mm
+```
+
+The calibration uses only free sources that download without an account: the ICT-FaceKit identity space, ANSUR II, the 3D Facial Norms summary statistics, the CDC growth charts, and FairFace photographs with MediaPipe for the benchmark (see `src/anny/data/faces/SOURCES.md` and `python -m anny.faces.authoring.benchmark`).
+
 ### Web viewer
 
-`viewer/dist/anny_viewer.html` renders anny in a browser with WebGL2, from one file. It carries skin shading with subsurface scattering, eyes with a refractive cornea and about 56,000 hair strands. Its Character panel holds anny's phenotype sliders, which run from 0 to 1 with anny's default at 0.5, and its Pose panel plays the poses and clips of `anny.poses` with the corrective shapes. To rebuild the page (node 22 or later is needed):
+`viewer/dist/anny_viewer.html` renders anny in a browser with WebGL2, from one file. It carries skin shading with subsurface scattering, eyes with a refractive cornea and about 56,000 hair strands. Its Character panel holds anny's phenotype sliders, which run from 0 to 1 with anny's default at 0.5, and the face shapes, with a Random face button that draws from the calibrated distribution. Its Pose panel plays the poses and clips of `anny.poses` with the corrective shapes. To rebuild the page (node 22 or later is needed):
 
 ```bash
 uv sync --extra viewer
@@ -155,6 +172,8 @@ The code of Anny, Copyright (c) 2025 NAVER Corp., is licensed under the Apache L
 **data/mpfb2**: *Anny* relies on [MakeHuman](https://static.makehumancommunity.org/) assets adapted from [MPFB2](https://github.com/makehumancommunity/mpfb2/) that are licensed under the [CC0 1.0 Universal](src/anny/data/mpfb2/LICENSE.md) License.
 
 **data/faceunits01**: Facial actions of *Anny* rely on [Face Units asset pack](https://static.makehumancommunity.org/assets/assetpacks/index.html#functional-asset-packs) by Mika Suominen, licensed under the [CC0 1.0 Universal](src/anny/data/mpfb2/LICENSE.md) License.
+
+**data/faces, data/keypoints/mediapipe.json, data/shape_calibration/face_prior.safetensors**: the face-shape distribution derives from the [ICT-FaceKit](https://github.com/USC-ICT/ICT-FaceKit) identity space (MIT licence), the ANSUR II survey (public release), the [3D Facial Norms](https://www.facebase.org/resources/human/facial_norms/) summary statistics (FaceBase; acknowledgement in `src/anny/data/faces/SOURCES.md`) and the CDC growth charts (public domain). The MediaPipe landmarks on anny derive from MediaPipe's canonical face model (Apache 2.0). No source data is redistributed.
 
 **data/soma**: *Anny* provide a "soma" topology adapted from [SOMA-X](https://github.com/NVlabs/SOMA-X) which is licenced under the [Apache 2.0](https://github.com/NVlabs/SOMA-X/blob/main/LICENSE) license.
 
