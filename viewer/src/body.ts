@@ -184,7 +184,8 @@ export class AnnyBody {
   nBody: number; nc: number; nFine: number;
   quads: Uint32Array; detail: Int16Array; detailStep: number;
   index: Uint32Array;
-  rest0: Float32Array;       // fine positions of anny's default body (the 'rest' attribute)
+  rest0: Float32Array;       // fine positions of anny's default body (the 'rest' attribute, 16 bits)
+  pos0: Float32Array;        // fine positions of anny's default body as update() builds it
   ring: Uint32Array;            // four neighbours per fine vertex (ringNeighbours)
   area: Float32Array; area0: Float32Array;   // ringFrames' area now and on anny's default body
   localDetail: Float32Array;    // per fine vertex: the detail layers in the frame (t1, t2, n), per unit of local size
@@ -240,6 +241,8 @@ export class AnnyBody {
       W[o + 2] = a * Tt[o + 2] + b * t2z + n * Nt[o + 2];
       P[o] = S[o] + W[o]; P[o + 1] = S[o + 1] + W[o + 1]; P[o + 2] = S[o + 2] + W[o + 2];
     }
+    // the strands bind to this body as the updates rebuild it (the rest attribute holds it in 16 bits)
+    this.pos0 = P.slice();
     this.ring = ringNeighbours(this.index, S, Nt, Tt, nF);
     ringFrames(S, this.ring, this.sn, this.tan, this.area);
     this.area0 = this.area.slice();
@@ -319,7 +322,7 @@ export class AnnyBody {
   // (frames: optional storage for StrandSet.frames, such as the data of a texture; tip: the skin under the tips)
   bindStrands(name: string, P: Float32Array, counts: Uint8Array, corners: Uint32Array, bary: Float32Array, frames?: Float32Array,
     tip?: { corners: Uint32Array; bary: Float32Array }) {
-    const nS = counts.length, R = this.rest0;
+    const nS = counts.length, R = this.pos0;
     const roots = anchors(R, corners, bary, nS);
     if (name === 'hair') this.scalpRef = rmsSize(roots);
     const set: StrandSet = { counts, total: P.length / 3, corners, bary, local: this.toLocal(P, counts, corners, roots),
@@ -331,9 +334,10 @@ export class AnnyBody {
     this.strands[name] = set;
   }
 
-  // strand points in the frames of the given triangles (rest positions), relative to the anchors, per unit of scalp size
+  // strand points in the frames of the given triangles (anny's default body), relative to the anchors, per unit of
+  // scalp size
   private toLocal(P: Float32Array, counts: Uint8Array, corners: Uint32Array, anchor: Float64Array): Float32Array {
-    const R = this.rest0, F = new Float64Array(9), local = new Float32Array(P.length);
+    const R = this.pos0, F = new Float64Array(9), local = new Float32Array(P.length);
     let p = 0;
     for (let i = 0; i < counts.length; i++) {
       triFrame(R, corners[i * 3], corners[i * 3 + 1], corners[i * 3 + 2], F);
