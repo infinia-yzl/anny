@@ -25,7 +25,7 @@ Build the calibrated distribution of anny's face shapes
    The mean moves by linearised Gaussian conditioning of the face values on the measurements:
    ``K (target - simulated)`` with ``K = S J^T (J S J^T + N)^-1``, where J comes from finite
    differences and the simulated mean from bodies and faces drawn from the current Gaussian,
-   over three rounds. The spread changes by one variance factor per group of face shapes (head,
+   over six rounds. The spread changes by one variance factor per group of face shapes (head,
    forehead, brows, eyes, nose, cheeks, mouth, chin, ears, detail), within ``VARIANCE_BOUNDS``,
    so that the predicted SD of each measurement, from the face and from the rest of the body
    (height, weight, muscle, proportions), meets the data. The factors keep the correlations of
@@ -299,7 +299,7 @@ def moment_match(
     target_mean,
     target_sd,
     noise_sd,
-    rounds=3,
+    rounds=6,
     seed=0,
 ):
     """
