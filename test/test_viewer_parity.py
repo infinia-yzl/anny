@@ -38,7 +38,9 @@ def node_available():
 class TestViewerParity(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.model = anny.Anny(topology="anny-quads").to(dtype=torch.float64)
+        cls.model = anny.Anny(topology="anny-quads", phenotypes="all").to(
+            dtype=torch.float64
+        )
         cls.dir = pathlib.Path(tempfile.mkdtemp())
         model = cls.model
         rng = np.random.default_rng(3)
@@ -147,9 +149,9 @@ class TestViewerFaceParity(unittest.TestCase):
     def setUpClass(cls):
         from anny.faces.distribution import DEFAULT_PATH
 
-        model = anny.Anny(topology="anny-quads", face_shapes="all").to(
-            dtype=torch.float64
-        )
+        model = anny.Anny(
+            topology="anny-quads", face_shapes="all", phenotypes="all"
+        ).to(dtype=torch.float64)
         cls.model = model
         cls.dir = pathlib.Path(tempfile.mkdtemp())
         rng = np.random.default_rng(5)
@@ -278,6 +280,54 @@ class TestViewerFaceParity(unittest.TestCase):
             with torch.no_grad():
                 mean = dist.mean(s["phenotype"])[0].numpy()
             self.assertLess(np.abs(M[i] - mean).max(), 1e-4)
+
+    def test_random_faces(self):
+        # sampleFace with the uniform numbers of parity.mjs against the distribution in Python:
+        # the mean with the race offsets, the low-rank factor scaled by the default spread, and
+        # the slider ranges
+        from anny.faces.distribution import (
+            DEFAULT_PATH,
+            DEFAULT_SPREAD,
+            FaceShapeDistribution,
+        )
+        from anny.utils.interpolation import linear_interpolation_coefficients
+
+        if not DEFAULT_PATH.exists():
+            self.skipTest("no face prior")
+        prior = self.tables["prior"]
+        self.assertEqual(prior["spread"], DEFAULT_SPREAD)
+        F = len(self.model.face_shape_labels)
+        R = prior["rank"]
+        A = len(prior["age_anchors"])
+        factors = np.fromfile(self.dir / "face_prior.bin", dtype=np.float32)
+        factors = factors.reshape(A, 2, F, R).astype(np.float64)
+        samples = np.fromfile(self.dir / "face_samples.bin", dtype=np.float64)
+        samples = samples.reshape(-1, F)
+        lo, hi = np.array(self.tables["ranges"]).T
+        dist = FaceShapeDistribution(self.model)
+        g0, g1 = prior["gender_anchors"]
+        for i, s in enumerate(self.settings):
+            params = self._params(s)
+            age = params[:, self.model.phenotype_labels.index("age")]
+            gender = params[0, self.model.phenotype_labels.index("gender")].item()
+            wa = linear_interpolation_coefficients(
+                age, torch.tensor(prior["age_anchors"], dtype=age.dtype), False
+            )[0].numpy()
+            t = min(1.0, max(0.0, (gender - g0) / (g1 - g0)))
+            factor = sum(
+                wa[a] * ((1 - t) * factors[a, 0] + t * factors[a, 1]) for a in range(A)
+            )
+            u = [((k + 1) * 0.6180339887498949 + 0.1 * i) % 1 for k in range(R + 1)]
+            z = np.zeros(R)
+            for k in range(0, R, 2):
+                r = np.sqrt(-2 * np.log(max(u[k], 1e-12)))
+                z[k] = r * np.cos(2 * np.pi * u[k + 1])
+                if k + 1 < R:
+                    z[k + 1] = r * np.sin(2 * np.pi * u[k + 1])
+            with torch.no_grad():
+                mean = dist.mean(s["phenotype"])[0].numpy()
+            expected = np.clip(mean + DEFAULT_SPREAD * factor @ z, lo, hi)
+            self.assertLess(np.abs(samples[i] - expected).max(), 1e-4, i)
 
 
 if __name__ == "__main__":

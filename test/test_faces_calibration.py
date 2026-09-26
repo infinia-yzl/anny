@@ -2,12 +2,19 @@
 # Copyright (C) 2025 NAVER Corp.
 # Apache License, Version 2.0
 
+import importlib.util
+import inspect
 import unittest
 
 import torch
 
 import anny
-from anny.faces.distribution import DEFAULT_PATH, FaceShapeDistribution
+from anny.faces.distribution import (
+    DEFAULT_PATH,
+    DEFAULT_SPREAD,
+    FaceShapeDistribution,
+    load_prior,
+)
 from anny.faces.measurements import (
     ANSUR_MEASUREMENTS,
     TDFN_MEASUREMENTS,
@@ -107,6 +114,98 @@ class TestFaceShapeDistribution(unittest.TestCase):
             (dist.mean({"age": 0.8}) - full[:, idx]).abs().max().item(), 1e-6
         )
         self.assertEqual(dist.sample(batch_size=5).shape, (5, 3))
+
+
+@unittest.skipUnless(DEFAULT_PATH.exists(), "the face prior is not built")
+@unittest.skipUnless(
+    importlib.util.find_spec("requests"),
+    "the calibration needs the examples extra (requests)",
+)
+class TestPlausibleFaces(unittest.TestCase):
+    """
+    guards of the choices that keep random faces plausible (anny.faces.authoring.calibrate):
+    renders showed faces that looked old and harsh while any of them was undone. A change that
+    breaks one of these tests needs the review grid (python -m anny.faces.authoring.review) and
+    the judgement of a person, not only new numbers.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from anny.faces.authoring import calibrate
+
+        cls.calibrate = calibrate
+        cls.tensors, meta = load_prior()
+        cls.labels = meta["face_labels"]
+        cls.years = meta["anchor_years"]
+        tril = cls.tensors["scale_tril"].double()
+        cls.sd = (tril**2).sum(-1).sqrt()  # (A, 2, F)
+
+    def test_means_move_the_skull_only(self):
+        # means that moved the facial features gave big noses, forward chins and thin lips
+        other = torch.tensor([k not in self.calibrate.MEAN_SHAPES for k in self.labels])
+        self.assertEqual(self.tensors["mean"][..., other].abs().max().item(), 0.0)
+        self.assertEqual(
+            self.tensors["race_offsets"][..., other].abs().max().item(), 0.0
+        )
+
+    def test_fixed_shapes(self):
+        for name in self.calibrate.FIXED_SHAPES:
+            self.assertLess(self.sd[..., self.labels.index(name)].max().item(), 1e-4)
+
+    def test_no_adult_detail_for_children(self):
+        from anny.models.face_shapes import face_shape_parameter
+
+        detail = [
+            i
+            for i, k in enumerate(self.labels)
+            if face_shape_parameter(k).source == "ict"
+        ]
+        for a, years in enumerate(self.years):
+            sd = self.sd[a][..., detail].max().item()
+            if years < self.calibrate.DETAIL_YEARS:
+                self.assertLess(sd, 1e-4, years)
+            else:
+                self.assertGreater(sd, 0.05, years)
+
+    def test_spread_settings(self):
+        # the spread of the ICT faces is an upper bound, and random faces draw at most 0.6 of it
+        self.assertLessEqual(self.calibrate.VARIANCE_BOUNDS[1], 1.0)
+        self.assertLessEqual(DEFAULT_SPREAD, 0.6)
+        default = inspect.signature(FaceShapeDistribution.sample).parameters["spread"]
+        self.assertEqual(default.default, DEFAULT_SPREAD)
+
+    # the facial spread of the approved prior (commit d888932), in mm: the mean of the 1,000 largest
+    # SDs of the vertices of 48 faces drawn at spread 1, with the skull-size shapes at their mean;
+    # (anny age, gender) -> SD
+    APPROVED_FACIAL_SPREAD = {
+        (0.05, 0.0): 5.94,  # 1 year
+        (0.05, 1.0): 5.82,
+        (0.329, 0.0): 5.71,  # 8 years
+        (0.329, 1.0): 4.04,
+        (0.466, 0.0): 5.21,  # 12 years
+        (0.466, 1.0): 6.44,
+        (0.783, 0.0): 5.16,  # 28 years
+        (0.783, 1.0): 4.91,
+        (0.87, 0.0): 5.01,  # 75 years
+        (0.87, 1.0): 4.64,
+    }
+
+    def test_facial_spread_does_not_grow(self):
+        # wider spreads gave harsh faces: 12-year-olds of the first calibration varied by half as
+        # much again as adults
+        model = anny.Anny(face_shapes="all").to(dtype=torch.float64)
+        dist = FaceShapeDistribution(model)
+        skull = [model.face_shape_labels.index(k) for k in self.calibrate.MEAN_SHAPES]
+        for (age, gender), approved in self.APPROVED_FACIAL_SPREAD.items():
+            n = 48
+            phen = {"age": torch.full((n,), age), "gender": torch.full((n,), gender)}
+            g = torch.Generator().manual_seed(0)
+            with torch.no_grad():
+                faces = dist.sample(phen, generator=g, spread=1.0)
+                faces[:, skull] = dist.mean(phen)[:, skull]
+                v = model(phenotype_kwargs=phen, face_shape_kwargs=faces)["vertices"]
+            spread = 1000 * v.std(0).norm(dim=-1).topk(1000).values.mean().item()
+            self.assertLessEqual(spread, 1.05 * approved, (age, gender))
 
 
 if __name__ == "__main__":

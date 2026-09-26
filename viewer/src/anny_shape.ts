@@ -145,6 +145,8 @@ export interface FacePrior {
   age_anchors: number[];
   gender_anchors: number[];
   means: number[][][];                    // (A, 2, F)
+  races?: string[];                       // anny's race phenotypes, in the order of race_offsets
+  race_offsets?: number[][][];            // (2, races, F): offsets of the mean, weighted by the shares of the races
   rank: number;
   spread?: number;                        // the scale of the spread of random faces (anny.faces.distribution.DEFAULT_SPREAD)
 }
@@ -254,6 +256,17 @@ export function facePriorParameters(face: FaceData, values: Record<string, numbe
       for (let f = 0; f < F; f++) mean[f] += w * m[f];
       for (let i = 0; i < F * R; i++) factor[i] += w * face.prior[o + i];
     }
+  }
+  // the race offsets, weighted by the shares of the race sliders (equal shares when they are all 0)
+  if (p.race_offsets && p.races) {
+    const r = p.races.map(val), sum = r.reduce((a, b) => a + b, 0);
+    p.races.forEach((_, k) => {
+      const share = sum > 0 ? r[k] / sum : 1 / p.races.length;
+      for (let g = 0; g < 2; g++) {
+        const w = share * (g === 0 ? 1 - t : t), off = p.race_offsets[g][k];
+        if (w !== 0) for (let f = 0; f < F; f++) mean[f] += w * off[f];
+      }
+    });
   }
   return { mean, factor };
 }
