@@ -321,5 +321,34 @@ class TestStrands(unittest.TestCase):
         )
 
 
+class TestDensityVolume(unittest.TestCase):
+    def test_cover_follows_the_fade(self):
+        from anny.hair import styles as H
+
+        layout = load_layout()
+        style = H.load_style("low_taper_fade", layout)
+        vol, lo, h = H.density_volume(style, layout)
+        self.assertEqual(vol.shape[3], 4)
+        cover = H.sample_volume(vol, lo, h, layout.guide_position, channel=2)
+        rs = style.spec["render"]
+        phi, el = layout.guide_chart[:, 0], layout.guide_chart[:, 1]
+        D = np.minimum(style.length, style.available)
+        D = np.minimum(
+            D, chart.fade_length(phi, el, rs["fade"], 0.0, rs.get("hairline"))
+        )
+        on = chart.coverage(phi, el, rs.get("hairline")) > 0.99
+        # the top shades the scalp fully; the bottom of the fade (the clipper's 0.8 mm up to 2 mm) shades it lightly
+        self.assertGreater(cover[on & (D > 0.01)].mean(), 0.9)
+        self.assertLess(cover[on & (D < 0.002)].mean(), 0.5)
+
+    def test_bald_has_no_cover(self):
+        from anny.hair import styles as H
+
+        layout = load_layout()
+        vol, _, _ = H.density_volume(H.load_style("bald", layout), layout)
+        self.assertTrue(np.all(vol[..., 0] == 255))
+        self.assertTrue(np.all(vol[..., 1:] == 0))
+
+
 if __name__ == "__main__":
     unittest.main()

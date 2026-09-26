@@ -1402,12 +1402,12 @@
  },
  "physics": {
   "global_stiffness": [
-   0.9,
-   0.08
+   0.8,
+   0.35
   ],
-  "local_stiffness": 0.6,
-  "damping": 0.08,
-  "gravity": 0.35
+  "local_stiffness": 0.8,
+  "damping": 0.15,
+  "gravity": 1.0
  },
  "controls": {
   "length": [

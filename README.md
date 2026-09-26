@@ -86,6 +86,7 @@ Anny ships a pose library, corrective shapes for the joints and hair that follow
 - `anny.poses` holds 50 poses and 7 animation clips for the `anny` rig as `local-ref` pose parameters. The root offset scales with the hip height of the body, the lowest point of the posed body stands on the floor, and the seated poses come with a stool that fits the body (`anny.poses.names()` lists the entries).
 - `anny.correctives.SoftTissueCorrectives(model)` adds corrective shapes at the shoulders, the elbows, the hips and the knees. A soft-tissue simulation made the shapes on the default body, and each shape scales with the size of the body around it.
 - `anny.hair.StrandBinding` ties hair strands to the skin at their roots and at their tips, so a groom made on one body follows every setting of the sliders.
+- `anny.hair.styles` holds 25 procedural hairstyles: short barber cuts (buzz, crew, low taper fade, mid fade, textured and French crops, curly top, side part, quiff, pixie), medium and long cuts (curtains, mullet, wolf cut, bobs, lob, long layers, long straight and wavy) and tied styles (ponytails and buns). Each style is a JSON spec and about 2,000 guide curves on a scalp layout that all styles share; `strands()` builds the render strands from the guides, with the length, curl, volume, density and fade of the style as parameters. `anny.hair.dynamics.HairSim` is the solver of the hair's physics.
 - `anny.utils.subdivision` holds Catmull-Clark subdivision as sparse linear operators, with a mixed subdivision that adds one level on the head.
 
 ```python
@@ -117,12 +118,14 @@ The distribution takes the spread of faces from fits of anny to the ICT-FaceKit 
 
 ### Web viewer
 
-`viewer/dist/anny_viewer.html` renders anny in a browser with WebGL2, from one file. It carries skin shading with subsurface scattering, eyes with a refractive cornea and about 56,000 hair strands. Its Character panel holds character presets (Asian and Eurasian women and men) that set the body, the face and the colours; colour looks; anny's phenotype sliders, which run from 0 to 1 with anny's default at 0.5, with the three race phenotypes, whose values mix by their shares (Eurasian is Asian and Caucasian at equal values); and the face shapes, with a Random face button that draws from the calibrated distribution. Its Pose panel plays the poses and clips of `anny.poses` with the corrective shapes. To rebuild the page (node 22 or later is needed):
+`viewer/dist/anny_viewer.html` renders anny in a browser with WebGL2, from one file. It carries skin shading with subsurface scattering, eyes with a refractive cornea and hair of up to 64,000 strands. Its Character panel holds character presets (Asian and Eurasian women and men) that set the body, the face and the colours; colour looks; anny's phenotype sliders, which run from 0 to 1 with anny's default at 0.5, with the three race phenotypes, whose values mix by their shares (Eurasian is Asian and Caucasian at equal values); and the face shapes, with a Random face button that draws from the calibrated distribution. Its Pose panel plays the poses and clips of `anny.poses` with the corrective shapes. To rebuild the page (node 22 or later is needed):
 
 ```bash
 uv sync --extra viewer
 uv run python -m anny.viewer build
 ```
+
+The Hair section of the Character panel holds the 25 styles of `anny.hair.styles` and their sliders: length, curl, volume, density and, on the fades, the height of the fade. The styles with a side part can take it on either side. The GPU builds the strands from the guides of the style, so a slider moves the hair at once and a still picture costs no hair work. The Physics button next to the Hair button turns the hair's physics on and off. The solver moves 384 guides with the dynamic follow-the-leader method of Müller et al. (2012) and the shape constraints of Han and Harada (2012), against capsules on the head, the neck, the chest and the shoulders. The groom keeps its shape while the head rests, since only the change of gravity in the head's frame acts on it, and the solver sleeps once the hair comes to rest.
 
 The build caches its slow stages, such as the bakes and the hair groom, under the cache directory (see [Caching](#caching)). For hosts that limit the size of a file, `node viewer/build.mjs --parts <dir>` also writes the page with its model data in separate text files that the page fetches next to itself. The viewer grew from an earlier stand-alone experiment, the `3D Model` folder, which git history keeps at commit `b10538d`.
 

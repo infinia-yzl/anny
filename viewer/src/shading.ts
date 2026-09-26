@@ -262,8 +262,8 @@ attribute vec3 rest;   // rest shape: skin detail, moles and creases stay fixed 
 uniform vec4 uWearOn;
 varying vec3 vWPos; varying vec3 vN; varying vec3 vNs; varying vec3 vAlb; varying vec3 vObj; varying vec4 vA; varying vec4 vB; varying vec4 vC; varying vec4 vD; varying vec3 vAx;
 varying vec3 vN0; varying vec3 vR0; varying vec3 vR1; varying vec3 vR2; varying vec3 vHOut;
-// the hair over the skin (anny.hair.styles.density_volume, on anny's default head): occlusion and the density near the
-// scalp, which tints it
+// the hair over the skin (anny.hair.styles.density_volume, on anny's default head): occlusion, the density near the
+// scalp, and the cover of the scalp by strands long enough to shade it (fades and short cuts); both tint the scalp
 uniform highp sampler3D uHairOcc; uniform vec3 uHairOccLo; uniform vec3 uHairOccSize; uniform float uHairOn; uniform mat4 uHeadInv;
 ${COVER_GLSL}
 void main() {
@@ -280,9 +280,10 @@ void main() {
   vA = attrA; vB = attrB; vC = attrC; vD = attrD;
   if (uHairOn > 0.5) {
     vec3 hq = (uHeadInv * vec4(wp.xyz + vN * 0.0015, 1.0)).xyz;
-    vec2 hv = textureLod(uHairOcc, (hq - uHairOccLo) / uHairOccSize, 0.0).rg;
+    vec3 hv = textureLod(uHairOcc, (hq - uHairOccLo) / uHairOccSize, 0.0).rgb;
     vA.z *= pow(hv.x, 0.6);
-    vA.w = smoothstep(0.08, 0.45, hv.y);
+    // the tint needs roots under it: hair that lies on the neck or the chest leaves the skin as it is
+    vA.w = hv.z * max(0.75, smoothstep(0.08, 0.45, hv.y));
   }
   // contact shade from the wearables that are on (one slot each)
   vec4 wz = mix(vec4(1.0), attrW, uWearOn);

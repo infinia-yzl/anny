@@ -663,11 +663,29 @@ def hair_buffers(pk, body, weights, n_bones):
     layout = load_layout()
     binding = H.Binding.build(layout, V, T)
     G, R = layout.guides, layout.roots
-    pk.add("hair_guide_root", layout.guide_position.astype(np.float32), "raw", G * 12, 1)
-    pk.add("hair_guide_bind", bind_record(binding.guide_tri, binding.guide_bary, T),
-           "sparse", G, 20, body="head", fields=3, sort="none")
-    pk.add("hair_root_bind", bind_record(binding.root_tri, binding.root_bary, T),
-           "sparse", R, 20, body="head", fields=3, sort="none")
+    pk.add(
+        "hair_guide_root", layout.guide_position.astype(np.float32), "raw", G * 12, 1
+    )
+    pk.add(
+        "hair_guide_bind",
+        bind_record(binding.guide_tri, binding.guide_bary, T),
+        "sparse",
+        G,
+        20,
+        body="head",
+        fields=3,
+        sort="none",
+    )
+    pk.add(
+        "hair_root_bind",
+        bind_record(binding.root_tri, binding.root_bary, T),
+        "sparse",
+        R,
+        20,
+        body="head",
+        fields=3,
+        sort="none",
+    )
     info = np.zeros((G, 12), np.uint8)
     u16 = np.concatenate([layout.guide_mirror[:, None], layout.guide_sim], 1)
     info[:, 0:8] = u16.astype("<u2").view(np.uint8).reshape(G, 8)
@@ -679,7 +697,11 @@ def hair_buffers(pk, body, weights, n_bones):
     for k in range(3):
         vi = corners[:, k]
         for j in range(weights["si"].shape[1]):
-            np.add.at(W, (np.arange(G), weights["si"][vi, j]), binding.guide_bary[:, k] * weights["sw"][vi, j])
+            np.add.at(
+                W,
+                (np.arange(G), weights["si"][vi, j]),
+                binding.guide_bary[:, k] * weights["sw"][vi, j],
+            )
     si, sw = top_weights(W, 4)
     pk.add("hair_guide_skin", skin_record(si, sw), "raw", G * 8, 1)
     data = np.zeros((R, 16), np.uint8)
@@ -695,14 +717,24 @@ def hair_buffers(pk, body, weights, n_bones):
         P = codes.shape[1] + 1
         pk.add(f"hair_{name}_codes", codes, "raw", codes.size, 1)
         rec = np.zeros((G, 20), np.uint8)
-        f32 = np.stack([tensors[f"{name}.segment"], style.length, style.flick, style.pivot], 1)
+        f32 = np.stack(
+            [tensors[f"{name}.segment"], style.length, style.flick, style.pivot], 1
+        )
         rec[:, 0:16] = f32.astype("<f4").view(np.uint8).reshape(G, 16)
         tri, bary, on = H.tip_binding(style, V, T)
         rec[:, 16] = style.group
         rec[:, 17] = on
         pk.add(f"hair_{name}_guide", rec, "raw", G * 20, 1)
-        pk.add(f"hair_{name}_tip", bind_record(tri, bary, T),
-               "sparse", G, 20, body="head", fields=3, sort="none")
+        pk.add(
+            f"hair_{name}_tip",
+            bind_record(tri, bary, T),
+            "sparse",
+            G,
+            20,
+            body="head",
+            fields=3,
+            sort="none",
+        )
         spec = {k: v for k, v in style.spec.items() if k != "groom"}
         styles.append(dict(spec, points=int(P)))
     from anny.hair import chart as C
@@ -721,6 +753,8 @@ def hair_buffers(pk, body, weights, n_bones):
             ray=H.VOLUME_RAY,
             k=H.VOLUME_K,
             near=H.VOLUME_NEAR,
+            cover_length=list(H.COVER_LENGTH),
+            cover_floor=H.COVER_FLOOR,
         ),
     )
 

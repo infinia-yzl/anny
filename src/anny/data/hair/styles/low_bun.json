@@ -72,15 +72,7 @@
   "fade": null,
   "density": 1.0
  },
- "physics": {
-  "global_stiffness": [
-   1.0,
-   0.05
-  ],
-  "local_stiffness": 0.5,
-  "damping": 0.06,
-  "gravity": 0.6
- },
+ "physics": null,
  "controls": {
   "length": [
    0.85,

@@ -70,12 +70,12 @@
  },
  "physics": {
   "global_stiffness": [
-   1.0,
-   0.05
+   0.06,
+   0.004
   ],
-  "local_stiffness": 0.5,
-  "damping": 0.06,
-  "gravity": 0.6
+  "local_stiffness": 0.3,
+  "damping": 0.05,
+  "gravity": 1.0
  },
  "controls": {
   "length": [

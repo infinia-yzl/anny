@@ -25,6 +25,7 @@ import {
   SKIN_VS, SSS_GLSL,
 } from './shading.ts';
 import { Hair } from './hair/gpu.ts';
+import { COLLIDERS, fitColliders } from './hair/colliders.ts';
 import { STRAND_VS } from './hair/glsl.ts';
 
 const qs = new URLSearchParams(location.search);
@@ -902,9 +903,18 @@ function rigForBody() {
   for (let i = 0; i < RIG.heads.length; i++) { RIG.heads[i][0] = J[i * 3]; RIG.heads[i][1] = J[i * 3 + 1]; RIG.heads[i][2] = J[i * 3 + 2]; }
   updateHeadMap();
   updateCorrectiveScales();
+  fitHairColliders();
   groundMotion();
   setRigRest();
   evalMotion();
+}
+// the colliders of the hair's physics on the current body at rest (hair/colliders.ts): the head sphere sits at the
+// cranium's centre of anny's default body, carried to the current head
+function fitHairColliders() {
+  if (!HAIR || !RIG.ready) return;
+  const c = new THREE.Vector3().fromArray(MANIFEST.hair.centre).applyMatrix4(HEADMAP.m);
+  const names = RIG.bones.map((b: any) => b.name), b = BODY.anny;
+  HAIR.setColliders(fitColliders(COLLIDERS, names, b.joints, { cranium: [c.x, c.y, c.z] }, b.coarse, b.nBody, HEADMAP.k));
 }
 // the height of the root above the floor: the library scales root offsets, stools and bounds by it
 function hipHeight() { return RIG.heads[RIG.root][1] - BODY.anny.floor; }
@@ -1299,7 +1309,7 @@ function poseChanged() {
   if (!RIG.ready) return;
   RIG.holder.updateMatrixWorld(true);
   applyCorrectives();
-  if (HAIR) { RIG.skel.update(); HAIR.setPose(RIG.skel.boneMatrices); }
+  if (HAIR) { RIG.skel.update(); HAIR.setPose(RIG.skel.boneMatrices, RIG.head); }
   const hb = RIG.bones[RIG.head];
   _headSkin.multiplyMatrices(hb.matrixWorld, RIG.skel.boneInverses[RIG.head]);
   // the head of anny's default body, carried to the current body and then posed
@@ -1659,6 +1669,10 @@ async function init() {
   HAIR = new Hair(meta.hair, (name) => B[name].data, BODY.anny, U.uHeadInv);
   HAIR.lod = isSmall ? 0.5 : 1;
   HAIR.setStyle(meta.hair.styles.some((x) => x.name === 'medium_tousled') ? 'medium_tousled' : meta.hair.styles[0].name);
+  // the physics runs unless the page takes still pictures (tests and reviews) or the address turns it off
+  HAIR.setPhysics(qs.has('physics') ? qs.get('physics') !== 'off' : !SHOT);
+  $('toggle-physics')?.setAttribute('aria-pressed', String(HAIR.physics));
+  fitHairColliders();
   buildHairUI();
   Object.assign(U, HAIR.volumeUniforms());
   U.uHairOn.value = 1;
@@ -1845,6 +1859,7 @@ function resetAccum() { accCount = 0; }
 controls.addEventListener('change', resetAccum);
 controls.addEventListener('start', () => { document.body.classList.add('interacted'); });
 let lastFrameT = performance.now();
+let hairClock = false;   // a test steps the hair's physics itself (window.stepHair)
 const _hc = new THREE.Vector3();
 function animate() {
   requestAnimationFrame(animate);
@@ -1866,6 +1881,8 @@ function animate() {
   const moved = controls.update();
   if (controls.autoRotate) resetAccum();
   if (HAIR && HAIR.due()) resetAccum();
+  // the hair's physics: it sleeps once the hair rests, so the picture can refine
+  if (HAIR && hairWanted && !hairClock && HAIR.stepPhysics(dt)) { shadowsDirty = true; resetAccum(); }
   if (accCount < MAX_ACC) renderPass();
 }
 window.addEventListener('resize', () => {
@@ -1908,6 +1925,13 @@ function wireUI() {
     const on = hairBtn.getAttribute('aria-pressed') !== 'true';
     hairBtn.setAttribute('aria-pressed', String(on));
     hairWanted = on; updateHairVisibility();
+    shadowsDirty = true; resetAccum();
+  });
+  const phys = $('toggle-physics');
+  phys?.addEventListener('click', () => {
+    const on = phys.getAttribute('aria-pressed') !== 'true';
+    phys.setAttribute('aria-pressed', String(on));
+    HAIR?.setPhysics(on);
     shadowsDirty = true; resetAccum();
   });
   const turn = $('toggle-turn');
@@ -2411,6 +2435,9 @@ window.setHairParams = (p) => { HAIR.setParams(p); shadowsDirty = true; resetAcc
 window.hairStats = () => HAIR ? HAIR.stats() : null;
 window.hairPoints = (n) => { HAIR.update(renderer); return Array.from(HAIR.readPoints(renderer, n)); };
 window.hairRest = (n) => HAIR.readRest(renderer, n);
+window.hairGuides = () => HAIR.readGuides(renderer);
+window.stepHair = (dt = 1 / 60) => { hairClock = true; if (HAIR.stepPhysics(dt)) { shadowsDirty = true; resetAccum(); } return HAIR.stats(); };
+window.setHairPhysics = (on) => { HAIR.setPhysics(!!on); const b = $('toggle-physics'); if (b) b.setAttribute('aria-pressed', String(!!on)); return HAIR.physics; };
 window.setPreset = (n) => { applyPreset(n); return true; };
 window.setCorrectives = (on) => { setCorrectivesOn(on); return CORR.ready; };
 window.__CORR = CORR;

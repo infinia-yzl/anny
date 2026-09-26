@@ -37,6 +37,16 @@ uv run python -m anny.faces.authoring.benchmark     # benchmark.html in ANNY_CAC
 uv run python -m anny.faces.authoring.review        # review.png in ANNY_CACHE_DIR/faces: random faces to judge by eye
 ```
 
+### Hair
+```bash
+uv sync --extra viewer
+uv run python -m anny.hair.authoring.layout                 # data/hair/scalp_layout.safetensors
+uv run python -m anny.hair.authoring.presets                # grow every style: data/hair/styles/*.json and styles.safetensors
+uv run python -m anny.hair.authoring.presets --only lob     # grow some styles
+uv run python -m anny.hair.authoring.presets --specs-only   # rewrite the specs alone (render, physics, controls)
+uv run python -m anny.hair.authoring.benchmark              # load, slider and render times of the built page
+```
+
 ### Web viewer
 ```bash
 uv sync --extra viewer                # scipy, tetgen, embreex for the build
@@ -83,7 +93,7 @@ cd viewer && npx tsc --noEmit         # type-check the page
 | Subdivision | `utils/subdivision.py` | Catmull-Clark as sparse linear operators; `MixedSubdivision` adds one level on a region (the head) |
 | Pose library | `poses/` | 50 poses and 7 clips as `local-ref` parameters (`data/poses/`), grounding, stool; `poses/authoring/` builds the library on the authoring rig |
 | Correctives | `correctives/` | `SoftTissueCorrectives` (hinge and cone drivers, shapes scaled with the local size; `data/correctives/`); `correctives/authoring/` holds the simulation, the fit and `evaluate` |
-| Hair | `hair/` | `StrandBinding` ties strands to the skin at roots and tips; `hair/authoring/` grows the groom, brows and lashes |
+| Hair | `hair/` | `StrandBinding` ties strands to the skin at roots and tips; `chart.py` holds the scalp chart (hairline, fade) and the 8-bit curve codec; `layout.py` loads the scalp layout (`data/hair/scalp_layout.safetensors`: guide and render roots in progressive order, their weights, the simulated guides); `styles.py` loads the 25 styles (`data/hair/styles/*.json` and `styles.safetensors`) and repeats the page's passes A and B and its density volume in NumPy; `dynamics.py` repeats the page's solver; `hair/authoring/` builds the layout, grows the styles (`groom.py`, `presets.py`), the brows and lashes, and benchmarks the page |
 | Viewer data | `viewer/` | `python -m anny.viewer build` writes the page data to `viewer/build/` and runs the node build of `viewer/` |
 | Face shapes | `models/face_shapes.py`, `faces/` | 103 named, symmetric face-shape parameters and 10 detail shapes from ICT-FaceKit (`Anny(face_shapes=...)`, `face_shape_kwargs`), scaled per group with the size of the head; craniofacial landmarks and the measurements of 3D Facial Norms and ANSUR II (`faces/measurements.py`); a face-shape distribution calibrated against measured faces (`faces/distribution.py`); `faces/authoring/` fetches the sources, fits the ICT-FaceKit identity space, calibrates the distribution and benchmarks against FairFace photos |
 
@@ -138,6 +148,12 @@ blend shapes exactly). The Characters row of the Character panel holds presets (
 set the phenotype sliders, the face and the colours, as a character creator's presets do; the Looks row sets the
 colours only. Random face draws with `sampleFace` (`src/anny_shape.ts`) at the spread of the exported prior, and
 `test/test_viewer_parity.py` checks it against Python.
+The hair lives in `src/hair/`: `data.ts` decodes the scalp layout and the styles and builds the density volume,
+`glsl.ts` holds pass A (the guides follow the body, the pose and the physics) and pass B (the render strands, into a
+float texture that the ribbons read), `gpu.ts` holds the `Hair` class, `sim.ts` the solver and `colliders.ts` its
+capsules. Each piece of data lives at the level where it changes (layout, style, body, pose), and every style control is
+a uniform or an instance count. `test/test_hair_parity.py`, `test/test_hair_page.py` and `test/test_hair_dynamics.py`
+check the page's hair against `anny.hair.styles` and `anny.hair.dynamics`.
 
 ### Optional Dependencies
 

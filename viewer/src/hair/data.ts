@@ -6,8 +6,9 @@
 //   - the scalp layout: guide roots and render roots, both in progressive order, with the triangles under them;
 //   - the styles: one curve per guide root, decoded from 8-bit octahedral segment directions (anny.hair.chart);
 //   - the render roots on the current body (rest positions and normals), and the pose of each guide root;
-//   - the density volume of a style: the occlusion of the hair by the hair outward of it, and the density near the
-//     scalp for the scalp tint (anny.hair.styles.density_volume).
+//   - the density volume of a style: the occlusion of the hair by the hair outward of it, the density near the scalp
+//     for the scalp tint, and the cover of the scalp by strands long enough to shade it (fades, short cuts)
+//     (anny.hair.styles.density_volume).
 
 export const TEX_W = 2048;
 
@@ -26,7 +27,7 @@ export interface HairMeta {
   curve_phi: number[];
   similarity: number;
   sector_radius: number;
-  volume: { step: number; sample: number; ray: number; k: number; near: number };
+  volume: { step: number; sample: number; ray: number; k: number; near: number; cover_length: number[]; cover_floor: number };
 }
 
 export interface HairLayout {
@@ -236,15 +237,20 @@ export function densityVolume(meta: HairMeta, layout: HairLayout, s: HairStyle, 
   const nG = new Float64Array(G);
   for (let r = 0; r < Math.min(count, layout.R); r++) nG[layout.rootGuides[r * 4]] += coverage(meta, layout.rootChart[r * 2], layout.rootChart[r * 2 + 1], rs.hairline);
   const avail = available(s);
-  // samples along the guides, weighted by their strands
-  const pts: number[] = [], wts: number[] = [];
+  // samples along the guides, weighted by their strands; the roots of the drawn strands for the cover
+  const pts: number[] = [], wts: number[] = [], roots: number[] = [], nRoot: number[] = [], shade: number[] = [];
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  const rlo = [Infinity, Infinity, Infinity], rhi = [-Infinity, -Infinity, -Infinity];
   for (let g = 0; g < G; g++) {
     // the guide chart: the chart of its root on anny's default body
     const gx = layout.guideRoot[g * 3] - meta.centre[0], gy = layout.guideRoot[g * 3 + 1] - meta.centre[1], gz = layout.guideRoot[g * 3 + 2] - meta.centre[2];
     const phi = Math.atan2(gx, gz) * 180 / Math.PI, el = Math.asin(Math.max(-1, Math.min(1, gy / Math.hypot(gx, gy, gz)))) * 180 / Math.PI;
     let D = Math.min(s.length[g] * params.length, avail[g]);
     D = Math.min(D, fadeLength(meta, phi, el, rs.fade, params.fade, rs.hairline));
+    if (nG[g] > 0) {
+      for (let k = 0; k < 3; k++) { const x = layout.guideRoot[g * 3 + k]; roots.push(x); rlo[k] = Math.min(rlo[k], x); rhi[k] = Math.max(rhi[k], x); }
+      nRoot.push(nG[g]); shade.push(smooth(V.cover_length[0], V.cover_length[1], D));
+    }
     if (!(nG[g] > 0) || !(D > 0)) continue;
     const m = Math.ceil(D / V.sample), sg = avail[g] / (P - 1);
     for (let i = 0; i < m; i++) {
@@ -258,33 +264,18 @@ export function densityVolume(meta: HairMeta, layout: HairLayout, s: HairStyle, 
     }
   }
   const h = V.step;
-  if (!wts.length) return { data: new Uint8Array(2 * 2 * 2 * 2).fill(255).map((v, i) => i % 2 ? 0 : 255), dims: [2, 2, 2], lo: meta.centre.map((c) => c - h), h };
-  const l0 = lo.map((x) => Math.floor((x - 0.01) / h) * h);
-  const dims = hi.map((x, k) => Math.ceil((x + 0.01 - l0[k]) / h) + 1);
+  if (!wts.length) return { data: new Uint8Array(2 * 2 * 2 * 4).map((_, i) => i % 4 ? 0 : 255), dims: [2, 2, 2], lo: meta.centre.map((c) => c - h), h };
+  const l0 = lo.map((x, k) => Math.floor((Math.min(x, rlo[k]) - 0.01) / h) * h);
+  const dims = hi.map((x, k) => Math.ceil((Math.max(x, rhi[k]) + 0.01 - l0[k]) / h) + 1);
   const [nx, ny, nz] = dims, n = nx * ny * nz;
   // x fastest, as WebGL reads a 3D texture
   const id = (x: number, y: number, z: number) => x + nx * (y + ny * z);
-  let grid = new Float64Array(n);
-  for (let q = 0; q < wts.length; q++) {
-    const u = [0, 1, 2].map((k) => (pts[q * 3 + k] - l0[k]) / h);
-    const i0 = u.map(Math.floor), f = u.map((x, k) => x - i0[k]);
-    for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) for (let dz = 0; dz < 2; dz++) {
-      const w = (dx ? f[0] : 1 - f[0]) * (dy ? f[1] : 1 - f[1]) * (dz ? f[2] : 1 - f[2]);
-      grid[id(i0[0] + dx, i0[1] + dy, i0[2] + dz)] += wts[q] * w;
-    }
-  }
-  // two passes of a [1, 2, 1] / 4 blur along each axis
-  const tmp = new Float64Array(n), strides = [1, nx, nx * ny];
-  for (let pass = 0; pass < 2; pass++) for (let ax = 0; ax < 3; ax++) {
-    const st = strides[ax], len = dims[ax];
-    for (let o = 0; o < n; o++) {
-      const c = Math.floor(o / st) % len;
-      tmp[o] = 0.5 * grid[o] + (c > 0 ? 0.25 * grid[o - st] : 0) + (c < len - 1 ? 0.25 * grid[o + st] : 0);
-    }
-    const sw = grid; grid = tmp.slice(); tmp.set(sw);
-  }
-  // occlusion: the density walked outward from each voxel (nearest voxel at each step), and the near density
-  const data = new Uint8Array(n * 2);
+  const grid = splat(pts, wts, l0, h, dims);
+  const num = splat(roots, nRoot.map((w, i) => w * shade[i]), l0, h, dims), den = splat(roots, nRoot, l0, h, dims);
+  let dmax = 0;
+  for (let o = 0; o < n; o++) dmax = Math.max(dmax, den[o]);
+  // occlusion: the density walked outward from each voxel (nearest voxel at each step), the near density, the cover
+  const data = new Uint8Array(n * 4);
   const c = meta.centre;
   for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
     const px = l0[0] + x * h, py = l0[1] + y * h, pz = l0[2] + z * h;
@@ -297,8 +288,35 @@ export function densityVolume(meta: HairMeta, layout: HairLayout, s: HairStyle, 
       acc += grid[id(qx, qy, qz)];
     }
     const o = id(x, y, z);
-    data[o * 2] = Math.round(Math.exp(-V.k * acc) * 255);
-    data[o * 2 + 1] = Math.round(Math.min(1, Math.max(0, grid[o] / V.near)) * 255);
+    data[o * 4] = Math.round(Math.exp(-V.k * acc) * 255);
+    data[o * 4 + 1] = Math.round(Math.min(1, Math.max(0, grid[o] / V.near)) * 255);
+    data[o * 4 + 2] = Math.round(Math.min(1, Math.max(0, num[o] / Math.max(den[o], V.cover_floor * dmax))) * 255);
   }
   return { data, dims, lo: l0, h };
+}
+
+// trilinear splat of weighted points (3 per point) on a grid (x fastest), then two passes of a [1, 2, 1] / 4 blur
+// along each axis
+function splat(pts: ArrayLike<number>, wts: ArrayLike<number>, l0: number[], h: number, dims: number[]): Float64Array {
+  const [nx, ny, nz] = dims, n = nx * ny * nz;
+  const id = (x: number, y: number, z: number) => x + nx * (y + ny * z);
+  let grid = new Float64Array(n);
+  for (let q = 0; q < wts.length; q++) {
+    const u = [0, 1, 2].map((k) => (pts[q * 3 + k] - l0[k]) / h);
+    const i0 = u.map(Math.floor), f = u.map((x, k) => x - i0[k]);
+    for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) for (let dz = 0; dz < 2; dz++) {
+      const w = (dx ? f[0] : 1 - f[0]) * (dy ? f[1] : 1 - f[1]) * (dz ? f[2] : 1 - f[2]);
+      grid[id(i0[0] + dx, i0[1] + dy, i0[2] + dz)] += wts[q] * w;
+    }
+  }
+  const tmp = new Float64Array(n), strides = [1, nx, nx * ny];
+  for (let pass = 0; pass < 2; pass++) for (let ax = 0; ax < 3; ax++) {
+    const st = strides[ax], len = dims[ax];
+    for (let o = 0; o < n; o++) {
+      const c = Math.floor(o / st) % len;
+      tmp[o] = 0.5 * grid[o] + (c > 0 ? 0.25 * grid[o - st] : 0) + (c < len - 1 ? 0.25 * grid[o + st] : 0);
+    }
+    const sw = grid; grid = tmp.slice(); tmp.set(sw);
+  }
+  return grid;
 }

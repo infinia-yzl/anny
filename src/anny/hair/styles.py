@@ -246,14 +246,23 @@ def pose_guides(rest, matrices=None, offsets=None):
     return out
 
 
-def sim_offsets(layout, sim_motion, rest_available):
+def sim_offsets(layout, style, sim_motion):
     """
-    The motion of every guide from the motion of the simulated guides (S, P_sim, 3), each taken
-    at the same arc fraction and blended with the layout's weights.
+    The motion of every guide (G, P, 3) from the motion of the simulated guides (S, P, 3), taken at
+    the same point and blended with the layout's weights. It starts at the pivot of the guide (at
+    its root for a guide without a pivot) and grows over a centimetre (``anny.hair.dynamics``).
     """
-    S, Ps, _ = sim_motion.shape
+    from anny.hair.dynamics import NO_PIVOT
+
+    P = sim_motion.shape[1]
     w = layout.guide_sim_weights.astype(np.float64) / 255.0
-    return np.einsum("gk,gkpd->gpd", w, sim_motion[layout.guide_sim])
+    motion = np.einsum("gk,gkpd->gpd", w, sim_motion[layout.guide_sim])
+    start = np.where(style.pivot < NO_PIVOT, style.pivot, 0.0)
+    seg = np.linalg.norm(np.diff(style.points, axis=1), axis=2).sum(1) / (P - 1)
+    ramp = np.clip(
+        (np.arange(P)[None] * seg[:, None] - start[:, None]) / 0.01, 0.0, 1.0
+    )
+    return motion * ramp[..., None]
 
 
 # ---------------------------------------------------------------------------------------------- pass B
@@ -490,6 +499,11 @@ VOLUME_K = (
     0.044  # occlusion per unit of density walked (matches the legacy groom's occlusion)
 )
 VOLUME_NEAR = 60.0  # the density at which the scalp tint is full
+COVER_LENGTH = (
+    0.0005,
+    0.006,
+)  # m: strand lengths over which hair starts to shade the scalp
+COVER_FLOOR = 0.25  # the share of the densest scalp below which the shade fades out
 
 
 def guide_strands(style: HairStyle, layout: Layout, count: int | None = None):
@@ -508,11 +522,18 @@ def density_volume(
     count: int | None = None,
 ):
     """
-    A grid over the hair of a style on anny's default body: in channel 0 the occlusion of a point
-    by the hair outward of it (``exp(-k * density walked outward from the head centre)``), in
-    channel 1 the local density against VOLUME_NEAR (the scalp tint). Both are uint8. Returns the
-    grid (nx, ny, nz, 2), its lower corner and its step. The page builds the same grid
-    (``viewer/src/hair/data.ts``) when the style or its parameters change.
+    A grid over the hair of a style on anny's default body, in uint8 channels:
+
+    0. the occlusion of a point by the hair outward of it
+       (``exp(-k * density walked outward from the head centre)``);
+    1. the local density against VOLUME_NEAR (the tint of the scalp under a pile of hair);
+    2. the cover of the scalp: the share of the strands rooted there that are long enough to
+       shade it (COVER_LENGTH), which fades out where the roots thin out (the hairline, the
+       skin of a fade);
+    3. zero.
+
+    Returns the grid (nx, ny, nz, 4), its lower corner and its step. The page builds the same
+    grid (``viewer/src/hair/data.ts``) when the style or its parameters change.
     """
     prm = dict(style_params(style.spec), **(params or {}))
     rs = style.spec["render"]
@@ -534,37 +555,23 @@ def density_volume(
         pts.append(p[0])
         wts.append(np.full(m, n_g[g] * (D[g] / m) / VOLUME_SAMPLE))
     if not pts:
-        empty = np.zeros((2, 2, 2, 2), np.uint8)
-        empty[..., 0] = 255  # no hair: no occlusion and no scalp tint
+        empty = np.zeros((2, 2, 2, 4), np.uint8)
+        empty[..., 0] = 255  # no hair: no occlusion, no tint and no cover
         return empty, CRANIUM_CENTRE - VOLUME_STEP, VOLUME_STEP
     pts, wts = np.concatenate(pts), np.concatenate(wts)
+    # the roots of the drawn strands, for the cover
+    rg = np.nonzero(n_g > 0)[0]
+    roots = layout.guide_position[rg].astype(np.float64)
     h = VOLUME_STEP
-    lo = np.floor((pts.min(0) - 0.01) / h) * h
-    dims = (np.ceil((pts.max(0) + 0.01 - lo) / h)).astype(int) + 1
-    grid = np.zeros(dims)
-    # trilinear splat
-    u = (pts - lo) / h
-    i0 = np.floor(u).astype(int)
-    f = u - i0
-    for dx in (0, 1):
-        for dy in (0, 1):
-            for dz in (0, 1):
-                wgt = (
-                    (f[:, 0] if dx else 1 - f[:, 0])
-                    * (f[:, 1] if dy else 1 - f[:, 1])
-                    * (f[:, 2] if dz else 1 - f[:, 2])
-                )
-                np.add.at(
-                    grid, (i0[:, 0] + dx, i0[:, 1] + dy, i0[:, 2] + dz), wts * wgt
-                )
-    # two passes of a [1, 2, 1] / 4 blur along each axis
-    for _ in range(2):
-        for ax in range(3):
-            pad = np.pad(grid, [(1, 1) if a == ax else (0, 0) for a in range(3)])
-            sl = [slice(None)] * 3
-            a_, b_, c_ = list(sl), list(sl), list(sl)
-            a_[ax], b_[ax], c_[ax] = slice(0, -2), slice(1, -1), slice(2, None)
-            grid = 0.25 * pad[tuple(a_)] + 0.5 * pad[tuple(b_)] + 0.25 * pad[tuple(c_)]
+    lo = np.floor((np.minimum(pts.min(0), roots.min(0)) - 0.01) / h) * h
+    dims = (np.ceil((np.maximum(pts.max(0), roots.max(0)) + 0.01 - lo) / h)).astype(
+        int
+    ) + 1
+    grid = _blur(_splat(pts, wts, lo, h, dims))
+    shade = smoothstep(COVER_LENGTH[0], COVER_LENGTH[1], D[rg])
+    num = _blur(_splat(roots, n_g[rg] * shade, lo, h, dims))
+    den = _blur(_splat(roots, n_g[rg], lo, h, dims))
+    cover = num / np.maximum(den, COVER_FLOOR * den.max())
     # occlusion: the density walked outward from each voxel (nearest voxel at each step)
     idx = np.stack(
         np.meshgrid(*[np.arange(d) for d in dims], indexing="ij"), -1
@@ -579,8 +586,40 @@ def density_volume(
         acc[ok] += grid[q[ok, 0], q[ok, 1], q[ok, 2]]
     occ = np.exp(-VOLUME_K * acc).reshape(dims)
     near = np.clip(grid / VOLUME_NEAR, 0, 1)
-    out = np.stack([occ, near], -1)
+    out = np.stack([occ, near, np.clip(cover, 0, 1), np.zeros_like(occ)], -1)
     return np.round(out * 255).astype(np.uint8), lo, h
+
+
+def _splat(pts, wts, lo, h, dims):
+    """trilinear splat of weighted points on a grid"""
+    grid = np.zeros(dims)
+    u = (pts - lo) / h
+    i0 = np.floor(u).astype(int)
+    f = u - i0
+    for dx in (0, 1):
+        for dy in (0, 1):
+            for dz in (0, 1):
+                wgt = (
+                    (f[:, 0] if dx else 1 - f[:, 0])
+                    * (f[:, 1] if dy else 1 - f[:, 1])
+                    * (f[:, 2] if dz else 1 - f[:, 2])
+                )
+                np.add.at(
+                    grid, (i0[:, 0] + dx, i0[:, 1] + dy, i0[:, 2] + dz), wts * wgt
+                )
+    return grid
+
+
+def _blur(grid):
+    """two passes of a [1, 2, 1] / 4 blur along each axis"""
+    for _ in range(2):
+        for ax in range(3):
+            pad = np.pad(grid, [(1, 1) if a == ax else (0, 0) for a in range(3)])
+            sl = [slice(None)] * 3
+            a_, b_, c_ = list(sl), list(sl), list(sl)
+            a_[ax], b_[ax], c_[ax] = slice(0, -2), slice(1, -1), slice(2, None)
+            grid = 0.25 * pad[tuple(a_)] + 0.5 * pad[tuple(b_)] + 0.25 * pad[tuple(c_)]
+    return grid
 
 
 def sample_volume(volume, lo, h, P, channel=0):

@@ -12,12 +12,13 @@ every spec to ``data/hair/styles/<name>.json`` and grows its guides into
   length map, perimeter, cuts, relaxation;
 - ``render``: the look of the render strands in the page (``anny.hair.styles.strands``): points
   per strand, width, clumps, curl, waves, flyaways, fade and hairline;
-- ``physics``: the stiffness of the strands in the page's solver;
+- ``physics``: the parameters of the page's solver (``anny.hair.dynamics``) per family, or None for
+  a style that keeps its shape (the buns);
 - ``controls``: the ranges of the page's sliders.
 
 Usage::
 
-    python -m anny.hair.authoring.presets [--only NAME ...]
+    python -m anny.hair.authoring.presets [--only NAME ...] [--specs-only]
 """
 
 from __future__ import annotations
@@ -70,12 +71,26 @@ DEFAULT_RENDER = dict(
     fade=None,
     density=0.88,
 )
-DEFAULT_PHYSICS = dict(
-    global_stiffness=[0.9, 0.08],
-    local_stiffness=0.6,
-    damping=0.08,
-    gravity=0.35,
+# the page's solver (viewer/src/hair/sim.ts, anny.hair.dynamics), per step of 1/60 s: the pull toward the groom
+# from the free start of a guide to its tip, the pull toward the groom's bends, the share of the velocity lost, and the
+# share of the change of gravity that acts
+FAMILY_PHYSICS = dict(
+    short=dict(
+        global_stiffness=[0.8, 0.35], local_stiffness=0.8, damping=0.15, gravity=1.0
+    ),
+    medium=dict(
+        global_stiffness=[0.35, 0.03], local_stiffness=0.5, damping=0.06, gravity=1.0
+    ),
+    long=dict(
+        global_stiffness=[0.2, 0.01], local_stiffness=0.4, damping=0.05, gravity=1.0
+    ),
+    tied=dict(
+        global_stiffness=[0.06, 0.004], local_stiffness=0.3, damping=0.05, gravity=1.0
+    ),
 )
+DEFAULT_PHYSICS = FAMILY_PHYSICS["medium"]
+# a bun keeps its shape: the solver skips it (a style's physics of None)
+BUN_PHYSICS = False
 DEFAULT_CONTROLS = dict(
     length=[0.7, 1.25],
     curl=[0.0, 1.5],
@@ -91,7 +106,9 @@ def spec(name, label, family, groom, render=None, physics=None, controls=None):
         family=family,
         groom=groom,
         render=dict(DEFAULT_RENDER, **(render or {})),
-        physics=dict(DEFAULT_PHYSICS, **(physics or {})),
+        physics=None
+        if physics is False
+        else dict(FAMILY_PHYSICS.get(family, DEFAULT_PHYSICS), **(physics or {})),
         controls=dict(DEFAULT_CONTROLS, **(controls or {})),
     )
 
@@ -138,7 +155,9 @@ def medium_tousled():
             flick=dict(share=0.45, min_azimuth=50, mm=[1.5, 4.5]),
         ),
     )
-    return spec("medium_tousled", "Medium tousled", "medium", groom)
+    # an 8 cm cut: stiffer than the hanging medium cuts
+    physics = dict(global_stiffness=[0.6, 0.15], local_stiffness=0.7, damping=0.1)
+    return spec("medium_tousled", "Medium tousled", "medium", groom, physics=physics)
 
 
 # ---------------------------------------------------------------------------------------------- helpers
@@ -582,7 +601,8 @@ def perimeter(front, sides, back, fringe=None, fringe_width=35.0):
 
 
 MEDIUM_RENDER = dict(
-    thinning=dict(share=0.2, range=[0.7, 0.95]),
+    # blunt ends: few thinned strands, ending near the cut (loose ends over a long band look like a haze)
+    thinning=dict(share=0.12, range=[0.85, 0.97]),
     clump=dict(
         coarse=[0.5, 0.8],
         coarse_tip=0.5,
@@ -785,7 +805,13 @@ def textured_bob():
         [
             dict(CROWN_FLOW, weight=0.4),
             dict(type="part", x=0.03, weight=2.2, falloff=0.05, el=[15, 40]),
-            dict(type="direction", vector=[-1.0, 0.0, -0.8], weight=1.6, el=[45, 20], phi=[55, 30]),
+            dict(
+                type="direction",
+                vector=[-1.0, 0.0, -0.8],
+                weight=1.6,
+                el=[45, 20],
+                phi=[55, 30],
+            ),
             DOWN_ALL,
         ],
         dict(base=60, sd=7, top=-4, crown=4, front=-8, edge=8, min=25, max=85),
@@ -909,7 +935,7 @@ TIED_RENDER = dict(
 )
 
 
-def tied(name, label, tie, seed, points, longest=1.3, controls=None):
+def tied(name, label, tie, seed, points, longest=1.3, controls=None, physics=None):
     groom = dict(seed=seed, tie=tie, longest=longest, body_collision=True)
     return spec(
         name,
@@ -917,9 +943,7 @@ def tied(name, label, tie, seed, points, longest=1.3, controls=None):
         "tied",
         groom,
         dict(TIED_RENDER, points=points),
-        physics=dict(
-            global_stiffness=[1.0, 0.05], local_stiffness=0.5, damping=0.06, gravity=0.6
-        ),
+        physics=physics,
         controls=dict(
             dict(
                 length=[0.6, longest],
@@ -974,6 +998,7 @@ def top_knot():
         48,
         longest=1.15,
         controls=dict(length=[0.85, 1.15]),
+        physics=BUN_PHYSICS,
     )
 
 
@@ -989,6 +1014,7 @@ def low_bun():
         48,
         longest=1.15,
         controls=dict(length=[0.85, 1.15]),
+        physics=BUN_PHYSICS,
     )
 
 
@@ -1070,7 +1096,19 @@ def build(names=None, body=None, verbose=True):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--only", nargs="*", default=None)
+    ap.add_argument(
+        "--specs-only",
+        action="store_true",
+        help="write the specs alone, for changes to the render, physics or controls that keep the guides",
+    )
     args = ap.parse_args()
+    if args.specs_only:
+        specs = [p() for p in PRESETS]
+        specs = [s for s in specs if not args.only or s["name"] in args.only]
+        for s in specs:
+            write_spec(s)
+        print(f"wrote {len(specs)} specs to {STYLE_DIR}")
+        return
     specs = build(args.only)
     print(f"wrote {len(specs)} styles to {STYLE_DIR} and {GUIDES_PATH}")
 

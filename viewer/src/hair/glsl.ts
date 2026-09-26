@@ -3,8 +3,9 @@
 // Apache License, Version 2.0
 //
 // The shaders of anny's hair (anny.hair.styles repeats them in NumPy):
-//   pass A: the guides follow the body (the frames of AnnyBody.followStrands, as anny.hair.StrandBinding with tips)
-//           and take the pose of their root; a texture row of P + 2 texels per guide: the points, the root normal,
+//   pass A: the guides follow the body (the frames of AnnyBody.followStrands, as anny.hair.StrandBinding with tips),
+//           take the pose of their root and add the motion of the physics (blended from three simulated guides, as
+//           anny.hair.styles.sim_offsets does); a texture row of P + 2 texels per guide: the points, the root normal,
 //           and the direction of the first third (for the blend);
 //   pass B: each render strand from its four guides, with its length, clumps, curl, waves, flyaways, flick and
 //           volume; P texels per strand, the occlusion of the density volume in w (-1: no strand);
@@ -27,8 +28,20 @@ uniform highp sampler2D uLocal;    // per guide point: in the frame of the root 
 uniform highp sampler2D uTipLocal; // per guide point: in the frame of the tip triangle / scalp size
 uniform highp sampler2D uFrames;   // 6 texels per guide: rows [scalp * frame | anchor] of the root and tip triangles
 uniform highp sampler2D uMat;      // 3 texels per guide: the rows of the pose of its root
-uniform highp sampler2D uMotion;   // per guide point: the motion of the simulation (m)
+uniform highp sampler2D uMotion;   // per point of the simulated guides: the motion of the simulation (m)
+uniform highp sampler2D uSimInfo;  // 2 texels per guide: its three simulated guides, and their weights
+uniform highp sampler2D uGuideInfo; // 2 texels per guide (pass B): segment, ...; pivot
 uniform int uP; uniform int uG; uniform int uMoving;
+#define NO_PIVOT 100.0
+// the motion of the simulated guides at point j of guide g; it starts at the pivot of the guide (or at its root) and
+// grows over a centimetre (hair/sim.ts)
+vec3 motion(int g, int j) {
+  vec4 si = at(uSimInfo, g * 2), sw = at(uSimInfo, g * 2 + 1);
+  vec3 m = sw.x * at(uMotion, int(si.x) * uP + j).xyz + sw.y * at(uMotion, int(si.y) * uP + j).xyz + sw.z * at(uMotion, int(si.z) * uP + j).xyz;
+  float seg = at(uGuideInfo, g * 2).x, piv = at(uGuideInfo, g * 2 + 1).x;
+  float start = piv < NO_PIVOT ? piv : 0.0;
+  return m * clamp((float(j) * seg - start) / 0.01, 0.0, 1.0);
+}
 vec3 frameApply(int g, int base, vec3 L) {
   vec4 m0 = at(uFrames, g * 6 + base), m1 = at(uFrames, g * 6 + base + 1), m2 = at(uFrames, g * 6 + base + 2);
   return vec3(dot(m0.xyz, L) + m0.w, dot(m1.xyz, L) + m1.w, dot(m2.xyz, L) + m2.w);
@@ -55,7 +68,7 @@ void main() {
   if (g >= uG) { outData = vec4(0.0); return; }
   if (j < uP) {
     vec3 p = pose(g, restPoint(g, j));
-    if (uMoving > 0) p += at(uMotion, g * uP + j).xyz;
+    if (uMoving > 0) p += motion(g, j);
     outData = vec4(p, 0.0);
   } else if (j == uP) {
     vec4 m0 = at(uFrames, g * 6), m1 = at(uFrames, g * 6 + 1), m2 = at(uFrames, g * 6 + 2);

@@ -12,7 +12,9 @@ versions of the page on one machine; they do not predict the times on a GPU. The
 - ``render_hair_ms`` and ``render_nohair_ms``: one accumulation frame of the face view, with
   and without the hair (the GPU work is waited for);
 - ``hair_bytes``: the GPU buffers and textures of the hair, and ``hair_data_bytes``: the hair
-  data in the page.
+  data in the page;
+- ``physics_ms``: the CPU time of one step of the hair's physics (``viewer/src/hair/sim.ts``) on
+  each style of ``PHYSICS_STYLES`` while the figure runs, when the page has the physics.
 
 Usage::
 
@@ -33,6 +35,7 @@ import time
 
 from anny.paths import get_anny_cache_path
 
+PHYSICS_STYLES = ["medium_tousled", "french_bob", "long_straight", "high_ponytail"]
 VIEWS = {
     "front": (0, 3),
     "side": (90, 3),
@@ -117,6 +120,20 @@ def run(
         tab.evaluate("() => window.setHair(true)")
         res["hair_bytes"] = tab.evaluate(HAIR_BYTES)
         res["hair_data_bytes"] = tab.evaluate(HAIR_DATA)
+        if tab.evaluate("() => typeof window.stepHair === 'function'"):
+            res["physics_ms"] = {}
+            for name in PHYSICS_STYLES:
+                tab.evaluate(
+                    f"() => {{ window.setHairStyle('{name}'); window.setHairPhysics(true); }}"
+                )
+                ms = []
+                for k in range(90):
+                    st = tab.evaluate(
+                        f"() => {{ window.setMotion('run', {k / 60}, true); return window.stepHair(1 / 60); }}"
+                    )
+                    ms.append(st["sim"]["ms"])
+                # after the engine's warm-up
+                res["physics_ms"][name] = round(sum(ms[30:]) / len(ms[30:]), 2)
         browser.close()
     (out / "benchmark.json").write_text(json.dumps(res, indent=1))
     return res

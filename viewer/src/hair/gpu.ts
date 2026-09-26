@@ -10,6 +10,8 @@
 // Pass A poses the guides and pass B builds the points of every render strand into a float texture; the ribbons read
 // two texels per vertex, so a still frame costs no hair work at all. The parameters of a style are uniforms: the
 // length, curl, volume and fade change pass B alone, and the density changes the number of instances.
+// The physics (hair/sim.ts) runs on the CPU on the simulated guides of the layout; their motion goes to a small
+// texture, and pass A blends it into every guide. The solver sleeps when the hair comes to rest.
 
 import * as THREE from 'three';
 import type { AnnyBody } from '../body.ts';
@@ -18,9 +20,15 @@ import {
   type Bytes, type HairLayout, type HairMeta, type HairStyle, type StyleSpec, type Volume,
 } from './data.ts';
 import { HAIR_PASS_A, HAIR_PASS_B } from './glsl.ts';
+import { HairSim, SIM_DEFAULTS, STEP, type SimParams } from './sim.ts';
+import { poseColliders, type RestColliders } from './colliders.ts';
 
 export interface HairParams { length: number; curl: number; volume: number; density: number; fade: number }
 export const DEFAULT_PARAMS: HairParams = { length: 1, curl: 1, volume: 1, density: 1, fade: 0 };
+const GRAVITY = 9.81;
+const SLEEP_SPEED = 0.004;   // m/s: the hair rests when no simulated point moves faster
+const SLEEP_STEPS = 20;      // steps at rest before the solver sleeps
+const JUMP = 0.1;            // m: a move of a guide root in one frame that resets the solver (a jump of pose)
 
 const FSQ_VS = 'void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }';
 const rows = (n: number) => Math.max(1, Math.ceil(n / TEX_W));
@@ -91,6 +99,16 @@ export class Hair {
   uP = { value: 2 };
   dirtyA = true; dirtyB = true; volumeDirty = false; lastChange = 0;
   onGeometry: ((g: THREE.InstancedBufferGeometry) => void) | null = null;
+  // the physics: the solver of the simulated guides, their rest points on the current body (S * P * 3), their posed
+  // groom, the colliders, the rotation of the head (a column-major skin matrix) and the state of the clock
+  physics = false;
+  sim: HairSim | null = null;
+  simInfo: { tex: THREE.DataTexture; data: Float32Array };
+  simRest: Float64Array = new Float64Array(0); simTargets: Float64Array = new Float64Array(0); simRoots: Float64Array = new Float64Array(0);
+  colliders: RestColliders | null = null; colRest: Float64Array = new Float64Array(0); colPosed: Float64Array = new Float64Array(0);
+  bones: Float32Array | null = null; head = new Float64Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  simDirty = true; posed = true; asleep = false; still = 0; clock = 0;
+  simStats = { ms: 0, steps: 0, speed: 0 };
 
   constructor(meta: HairMeta, bytes: Bytes, body: AnnyBody, headInv: { value: THREE.Matrix4 }) {
     this.meta = meta; this.bytes = bytes; this.body = body;
@@ -101,12 +119,18 @@ export class Hair {
     for (let g = 0; g < L.G; g++) { this.mat.data[g * 12] = 1; this.mat.data[g * 12 + 5] = 1; this.mat.data[g * 12 + 10] = 1; }
     this.rootRest = floatTexture(L.R);
     this.rootData = uintTexture(L.rootData, L.R);
+    // the three simulated guides of each guide and their weights
+    this.simInfo = floatTexture(L.G * 2);
+    for (let g = 0; g < L.G; g++) for (let k = 0; k < 3; k++) {
+      this.simInfo.data[g * 8 + k] = L.sim[g * 3 + k]; this.simInfo.data[g * 8 + 4 + k] = L.simWeights[g * 3 + k] / 255;
+    }
     this.occ = new THREE.Data3DTexture(new Uint8Array(16), 2, 2, 2);
     this.rtB = floatTarget(1);
     const hl = meta.hairline;
     this.A = pass(HAIR_PASS_A, {
       uLocal: { value: this.local.tex }, uTipLocal: { value: this.tipLocal.tex }, uFrames: { value: this.frames.tex },
       uMat: { value: this.mat.tex }, uMotion: { value: this.motion.tex }, uP: this.uP, uG: { value: L.G }, uMoving: { value: 0 },
+      uSimInfo: { value: this.simInfo.tex }, uGuideInfo: { value: this.info.tex },
     });
     this.B = pass(HAIR_PASS_B, {
       uGuides: { value: null }, uGuideInfo: { value: this.info.tex }, uFrames: { value: this.frames.tex }, uMat: { value: this.mat.tex },
@@ -156,10 +180,10 @@ export class Hair {
     body.followStrands();
     const set = body.strands.hair;
     if (this.local.data.length < rows(G * P) * TEX_W * 4) {
-      this.local = floatTexture(G * P); this.tipLocal = floatTexture(G * P); this.motion = floatTexture(G * P);
+      this.local = floatTexture(G * P); this.tipLocal = floatTexture(G * P);
       this.A.mat.uniforms.uLocal.value = this.local.tex; this.A.mat.uniforms.uTipLocal.value = this.tipLocal.tex;
-      this.A.mat.uniforms.uMotion.value = this.motion.tex;
     }
+    if (this.motion.data.length < rows(L.S * P) * TEX_W * 4) { this.motion = floatTexture(L.S * P); this.A.mat.uniforms.uMotion.value = this.motion.tex; }
     for (let g = 0; g < G; g++) for (let j = 0; j < P; j++) {
       const i = g * P + j;
       for (let k = 0; k < 3; k++) { this.local.data[i * 4 + k] = set.local[i * 3 + k]; this.tipLocal.data[i * 4 + k] = set.tipLocal![i * 3 + k]; }
@@ -167,7 +191,9 @@ export class Hair {
     }
     this.local.tex.needsUpdate = true; this.tipLocal.tex.needsUpdate = true; this.frames.tex.needsUpdate = true;
     // two texels per guide: (segment, default length, flick, group) and (pivot)
-    if (this.info.data.length < rows(G * 2) * TEX_W * 4) { this.info = floatTexture(G * 2); this.B.mat.uniforms.uGuideInfo.value = this.info.tex; }
+    if (this.info.data.length < rows(G * 2) * TEX_W * 4) {
+      this.info = floatTexture(G * 2); this.B.mat.uniforms.uGuideInfo.value = this.info.tex; this.A.mat.uniforms.uGuideInfo.value = this.info.tex;
+    }
     for (let g = 0; g < G; g++) {
       this.info.data[g * 8] = s.seg[g]; this.info.data[g * 8 + 1] = s.length[g];
       this.info.data[g * 8 + 2] = s.flick[g]; this.info.data[g * 8 + 3] = s.group[g];
@@ -241,7 +267,7 @@ export class Hair {
     this.occ.dispose();
     const [nx, ny, nz] = v.dims;
     this.occ = new THREE.Data3DTexture(v.data, nx, ny, nz);
-    this.occ.format = THREE.RGFormat; this.occ.type = THREE.UnsignedByteType;
+    this.occ.format = THREE.RGBAFormat; this.occ.type = THREE.UnsignedByteType;
     this.occ.minFilter = this.occ.magFilter = THREE.LinearFilter;
     this.occ.wrapS = this.occ.wrapT = this.occ.wrapR = THREE.ClampToEdgeWrapping;
     this.occ.unpackAlignment = 1; this.occ.needsUpdate = true;
@@ -260,15 +286,120 @@ export class Hair {
     rootsOnBody(this.body.pos, this.layout, this.rootRest.data);
     this.rootRest.tex.needsUpdate = true; this.frames.tex.needsUpdate = true;
     this.B.mat.uniforms.uScale.value = this.body.headScale();
-    this.dirtyA = true;
+    this.dirtyA = true; this.simDirty = true;
   }
 
-  // the pose: three.js bone matrices (Skeleton.boneMatrices)
-  setPose(bones: Float32Array | null) {
+  // the pose: three.js bone matrices (Skeleton.boneMatrices), and the index of the head bone for the physics
+  setPose(bones: Float32Array | null, head = -1) {
     const L = this.layout;
     if (bones) guideMatrices(L, bones, this.mat.data);
     this.mat.tex.needsUpdate = true;
     this.dirtyA = true;
+    if (bones && head >= 0) for (let k = 0; k < 16; k++) this.head[k] = bones[head * 16 + k];
+    if (bones) this.bones = bones;
+    this.posed = true; this.asleep = false; this.still = 0;
+  }
+
+  // ------------------------------------------------------------------ physics
+  // the colliders on the current body at rest (hair/colliders.ts fitColliders)
+  setColliders(c: RestColliders) { this.colliders = c; this.simDirty = true; }
+
+  setPhysics(on: boolean) {
+    this.physics = on; this.simDirty = true; this.asleep = false;
+    if (!on) { this.A.mat.uniforms.uMoving.value = 0; this.dirtyA = true; }
+  }
+
+  physicsParams(): SimParams { return { ...SIM_DEFAULTS, ...(this.style?.spec.physics || {}) }; }
+
+  // the rest points of the simulated guides on the current body, as pass A builds them (restPoint)
+  private restPoints(out: Float64Array) {
+    const s = this.style!, P = s.P, F = this.frames.data, Lc = this.local.data, Q = this.tipLocal.data;
+    for (let g = 0; g < this.layout.S; g++) for (let j = 0; j < P; j++) {
+      const i = g * P + j, t = j / (P - 1), w = Lc[i * 4 + 3] > 0.5 ? t * t : 0;
+      for (let r = 0; r < 3; r++) {
+        const o = g * 24 + r * 4;
+        let v = F[o] * Lc[i * 4] + F[o + 1] * Lc[i * 4 + 1] + F[o + 2] * Lc[i * 4 + 2] + F[o + 3];
+        if (w > 0) v += w * (F[o + 12] * Q[i * 4] + F[o + 13] * Q[i * 4 + 1] + F[o + 14] * Q[i * 4 + 2] + F[o + 15] - v);
+        out[i * 3 + r] = v;
+      }
+    }
+  }
+
+  // the groom of the simulated guides in the current pose (the pose of pass A)
+  private posedTargets(out: Float64Array) {
+    const P = this.style!.P, M = this.mat.data, R = this.simRest;
+    for (let g = 0; g < this.layout.S; g++) {
+      const o = g * 12;
+      for (let j = 0; j < P; j++) {
+        const i = (g * P + j) * 3, x = R[i], y = R[i + 1], z = R[i + 2];
+        for (let r = 0; r < 3; r++) out[i + r] = M[o + r * 4] * x + M[o + r * 4 + 1] * y + M[o + r * 4 + 2] * z + M[o + r * 4 + 3];
+      }
+    }
+  }
+
+  private prepareSim() {
+    const s = this.style!, S = this.layout.S, P = s.P;
+    if (!this.sim || this.sim.P !== P) this.sim = new HairSim(S, P);
+    if (this.simRest.length !== S * P * 3) { this.simRest = new Float64Array(S * P * 3); this.simTargets = new Float64Array(S * P * 3); }
+    this.restPoints(this.simRest);
+    this.colRest = this.colliders ? this.colliders.rest : new Float64Array(0);
+    this.colPosed = this.colRest.slice();
+    this.sim.setGroom(this.simRest, s.pivot.subarray(0, S), this.physicsParams(), this.colRest);
+    this.posedTargets(this.simTargets);
+    this.sim.reset(this.simTargets);
+    this.simRoots = new Float64Array(S * 3);
+    for (let g = 0; g < S; g++) for (let k = 0; k < 3; k++) this.simRoots[g * 3 + k] = this.simTargets[g * P * 3 + k];
+    this.motion.data.fill(0); this.motion.tex.needsUpdate = true;
+    this.simDirty = false; this.posed = true; this.asleep = false; this.still = 0; this.clock = 0;
+  }
+
+  // advance the physics by dt seconds (fixed steps of STEP); returns true when the hair moved. A style without physics
+  // (a bun) keeps its shape.
+  stepPhysics(dt: number): boolean {
+    if (!this.physics || !this.style || this.style.P < 3 || !this.style.spec.physics) {
+      if (this.A.mat.uniforms.uMoving.value) { this.A.mat.uniforms.uMoving.value = 0; this.dirtyA = true; return true; }
+      return false;
+    }
+    const t0 = performance.now();
+    if (this.simDirty) {
+      if (!this.colliders) return false;
+      this.prepareSim();
+    }
+    if (this.asleep) return false;
+    this.clock += dt;
+    const n = Math.min(3, Math.floor(this.clock / STEP));
+    this.clock = n === 3 ? 0 : this.clock - n * STEP;
+    if (n === 0) return false;
+    const sim = this.sim!, S = this.layout.S, P = this.style.P, T = this.simTargets;
+    if (this.posed) {
+      this.posedTargets(T);
+      if (this.colliders && this.bones) poseColliders(this.colliders, this.colRest, this.bones, this.colPosed);
+      // a jump of the pose: the hair starts again from the groom
+      const R = this.simRoots;
+      let jump = 0;
+      for (let g = 0; g < S; g++) {
+        const o = g * P * 3;
+        jump = Math.max(jump, Math.hypot(T[o] - R[g * 3], T[o + 1] - R[g * 3 + 1], T[o + 2] - R[g * 3 + 2]));
+        R[g * 3] = T[o]; R[g * 3 + 1] = T[o + 1]; R[g * 3 + 2] = T[o + 2];
+      }
+      if (jump > JUMP) sim.reset(T);
+    }
+    // the change of gravity in the head's frame: g - R g, with the head's rotation R (the rest groom holds g)
+    const H = this.head, k = sim.params.gravity * GRAVITY;
+    const g = [k * H[4], k * (H[5] - 1), k * H[6]];
+    let speed = 0;
+    for (let q = 0; q < n; q++) speed = sim.step(T, g, this.colPosed);
+    // the motion of each simulated point from its groom
+    const M = this.motion.data, X = sim.x;
+    for (let i = 0; i < S * P; i++) { M[i * 4] = X[i * 3] - T[i * 3]; M[i * 4 + 1] = X[i * 3 + 1] - T[i * 3 + 1]; M[i * 4 + 2] = X[i * 3 + 2] - T[i * 3 + 2]; }
+    this.motion.tex.needsUpdate = true;
+    this.A.mat.uniforms.uMoving.value = 1;
+    this.dirtyA = true;
+    this.still = !this.posed && speed < SLEEP_SPEED ? this.still + 1 : 0;
+    this.asleep = this.still >= SLEEP_STEPS;
+    this.posed = false;
+    this.simStats = { ms: performance.now() - t0, steps: n, speed };
+    return true;
   }
 
   // a rebuild of the density volume waits until the parameters rest for 150 ms
@@ -298,10 +429,27 @@ export class Hair {
     return out.subarray(0, texels * 4);
   }
 
+  // pass A in the current pose without and with the motion of the physics, and that motion, for the tests
+  readGuides(renderer: THREE.WebGLRenderer) {
+    const L = this.layout, P = this.uP.value, u = this.A.mat.uniforms.uMoving, keep = u.value;
+    const run = (m: number) => {
+      u.value = m;
+      const prev = renderer.getRenderTarget();
+      renderer.setRenderTarget(this.rtA); renderer.render(this.A.scene, this.cam); renderer.setRenderTarget(prev);
+      return Array.from(this.read(renderer, this.rtA!, L.G * (P + 2)));
+    };
+    const off = run(0), on = run(1);
+    u.value = keep; this.dirtyA = true;
+    return { off, on, motion: Array.from(this.motion.data.subarray(0, L.S * P * 4)), P, G: L.G, S: L.S,
+      style: this.style?.spec.name, mirrored: this.style?.mirrored };
+  }
+
   // the passes at rest (no pose, the head centre of anny's default body) for the parity tests: pass A, the render roots
   // and pass B of the first n strands; the pose comes back with the next setPose
   readRest(renderer: THREE.WebGLRenderer, n: number) {
     const L = this.layout, P = this.uP.value, keep = this.mat.data.slice(), c = this.uHeadC.value.clone();
+    const moving = this.A.mat.uniforms.uMoving.value;
+    this.A.mat.uniforms.uMoving.value = 0;
     this.mat.data.fill(0);
     for (let g = 0; g < L.G; g++) { this.mat.data[g * 12] = 1; this.mat.data[g * 12 + 5] = 1; this.mat.data[g * 12 + 10] = 1; }
     this.mat.tex.needsUpdate = true;
@@ -310,6 +458,7 @@ export class Hair {
     const out = { guides: Array.from(this.read(renderer, this.rtA!, L.G * (P + 2))), roots: Array.from(this.rootRest.data.subarray(0, n * 4)),
       points: Array.from(this.read(renderer, this.rtB, n * P)), P, G: L.G, scale: this.B.mat.uniforms.uScale.value, params: { ...this.params } };
     this.mat.data.set(keep); this.mat.tex.needsUpdate = true; this.uHeadC.value.copy(c);
+    this.A.mat.uniforms.uMoving.value = moving;
     this.dirtyA = true; this.update(renderer);
     return out;
   }
@@ -321,8 +470,9 @@ export class Hair {
     const v = this.volume ? this.volume.data.byteLength : 0;
     const geo = this.geometry ? (this.geometry.index!.array as any).byteLength + (this.geometry.attributes.position.array as any).byteLength : 0;
     const bytes = rt(this.rtA) + rt(this.rtB) + tex(this.frames.tex) + tex(this.local.tex) + tex(this.tipLocal.tex) + tex(this.info.tex)
-      + tex(this.mat.tex) + tex(this.motion.tex) + tex(this.rootRest.tex) + tex(this.rootData) + v + geo;
+      + tex(this.mat.tex) + tex(this.motion.tex) + tex(this.simInfo.tex) + tex(this.rootRest.tex) + tex(this.rootData) + v + geo;
     return { gpu_bytes: bytes, strands: this.count, points: this.uP.value, guides: this.layout.G, style: this.style?.spec.name,
-      available: this.style ? Array.from(available(this.style)).reduce((a, b) => a + b, 0) / this.layout.G : 0 };
+      available: this.style ? Array.from(available(this.style)).reduce((a, b) => a + b, 0) / this.layout.G : 0,
+      physics: this.physics, asleep: this.asleep, sim: this.simStats };
   }
 }
