@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 import trimesh
 
-from anny.hair.authoring import groom as hairmod
+from anny.hair.chart import chart, hairline
 
 from . import bake, eyes, regions
 
@@ -80,8 +80,8 @@ def skin_attributes(body, hair=None, nrays=48, verbose=True):
     Ns /= np.linalg.norm(Ns, axis=1, keepdims=True)
     curv = bake.curvature(V, T, Ns, E)
     curv = bake.smooth_values(curv, E, len(V), 6)
-    phi, el, _ = hairmod.sph(V)
-    hl = hairmod.hairline_el(phi)
+    phi, el, _ = chart(V)
+    hl = hairline(phi)
     scalp = regions.smoothstep(hl + 1.0, hl + 9.0, el) * (V[:, 1] > 0.43)
     hocc = np.ones(len(V))
     brow_pre = None
