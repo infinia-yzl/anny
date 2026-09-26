@@ -12,6 +12,9 @@ shaders, lights and cameras. Every shape the page shows comes from anny:
 
 - the phenotype sliders use anny's coefficients (:mod:`anny.viewer.export`); the shape space of
   anny's default sliders is exact with 128 components;
+- the face-shape sliders add their sparse offsets on the coarse body, scaled with the size of the
+  head as in anny (:mod:`anny.models.face_shapes`), and "Random face" samples the calibrated
+  distribution of :mod:`anny.faces.distribution`;
 - the skeleton is anny's rig, its joints follow the coefficients;
 - the fine body is the mixed Catmull-Clark subdivision of anny's body, with the detail layers of
   :mod:`anny.viewer.geometry` scaled with the local size of the body;
@@ -39,7 +42,19 @@ from .geometry import fine_body, vertex_normals
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
 DEFAULT_OUT = REPO / "viewer" / "build"
-SLIDERS = ["gender", "age", "muscle", "weight", "height", "proportions"]
+# anny's phenotype sliders of the page: the default ones and the three race phenotypes, whose
+# values mix by their shares (anny's default, 0.5 each, is an equal mix)
+SLIDERS = [
+    "gender",
+    "age",
+    "muscle",
+    "weight",
+    "height",
+    "proportions",
+    "african",
+    "asian",
+    "caucasian",
+]
 M = ANNY_TO_LEGACY
 
 
@@ -316,7 +331,9 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
     if verbose:
         print(f"stages ready: {time.time() - t0:.0f} s")
 
-    model = anny.Anny(topology="anny-quads").to(dtype=torch.float64)
+    model = anny.Anny(topology="anny-quads", face_shapes="all", phenotypes="all").to(
+        dtype=torch.float64
+    )
     coarse = rig.preview["coarse"]
     base_index = coarse["base_index"]
     body_quads = coarse[
@@ -396,21 +413,21 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
     region = faces_weighted_to_bones(model, body_quads).astype(np.uint8)
     pk.add("coarse_quads", quads.reshape(-1), "raw", quads.size * 4, 1)
     pk.add("coarse_region", region, "raw", len(region), 1)
-    pk.add(
-        "coarse_template",
-        space["template"].astype(np.float32),
-        "raw",
-        space["template"].size * 4,
-        1,
-    )
     comp = space["components"]
     comp_scale = np.abs(comp).reshape(len(comp), -1).max(1) / 32767
     cq = np.round(comp / comp_scale[:, None, None]).astype(np.int16)
+    proj = space["projection"].astype(np.float32)
+    # the rounding of the components, centred on anny's default body: the template takes the rounding error of the
+    # default body, so each body keeps only the rounding error of its difference to the default body (the error is
+    # linear in the coefficients)
+    a0 = proj.astype(np.float64) @ export.coefficients(model, {})
+    rounding = comp - cq * comp_scale[:, None, None]
+    template = space["template"] + np.einsum("k, knd -> nd", a0, rounding)
+    pk.add("coarse_template", template.astype(np.float32), "raw", template.size * 4, 1)
     # one record of 4 values (x, y, z and a zero pad) per component and vertex: meshopt encodes them as
     # vertices, and the neighbouring vertices of a component move alike
     cq = np.concatenate([cq, np.zeros(cq.shape[:2] + (1,), np.int16)], 2).reshape(-1, 4)
     pk.add("shape_components", cq, "vertex", len(cq), 8)
-    proj = space["projection"].astype(np.float32)
     pk.add("shape_projection", proj, "raw", proj.size * 4, 1)
     jt = space["joint_template"].astype(np.float32)
     jb = space["joint_blend"].astype(np.float32)
@@ -445,6 +462,35 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
         },
         eye_offset=[0.0, -0.0005, 0.0012],
     )
+
+    # ---------------- face shapes: sparse offsets on the coarse body and bone-head deltas (legacy
+    # frame), the landmarks that size the scale groups (anny's frame: only their ratios matter),
+    # and the face-shape distribution
+    ft = export.face_tables(model)
+    fo = export.face_offsets(model, compact)
+    off = rig.scale * fo["offsets"] @ M.T
+    qo = np.round(off / 1e-5)
+    assert np.abs(qo).max() < 32767
+    rec = np.zeros((len(qo), 4), np.int16)
+    rec[:, :3] = qo
+    pk.add("face_ids", fo["ids"], "raw", fo["ids"].size * 4, 1)
+    pk.add("face_offsets", rec, "vertex", len(rec), 8)
+    fb = (rig.scale * fo["bone_deltas"] @ M.T).astype(np.float32)
+    pk.add("face_bones", fb, "raw", fb.size * 4, 1)
+    lm = export.face_landmark_tables(model, ft["landmarks"])
+    lt = lm["template"].astype(np.float32)
+    lb = lm["blendshapes"].astype(np.float32)
+    pk.add("face_lm_template", lt, "raw", lt.size * 4, 1)
+    pk.add("face_lm_blend", lb, "raw", lb.size * 4, 1)
+    from anny.faces.distribution import DEFAULT_PATH as FACE_PRIOR
+
+    man["shape"]["face"] = dict(
+        ft, starts=fo["starts"], counts=fo["counts"], bones=fo["bones"], step=1e-5
+    )
+    if FACE_PRIOR.exists():
+        prior_meta, factors = export.face_prior_tables(model)
+        pk.add("face_prior", factors, "raw", factors.size * 4, 1)
+        man["shape"]["face"]["prior"] = prior_meta
 
     # ---------------- rig and motion
     q, root, clips, bones = motion_data()

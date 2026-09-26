@@ -31,4 +31,5 @@ PoseParameterization: TypeAlias = Literal[
 BoneOrientation: TypeAlias = Literal["blender", "procrustes", "cached"]
 LocalChanges: TypeAlias = Literal["none", "default", "all"] | Sequence[str]
 FacialActions: TypeAlias = Literal["none", "all"] | Sequence[str]
+FaceShapes: TypeAlias = Literal["none", "all"] | Sequence[str]
 Phenotypes: TypeAlias = Literal["default", "all"]

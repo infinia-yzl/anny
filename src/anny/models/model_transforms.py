@@ -142,6 +142,10 @@ def filter_blendshapes(data: ModelData, mask: list[bool]) -> ModelData:
     extra = {}
     if data.bone_tails_blendshapes is not None:
         extra["bone_tails_blendshapes"] = data.bone_tails_blendshapes[blendshape_mask]
+    if data.craniofacial_landmarks_blendshapes is not None:
+        extra["craniofacial_landmarks_blendshapes"] = (
+            data.craniofacial_landmarks_blendshapes[blendshape_mask]
+        )
     return dataclasses.replace(
         data,
         metadata=dataclasses.replace(

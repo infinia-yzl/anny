@@ -56,6 +56,23 @@ class KeypointsRegressor(torch.nn.Module):
         )
 
     @classmethod
+    def craniofacial(cls, model: anny.Anny, labels: list[str] | None = None):
+        """the craniofacial landmarks of anny.faces.measurements"""
+        from anny.faces.measurements import craniofacial_landmark_weights
+
+        n = int(model.base_mesh_vertex_indices.max()) + 1
+        weights = craniofacial_landmark_weights(max(n, 19158))
+        labels = list(weights) if labels is None else labels
+        base = model.base_mesh_vertex_indices
+        W = torch.stack([weights[k][base] for k in labels]).to(
+            dtype=model.dtype, device=model.device
+        )
+        assert torch.all((W.sum(1) - 1).abs() < 1e-3), (
+            "the topology lacks vertices of the craniofacial landmarks"
+        )
+        return cls(W, labels)
+
+    @classmethod
     def load_precomputed(
         cls, model: anny.Anny, path: PathLike, labels: list[str] | None = None
     ):

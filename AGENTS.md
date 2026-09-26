@@ -24,6 +24,19 @@ uv run python -m unittest test.test_various  # run a single test file
 bash build_doc.bash  # build HTML docs from the jupytext py:percent tutorials in tutorials/*.py
 ```
 
+### Face calibration
+```bash
+uv sync --extra viewer --extra faces
+uv run python -m anny.faces.authoring.sources       # download the data sources into ANNY_CACHE_DIR/faces
+uv run python -m anny.faces.authoring.landmarks     # data/keypoints/craniofacial.json
+uv run python -m anny.faces.authoring.fit_3d        # fit anny's face shapes to ICT-FaceKit identities
+uv run python -m anny.faces.authoring.detail        # data/faces/detail_shapes.safetensors, from the fit residuals
+uv run python -m anny.faces.authoring.mediapipe_map # data/keypoints/mediapipe.json
+uv run python -m anny.faces.authoring.calibrate     # data/shape_calibration/face_prior.safetensors
+uv run python -m anny.faces.authoring.benchmark     # benchmark.html in ANNY_CACHE_DIR/faces
+uv run python -m anny.faces.authoring.review        # review.png in ANNY_CACHE_DIR/faces: random faces to judge by eye
+```
+
 ### Web viewer
 ```bash
 uv sync --extra viewer                # scipy, tetgen, embreex for the build
@@ -72,10 +85,41 @@ cd viewer && npx tsc --noEmit         # type-check the page
 | Correctives | `correctives/` | `SoftTissueCorrectives` (hinge and cone drivers, shapes scaled with the local size; `data/correctives/`); `correctives/authoring/` holds the simulation, the fit and `evaluate` |
 | Hair | `hair/` | `StrandBinding` ties strands to the skin at roots and tips; `hair/authoring/` grows the groom, brows and lashes |
 | Viewer data | `viewer/` | `python -m anny.viewer build` writes the page data to `viewer/build/` and runs the node build of `viewer/` |
+| Face shapes | `models/face_shapes.py`, `faces/` | 103 named, symmetric face-shape parameters and 10 detail shapes from ICT-FaceKit (`Anny(face_shapes=...)`, `face_shape_kwargs`), scaled per group with the size of the head; craniofacial landmarks and the measurements of 3D Facial Norms and ANSUR II (`faces/measurements.py`); a face-shape distribution calibrated against measured faces (`faces/distribution.py`); `faces/authoring/` fetches the sources, fits the ICT-FaceKit identity space, calibrates the distribution and benchmarks against FairFace photos |
 
 ### Phenotype System
 
 Phenotypes are blended linearly between discrete anchor states defined in `src/anny/data/mpfb2/targets/`. Default mode omits race, cupsize, and firmness; pass `phenotypes="all"` to enable them. Blend shape data is computed at model creation and cached in `~/.cache/anny/`. Set the `ANNY_CACHE_DIR` environment variable to use a different location.
+
+### Face Shapes
+
+`Anny(face_shapes="all")` (or a list of names) adds the face-shape block: each parameter of
+`data/faces/face_shapes.json` sums the left and right MakeHuman targets of the head, forehead, brows,
+eyes, nose, cheeks, mouth, chin and ears into rows `face_shape:{name}.pos` and `.neg`; +1 applies the
+positive targets, -1 the negative ones, and the head archetypes and `chin-triangle` run from 0 to 1.
+The `detail` parameters (`source: "ict"` in the spec) come from `data/faces/detail_shapes.safetensors`:
+the symmetric principal components of the residuals of the ICT-FaceKit fits, written by
+`python -m anny.faces.authoring.detail`. The model cache key carries a digest of both files
+(`face_shape_data_digest`), and the calibration widens the slider ranges to hold the calibrated
+distribution. The rows of a group scale with the size of that part of the head (`Anny.face_shape_scales`),
+measured on the craniofacial landmarks of `data/keypoints/craniofacial.json`, which `ModelData`
+stores for the template and every blend shape. The `anny` and `soma` rig caches carry the face rows;
+`scripts/precompute_rig_caches.py --append` adds rows for new blend shapes and leaves the others
+bit for bit. `anny.faces.distribution.FaceShapeDistribution` samples face values for given phenotypes
+from `data/shape_calibration/face_prior.safetensors`, built by `python -m anny.faces.authoring.calibrate`
+(sources and licences in `data/faces/SOURCES.md`): the covariance of the ICT fits with one variance
+factor per group of at most 1 (no detail shapes below 18 years, and `head-age` held at 0), around
+anny's default face for each age. Only the skull-size shapes (`MEAN_SHAPES`) move the mean, by MAP
+fits to the head measurements of each anchor; the facial features stay at anny's default face,
+because means that also moved them met the nose, lip and face-depth targets through big noses,
+forward chins and thin lips, which looked old and harsh. Check changes to the calibration by
+rendering random faces in the viewer as well as by the measurement check: fits that meet the
+numbers can still give implausible faces. Judge each random face by whether it passes as a normal
+person of that age, and show the calibrated mean in the grid, since the default face hides a shift
+of the mean: `python -m anny.faces.authoring.review` renders that grid from the viewer page.
+`test.test_faces_calibration.TestPlausibleFaces` guards these choices and the facial spread of the
+approved prior (`APPROVED_FACIAL_SPREAD`); when a change breaks one of its tests, review the grid
+with the user before updating the test.
 
 ### Pose Parameterization
 
@@ -88,9 +132,16 @@ The pose, corrective and hair authoring code (`*/authoring/`) works on the autho
 ### Web Viewer
 
 `viewer/` is a node project (TypeScript, three.js, esbuild). `src/anny_shape.ts` and `src/subdivision.ts` repeat anny's coefficient maths and the subdivision, and `test/test_viewer_parity.py` checks them against Python. `src/body.ts` rebuilds the fine body for any slider setting, `src/shading.ts` holds the shaders, and `src/main.ts` holds the renderer and the panels. `npm run build` writes the single-file page `viewer/dist/anny_viewer.html`; `npx tsc --noEmit` type-checks.
+The Body section holds the sliders of `anny.viewer.build.SLIDERS`: anny's six default phenotypes and the three race
+phenotypes, whose values mix by their shares (the build uses `phenotypes="all"`, and 136 components reproduce the
+blend shapes exactly). The Characters row of the Character panel holds presets (`CHARACTERS` in `src/main.ts`) that
+set the phenotype sliders, the face and the colours, as a character creator's presets do; the Looks row sets the
+colours only. Random face draws with `sampleFace` (`src/anny_shape.ts`) at the spread of the exported prior, and
+`test/test_viewer_parity.py` checks it against Python.
 
 ### Optional Dependencies
 
 - `smplx` — required for `SMPL` and `SMPLX` model classes; install via `uv sync --extra smpl`
 - `trimesh`, `gradio`, `jsonargparse`, `requests` — needed only for examples and parameter regression tests
 - `scipy`, `tetgen`, `embreex` — needed for the viewer build and the authoring tools; install via `uv sync --extra viewer` (the page build also needs node 22 or later)
+- `mediapipe`, `pyarrow`, `playwright` — needed for the face calibration and the photo benchmark (`python -m anny.faces.authoring.*`); install via `uv sync --extra faces` (MediaPipe needs the system libraries `libegl1` and `libgles2`)

@@ -198,6 +198,9 @@
   .ed-btn:disabled { opacity: 0.45; cursor: default; }
   .bar button[hidden] { display: none; }
   .ed-shape { display: grid; gap: 12px; }
+  .ed-face-list { padding: 4px 0 12px; }
+  .ed-face-list input[type="range"]:not(.ed-centred) { --track: rgba(236, 231, 225, 0.09); }
+  .ed-links { display: inline-flex; gap: 14px; }
   .ed-shape input[type="range"] {
     --track: linear-gradient(90deg, rgba(236, 231, 225, 0.09) calc(50% - 1px), rgba(236, 231, 225, 0.55) calc(50% - 1px) calc(50% + 1px), rgba(236, 231, 225, 0.09) calc(50% + 1px));
   }
@@ -271,6 +274,11 @@
     <button type="button" class="ed-x" id="ed-close" aria-label="Close the character panel"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
   <div class="ed-body">
+    <section class="ed-sec" aria-labelledby="ed-l-chars">
+      <h3 id="ed-l-chars">Characters</h3>
+      <div class="ed-chips" id="ed-chars"></div>
+      <p class="ed-note">A character sets the ethnicity, the body, the face, the skin, the hair and the eyes. The looks below change the colours only.</p>
+    </section>
     <section class="ed-sec" aria-labelledby="ed-l-looks">
       <h3 id="ed-l-looks">Looks</h3>
       <div class="ed-chips" id="ed-looks"></div>
@@ -279,6 +287,11 @@
       <div class="ed-row"><h3 id="ed-l-shape">Body</h3><button type="button" class="ed-link" id="ed-shape-reset">Reset body</button></div>
       <p class="ed-note">These are anny's phenotype sliders. Each one runs from 0 to 1, and anny's default is 0.5.</p>
       <div class="ed-shape" id="ed-shape"></div>
+    </section>
+    <section class="ed-sec" id="ed-face-sec" aria-labelledby="ed-l-face" hidden>
+      <div class="ed-row"><h3 id="ed-l-face">Face</h3><span class="ed-links"><button type="button" class="ed-link" id="ed-face-random">Random face</button><button type="button" class="ed-link" id="ed-face-reset">Reset face</button></span></div>
+      <p class="ed-note">Named shapes of the head and the face, which scale with the size of the head. Random face draws a face from anny's distribution, calibrated against measured faces, for the current age, gender, weight and muscle.</p>
+      <div class="po-groups" id="ed-face"></div>
     </section>
     <section class="ed-sec" aria-labelledby="ed-l-skin">
       <h3 id="ed-l-skin">Skin</h3>

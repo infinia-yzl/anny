@@ -7,13 +7,42 @@ All notable changes to this project.
 Highlights:
 
 - **Web viewer.** `viewer/dist/anny_viewer.html` renders anny in the browser with skin,
-  eye and hair shading. Its Character panel holds anny's phenotype sliders, and every part
-  of the page follows them: the fine body, the skeleton, the eyes, the hair and the
-  corrective shapes. `python -m anny.viewer build` rebuilds the page.
+  eye and hair shading. Its Character panel holds anny's phenotype sliders, with the three
+  race phenotypes for any mix of ethnicities, and every part of the page follows them: the
+  fine body, the skeleton, the eyes, the hair and the corrective shapes. Character presets
+  (Asian and Eurasian women and men) set the body, the face and the colours at once.
+  `python -m anny.viewer build` rebuilds the page.
 - **Poses, soft tissue and hair for anny.** These parts come from the `3D Model`
   experiment, and they follow the phenotype sliders.
+- **Face and head shapes.** `Anny(face_shapes="all")` adds 103 named, symmetric shapes of the
+  head and the face and 10 detail shapes from the 3D faces of ICT-FaceKit (`face_shape_kwargs`),
+  scaled with the size of the head. A face-shape distribution draws plausible faces for any age,
+  gender and ethnicity around anny's own face: the ICT-FaceKit faces give its spread, and the
+  head measurements of ANSUR II, 3D Facial Norms and the CDC charts give the size of the skull.
+  The viewer's Character panel gains a Face section with a Random face button, and
+  `test.test_faces_calibration.TestPlausibleFaces` guards the approved random faces. Fitted to
+  1,107 FairFace photos, the face shapes halve anny's landmark error.
 
 ### Added
+
+- `Anny(face_shapes=..., scale_face_shapes=True)` and `forward(face_shape_kwargs=...)`: the
+  face-shape parameters of `data/faces/face_shapes.json` (`scripts/make_face_shape_spec.py`),
+  with `face_shape_labels`, `face_shape_groups`, `face_shape_ranges` and `face_shape_scales`.
+  The `detail` parameters come from `data/faces/detail_shapes.safetensors`
+  (`python -m anny.faces.authoring.detail`).
+- `anny.faces.measurements`: 51 craniofacial landmarks (`data/keypoints/craniofacial.json`,
+  also through `KeypointsRegressor.craniofacial`), the 34 measurements of the 3D Facial Norms
+  database and the head and face measurements of ANSUR II (`CraniofacialMeasurements`), and
+  `Anny.rest_craniofacial_landmarks` on every topology.
+- `anny.faces.distribution.FaceShapeDistribution`: face values for given phenotypes, from
+  `data/shape_calibration/face_prior.safetensors`.
+- `anny.faces.authoring`: the sources (ANSUR II, 3D Facial Norms, CDC growth charts,
+  ICT-FaceKit, FairFace, MediaPipe; all free without an account, see `data/faces/SOURCES.md`),
+  the landmark placement, the fits to the ICT-FaceKit identity space, the calibration and the
+  benchmark against FairFace photographs.
+- `scripts/precompute_rig_caches.py --append`: rows for new blend shapes, leaving the existing
+  rows bit for bit.
+- The `faces` extra (`mediapipe`, `pyarrow`, `playwright`) for the face calibration.
 
 - `anny.poses`: a library of 50 poses and 7 clips for the `anny` rig, as `local-ref` pose
   parameters, with grounding on the floor and a stool for the seated poses.
@@ -32,6 +61,11 @@ Highlights:
   shape space, poses, correctives and hair) and its command line.
 - The `viewer` extra (`scipy`, `tetgen`, `embreex`) for the viewer build and the authoring
   tools.
+
+### Changed
+
+- `CURRENT_DATA_VERSION` is 12: the model data stores the craniofacial landmarks, and the
+  MakeHuman data gains the face-shape rows.
 
 ### Removed
 

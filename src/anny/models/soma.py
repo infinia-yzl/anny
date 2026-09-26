@@ -5,7 +5,7 @@
 import dataclasses
 import os
 
-from anny.typing import LocalChanges, FacialActions
+from anny.typing import FaceShapes, LocalChanges, FacialActions
 import torch
 
 from anny.models.model_data import RigConfig, TopologyConfig
@@ -46,7 +46,9 @@ def _load_soma_faces():
 
 
 def build_soma_rig_and_topology_model_data(
-    local_changes: LocalChanges, facial_actions: FacialActions
+    local_changes: LocalChanges,
+    facial_actions: FacialActions,
+    face_shapes: FaceShapes = "none",
 ):
     soma_rig_data = _load_soma_rig()
     procrustes_orientation_data = _load_cached_orientation_data()
@@ -56,6 +58,7 @@ def build_soma_rig_and_topology_model_data(
         local_changes=local_changes,
         facial_actions=facial_actions,
         reference_topology="anny_from_soma",
+        face_shapes=face_shapes,
     )
     data = apply_soma_rig(soma_data, soma_rig_data, procrustes_orientation_data)
     # Use the canonical SOMA-X triangulation so the SOMA-topology mesh (and the retopology
@@ -66,11 +69,15 @@ def build_soma_rig_and_topology_model_data(
 
 
 def build_soma_rig_model_data(
-    topology: TopologyConfig, local_changes: LocalChanges, facial_actions: FacialActions
+    topology: TopologyConfig,
+    local_changes: LocalChanges,
+    facial_actions: FacialActions,
+    face_shapes: FaceShapes = "none",
 ):
     soma_data = build_soma_rig_and_topology_model_data(
         local_changes=local_changes,
         facial_actions=facial_actions,
+        face_shapes=face_shapes,
     )
 
     if topology.base_mesh == "soma":
@@ -90,6 +97,7 @@ def build_soma_rig_model_data(
         local_changes=local_changes,
         facial_actions=facial_actions,
         topology=topology,
+        face_shapes=face_shapes,
     )
 
     vertices = target_data.template_vertices

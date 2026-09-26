@@ -19,6 +19,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { AnnyBody, vertexNormals as normalsOf } from './body.ts';
+import { sampleFace, type FaceData } from './anny_shape.ts';
 import {
   BG_GLSL, COVER_GLSL, EYE_FS, EYE_VS, GLSL_COMMON, HAIR_FS, HAIR_VS, HEAD_OUT_GLSL, NOISE_GLSL, PROP_FS, PROP_VS, SKIN_FS, SKIN_GLSL,
   SKIN_VS, SSS_GLSL,
@@ -764,7 +765,14 @@ function makeHairMesh(geo, p, defines, strands) {
 // The body comes from anny (body.ts): the sliders set anny's blend-shape coefficients, the coarse body and the
 // joints follow, the fine surface is rebuilt by subdivision with its detail layers, and the eyes, the hair, the
 // skeleton and the corrective shapes follow the body. Every slider runs from 0 to 1, and anny's default is 0.5.
-const BODY: any = { ready: false, anny: null as AnnyBody | null, geo: null, values: null, sliders: [], lastMs: 0, lastTotalMs: 0, lastTiming: {} };
+const BODY: any = { ready: false, anny: null as AnnyBody | null, geo: null, values: null, face: null, faceSliders: [], sliders: [], lastMs: 0, lastTotalMs: 0, lastTiming: {} };
+// anny's race phenotypes: their values mix by their shares
+const RACES = ['african', 'asian', 'caucasian'];
+function raceShare(phenotype: any, name: string) {
+  const v = (k: string) => phenotype[k] ?? PHENOTYPE_DEFAULT;
+  const sum = RACES.reduce((a, k) => a + v(k), 0);
+  return sum > 0 ? v(name) / sum : 1 / RACES.length;
+}
 function sliderEnds(tables: any, label: string) {
   const v = tables.variations.find((x: any) => x[0] === label);
   const a = tables.anchors[label];
@@ -787,21 +795,52 @@ function initBody(meta: any, B: any, geo: any) {
   // the shape components come as records of 4 values (x, y, z and a pad)
   const c4 = i16('shape_components'), nComp = sm.components * sm.coarse_vertices, components = new Int16Array(nComp * 3);
   for (let i = 0; i < nComp; i++) { components[i * 3] = c4[i * 4]; components[i * 3 + 1] = c4[i * 4 + 1]; components[i * 3 + 2] = c4[i * 4 + 2]; }
+  // anny's face shapes: sparse offsets on the coarse body (records of x, y, z and a pad), bone-head deltas, the
+  // landmarks that size the scale groups, and the factors of the face-shape distribution
+  let face: FaceData | undefined;
+  if (sm.face && B.face_offsets) {
+    const o4 = i16('face_offsets'), n = o4.length / 4, offsets = new Int16Array(n * 3);
+    for (let i = 0; i < n; i++) { offsets[i * 3] = o4[i * 4]; offsets[i * 3 + 1] = o4[i * 4 + 1]; offsets[i * 3 + 2] = o4[i * 4 + 2]; }
+    face = { tables: sm.face, lmTemplate: f32('face_lm_template'), lmBlend: f32('face_lm_blend'), ids: u32('face_ids'), offsets,
+      boneDeltas: f32('face_bones'), prior: B.face_prior ? f32('face_prior') : undefined };
+  }
   const body = new AnnyBody(meta, {
     template: f32('coarse_template'), components,
     projection: f32('shape_projection').subarray(0, sm.components * sm.blend_shapes),
     jointTemplate: f32('joint_template'), jointBlend: f32('joint_blend'),
     quads: u32('coarse_quads'), rows, detail: detailRaw, relief,
-    index: geo.index.array, rest: at.rest.array, nsmooth: at.nsmooth.array.slice(), coarseSkin: B.coarse_skin.data,
+    index: geo.index.array, rest: at.rest.array, nsmooth: at.nsmooth.array.slice(), coarseSkin: B.coarse_skin.data, face,
   }, at.position.array, at.normal.array, at.nsmooth.array);
   body.detailStep = B.head_detail.info.step || 1e-5;
   BODY.anny = body; BODY.geo = geo;
-  BODY.sliders = sm.sliders.map((name: string) => ({ name, label: name.charAt(0).toUpperCase() + name.slice(1), ends: sliderEnds(sm.tables, name) }));
+  BODY.sliders = sm.sliders.map((name: string) => ({ name, label: name.charAt(0).toUpperCase() + name.slice(1),
+    race: RACES.includes(name), ends: RACES.includes(name) ? [] : sliderEnds(sm.tables, name) }));
+  BODY.face = face || null;
+  BODY.faceSliders = face ? face.tables.names.map((name: string, i: number) => ({ name, group: face.tables.groups[i],
+    label: faceLabel(name, face.tables.groups[i]), range: face.tables.ranges[i], ends: (face.tables.ends || [])[i] || ['', ''] })) : [];
   BODY.ready = true;
 }
+// a readable label for a face-shape name, without the group's own word: 'nose-scale-vert' -> 'Height'
+const FACE_WORDS: Record<string, string> = { 'scale-vert': 'height', 'scale-horiz': 'width', 'scale-depth': 'depth', 'trans': 'position',
+  'down-up': 'up and down', 'in-out': 'in and out', 'backward-forward': 'back and forth', 'decr-incr': '', 'invertedtriangular': 'inverted triangular' };
+const FACE_GROUP_WORDS: Record<string, string[]> = { head: ['head'], forehead: ['forehead'], brows: ['eyebrows'], eyes: ['eye'], nose: ['nose'],
+  cheeks: ['cheek'], mouth: ['mouth'], chin: ['chin'], ears: ['ear'] };
+function faceLabel(name: string, group: string) {
+  let t = name;
+  for (const w of FACE_GROUP_WORDS[group] || []) if (t.startsWith(w + '-')) t = t.slice(w.length + 1);
+  for (const [k, v] of Object.entries(FACE_WORDS)) t = t.split(k).join(v);
+  t = t.replace(/-/g, ' ').replace(/\s+/g, ' ').trim() || name;
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+const FACE_GROUP_TITLES: Record<string, string> = { head: 'Head', forehead: 'Forehead', brows: 'Brows', eyes: 'Eyes', nose: 'Nose',
+  cheeks: 'Cheeks', mouth: 'Mouth', chin: 'Chin and jaw', ears: 'Ears', detail: 'Detail' };
 function sameValues(a: any, b: any) {
   if (!a || !b) return false;
   return BODY.sliders.every((s: any) => Math.abs((a[s.name] ?? 0.5) - (b[s.name] ?? 0.5)) < 1e-6);
+}
+function sameFace(a: any, b: any) {
+  if (!a || !b) return false;
+  return BODY.faceSliders.every((s: any) => Math.abs((a[s.name] ?? 0) - (b[s.name] ?? 0)) < 1e-6);
 }
 // the head of anny's default body -> the head of the current body (both at rest): a move and a uniform scale
 const HEADMAP = { def: new THREE.Vector3(), cur: new THREE.Vector3(), k: 1, m: new THREE.Matrix4(), inv: new THREE.Matrix4() };
@@ -816,17 +855,18 @@ function updateHeadMap() {
     .multiply(new THREE.Matrix4().makeTranslation(-HEADMAP.def.x, -HEADMAP.def.y, -HEADMAP.def.z));
   HEADMAP.inv.copy(HEADMAP.m).invert();
 }
-function applyBodyShape(values: any) {
+function applyBodyShape(values: any, face: any = {}) {
   if (!BODY.ready) return false;
-  const v: any = {};
+  const v: any = {}, f: any = {};
   for (const s of BODY.sliders) v[s.name] = typeof values?.[s.name] === 'number' ? values[s.name] : 0.5;
-  if (sameValues(v, BODY.values)) return false;
+  for (const s of BODY.faceSliders) if (typeof face?.[s.name] === 'number' && face[s.name] !== 0) f[s.name] = face[s.name];
+  if (sameValues(v, BODY.values) && sameFace(f, BODY.faceValues)) return false;
   const t0 = performance.now(), steps: any = {};
   let last = t0;
   const mark = (name: string) => { const t = performance.now(); steps[name] = Math.round((t - last) * 10) / 10; last = t; };
-  BODY.values = v;
+  BODY.values = v; BODY.faceValues = f;
   clearCorrectives();
-  const r = BODY.anny.update(v);
+  const r = BODY.anny.update(v, f);
   last = performance.now();
   const at = BODY.geo.attributes;
   markFull(at.position); markFull(at.normal); markFull(at.nsmooth);
@@ -1372,7 +1412,8 @@ function showStool(info) {
 // ------------------------------------------------------------------ look: the parameters a preset carries
 // A preset is plain JSON: sRGB hex colours for the skin, the hair and the eyes, and the values of anny's phenotype
 // sliders, so the same file can set up anny in Python (phenotype_kwargs) and this viewer.
-const LOOK_FORMAT = 'anny-viewer/look@1';
+// look@2 adds the face-shape values (face: {name: value}); a look@1 preset reads as a face of anny's defaults
+const LOOK_FORMAT = 'anny-viewer/look@2';
 const srgb2lin = (c: number) => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 const hexToRgb = (h: string) => { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
 const hexToLin = (h: string) => hexToRgb(h).map(srgb2lin);
@@ -1397,12 +1438,29 @@ const PALETTES: any = {
 };
 const PHENOTYPE_DEFAULT = 0.5;
 function baselinePhenotype() { return Object.fromEntries((MANIFEST?.shape?.sliders || []).map((k: string) => [k, PHENOTYPE_DEFAULT])); }
-const BASELINE_LOOK: any = { format: LOOK_FORMAT, name: 'Baseline', skin: { tone: 0.35, undertone: 0 }, hair: { color: '#271f16' }, eyes: { color: '#875f3d' }, phenotype: {} };
+const BASELINE_LOOK: any = { format: LOOK_FORMAT, name: 'Baseline', skin: { tone: 0.35, undertone: 0 }, hair: { color: '#271f16' }, eyes: { color: '#875f3d' }, phenotype: {}, face: {} };
 const EXAMPLE_LOOKS: any[] = [
   BASELINE_LOOK,
   { format: LOOK_FORMAT, name: 'Fair', skin: { tone: 0.12, undertone: -0.3 }, hair: { color: '#6b4a30' }, eyes: { color: '#5f84a8' } },
   { format: LOOK_FORMAT, name: 'Olive', skin: { tone: 0.5, undertone: 0.45 }, hair: { color: '#141110' }, eyes: { color: '#4a3020' } },
   { format: LOOK_FORMAT, name: 'Deep', skin: { tone: 0.9, undertone: 0.1 }, hair: { color: '#141110' }, eyes: { color: '#4a3020' } },
+];
+// characters: presets that set everything a look carries (the phenotype sliders, the face and the colours), as the
+// presets of a character creator do; the example looks set the colours only. The faces are random faces of the
+// calibrated distribution for each body, chosen on the review renders.
+const CHARACTERS: any[] = [
+  { format: LOOK_FORMAT, name: 'Asian woman', skin: { tone: 0.28, undertone: 0.4 }, hair: { color: '#141110' }, eyes: { color: '#4a3020' },
+    phenotype: { gender: 1, age: 0.78, muscle: 0.45, weight: 0.45, height: 0.5, proportions: 0.5, african: 0, asian: 1, caucasian: 0 },
+    face: { 'head-scale-vert': 0.51, 'head-fat': -0.02, 'head-invertedtriangular': 0.03, 'head-back-scale-depth': -0.96, 'head-round': 0.02, 'head-scale-depth': 1.76, 'head-scale-horiz': 0.43, 'forehead-temple': -0.01, 'forehead-trans': 0.25, 'forehead-scale-vert': 0.06, 'forehead-nubian': -0.01, 'eyebrows-angle': -0.01, 'eyebrows-trans-backward-forward': 0.04, 'eye-corner1': 0.34, 'eye-height1': 0.1, 'eye-scale': 0.04, 'eye-push1': -0.01, 'eye-eyefold-down-up': 0.03, 'eye-height3': 0.16, 'eye-height2': 0.13, 'eye-bag-decr-incr': -0.01, 'eye-push2': -0.06, 'eye-trans-down-up': 0.18, 'eye-bag-height': 0.03, 'eye-epicanthus': 0.02, 'eye-eyefold-angle': -0.1, 'eye-bag-in-out': -0.03, 'eye-corner2': -0.26, 'eye-trans-in-out': -0.22, 'eye-eyefold-concave-convex': 0.02, 'nose-nostrils-angle': 0.04, 'nose-flaring': -0.11, 'nose-curve': -0.02, 'nose-scale-depth': 0.01, 'nose-scale-vert': 0.04, 'nose-point-width': -0.11, 'nose-scale-horiz': 0.07, 'nose-width1': -0.01, 'nose-trans-backward-forward': 0.08, 'nose-trans-down-up': -0.06, 'nose-hump': -0.01, 'nose-nostrils-width': 0.05, 'nose-greek': 0.03, 'nose-point': -0.04, 'nose-width2': -0.05, 'nose-width3': 0.03, 'nose-septumangle': 0.06, 'nose-base': -0.04, 'nose-compression': -0.03, 'nose-volume': 0.01, 'cheek-trans': 0.08, 'cheek-inner': -0.04, 'cheek-bones': -0.17, 'mouth-lowerlip-height': -0.01, 'mouth-scale-horiz': -0.08, 'mouth-cupidsbow': -0.01, 'mouth-laugh-lines': 0.01, 'mouth-scale-depth': -0.17, 'mouth-lowerlip-volume': -0.18, 'mouth-angles': 0.1, 'mouth-upperlip-ext': 0.01, 'mouth-lowerlip-width': -0.01, 'mouth-trans-backward-forward': 0.06, 'mouth-scale-vert': 0.04, 'mouth-dimples': 0.05, 'mouth-upperlip-height': 0.03, 'mouth-upperlip-volume': 0.03, 'mouth-cupidsbow-width': 0.03, 'mouth-lowerlip-ext': -0.06, 'mouth-upperlip-middle': -0.1, 'mouth-trans-down-up': -0.04, 'mouth-lowerlip-middle': -0.06, 'mouth-philtrum-volume': 0.04, 'chin-jaw-drop': 0.01, 'chin-height': 0.09, 'chin-prominent': 0.01, 'chin-bones': -0.01, 'chin-width': 0.02, 'chin-triangle': 0.02, 'chin-prognathism': 0.09, 'ear-lobe': 0.11, 'ear-shape-square-round': -0.04, 'ear-trans-backward-forward': -0.18, 'ear-rot': 0.01, 'ear-trans-down-up': 0.03, 'ear-scale-vert': 0.04, 'ear-flap': 0.02, 'ear-shape-pointed-triangle': 0.11, 'ear-scale': 0.14, 'ear-scale-depth': -0.06, 'ear-wing': 0.03, 'detail-1': 0.08, 'detail-2': -0.17, 'detail-3': -0.11, 'detail-4': 0.12, 'detail-5': 0.03, 'detail-6': -0.2, 'detail-7': 0.01, 'detail-8': -0.21, 'detail-9': -0.33, 'detail-10': 0.09 } },
+  { format: LOOK_FORMAT, name: 'Asian man', skin: { tone: 0.32, undertone: 0.4 }, hair: { color: '#141110' }, eyes: { color: '#4a3020' },
+    phenotype: { gender: 0, age: 0.79, muscle: 0.55, weight: 0.5, height: 0.5, proportions: 0.5, african: 0, asian: 1, caucasian: 0 },
+    face: { 'head-scale-vert': 0.11, 'head-fat': -0.09, 'head-invertedtriangular': 0.07, 'head-back-scale-depth': -1.43, 'head-scale-depth': 0.81, 'head-scale-horiz': 0.11, 'forehead-temple': 0.08, 'forehead-trans': 0.07, 'forehead-scale-vert': -0.01, 'forehead-nubian': 0.01, 'eyebrows-angle': -0.03, 'eyebrows-trans-down-up': 0.02, 'eyebrows-trans-backward-forward': -0.03, 'eye-corner1': 0.02, 'eye-height1': 0.02, 'eye-scale': 0.14, 'eye-push1': -0.12, 'eye-eyefold-down-up': 0.02, 'eye-height3': -0.06, 'eye-height2': -0.06, 'eye-bag-decr-incr': 0.05, 'eye-push2': -0.26, 'eye-bag-height': 0.05, 'eye-epicanthus': 0.05, 'eye-eyefold-angle': 0.03, 'eye-bag-in-out': 0.04, 'eye-corner2': -0.04, 'eye-trans-in-out': 0.01, 'eye-eyefold-concave-convex': -0.13, 'nose-nostrils-angle': 0.01, 'nose-flaring': 0.04, 'nose-curve': -0.01, 'nose-scale-depth': -0.05, 'nose-scale-vert': 0.02, 'nose-point-width': -0.02, 'nose-scale-horiz': -0.02, 'nose-width1': -0.04, 'nose-trans-backward-forward': -0.08, 'nose-trans-down-up': -0.04, 'nose-hump': 0.02, 'nose-nostrils-width': -0.01, 'nose-greek': 0.04, 'nose-point': -0.04, 'nose-width2': 0.01, 'nose-width3': 0.06, 'nose-septumangle': -0.01, 'nose-base': 0.01, 'nose-compression': 0.01, 'cheek-trans': 0.02, 'cheek-volume': 0.01, 'cheek-inner': 0.07, 'cheek-bones': -0.04, 'mouth-lowerlip-height': 0.04, 'mouth-scale-horiz': -0.21, 'mouth-cupidsbow': 0.01, 'mouth-laugh-lines': 0.01, 'mouth-scale-depth': -0.13, 'mouth-lowerlip-volume': -0.07, 'mouth-angles': -0.04, 'mouth-upperlip-ext': -0.01, 'mouth-trans-backward-forward': 0.2, 'mouth-upperlip-width': -0.04, 'mouth-scale-vert': 0.06, 'mouth-dimples': 0.02, 'mouth-upperlip-height': -0.02, 'mouth-upperlip-volume': 0.02, 'mouth-cupidsbow-width': 0.03, 'mouth-upperlip-middle': 0.08, 'mouth-trans-down-up': 0.02, 'mouth-lowerlip-middle': 0.02, 'mouth-philtrum-volume': 0.03, 'chin-jaw-drop': 0.01, 'chin-prominent': 0.05, 'chin-bones': 0.18, 'chin-width': 0.04, 'chin-triangle': 0.04, 'chin-prognathism': 0.07, 'ear-lobe': 0.12, 'ear-shape-square-round': -0.13, 'ear-trans-backward-forward': 0.1, 'ear-rot': 0.03, 'ear-trans-down-up': 0.1, 'ear-scale-vert': 0.07, 'ear-flap': 0.05, 'ear-shape-pointed-triangle': -0.16, 'ear-scale': -0.09, 'ear-scale-depth': -0.18, 'ear-wing': 0.14, 'detail-1': 0.24, 'detail-2': -0.19, 'detail-3': -0.05, 'detail-4': -0.04, 'detail-5': -0.01, 'detail-6': 0.09, 'detail-7': -0.11, 'detail-8': -0.02, 'detail-9': -0.28, 'detail-10': 0.09 } },
+  { format: LOOK_FORMAT, name: 'Eurasian woman', skin: { tone: 0.22, undertone: 0.25 }, hair: { color: '#271f16' }, eyes: { color: '#875f3d' },
+    phenotype: { gender: 1, age: 0.78, muscle: 0.45, weight: 0.45, height: 0.5, proportions: 0.5, african: 0, asian: 1, caucasian: 1 },
+    face: { 'head-scale-vert': 0.34, 'head-fat': 0.07, 'head-invertedtriangular': 0.12, 'head-back-scale-depth': -0.82, 'head-round': 0.03, 'head-scale-depth': 1.48, 'head-scale-horiz': 0.21, 'forehead-temple': -0.23, 'forehead-trans': 0.05, 'forehead-scale-vert': 0.05, 'forehead-nubian': 0.01, 'eyebrows-angle': 0.01, 'eyebrows-trans-down-up': -0.02, 'eyebrows-trans-backward-forward': 0.07, 'eye-corner1': 0.12, 'eye-height1': -0.1, 'eye-scale': 0.24, 'eye-push1': 0.03, 'eye-eyefold-down-up': -0.04, 'eye-height3': -0.18, 'eye-height2': -0.14, 'eye-bag-decr-incr': -0.02, 'eye-push2': -0.04, 'eye-trans-down-up': 0.15, 'eye-bag-height': -0.04, 'eye-epicanthus': -0.01, 'eye-eyefold-angle': -0.06, 'eye-bag-in-out': -0.06, 'eye-corner2': -0.22, 'eye-trans-in-out': 0.01, 'eye-eyefold-concave-convex': 0.26, 'nose-nostrils-angle': -0.04, 'nose-flaring': -0.01, 'nose-curve': -0.07, 'nose-scale-depth': -0.03, 'nose-scale-vert': -0.1, 'nose-point-width': -0.06, 'nose-scale-horiz': -0.02, 'nose-width1': -0.04, 'nose-trans-backward-forward': 0.06, 'nose-trans-down-up': 0.02, 'nose-hump': -0.03, 'nose-nostrils-width': 0.09, 'nose-greek': -0.13, 'nose-point': -0.07, 'nose-width2': -0.03, 'nose-width3': -0.03, 'nose-septumangle': -0.11, 'nose-base': 0.16, 'nose-compression': 0.01, 'nose-volume': -0.14, 'cheek-trans': 0.04, 'cheek-volume': -0.08, 'cheek-inner': 0.07, 'cheek-bones': -0.12, 'mouth-lowerlip-height': -0.02, 'mouth-scale-horiz': -0.04, 'mouth-scale-depth': -0.01, 'mouth-lowerlip-volume': 0.12, 'mouth-angles': 0.1, 'mouth-lowerlip-width': 0.02, 'mouth-trans-backward-forward': -0.14, 'mouth-upperlip-width': 0.06, 'mouth-scale-vert': 0.01, 'mouth-dimples': -0.05, 'mouth-upperlip-height': 0.04, 'mouth-upperlip-volume': -0.08, 'mouth-lowerlip-ext': 0.02, 'mouth-upperlip-middle': 0.03, 'mouth-trans-down-up': 0.06, 'mouth-philtrum-volume': 0.03, 'chin-jaw-drop': -0.05, 'chin-height': -0.05, 'chin-prominent': -0.1, 'chin-width': -0.03, 'chin-prognathism': -0.17, 'ear-lobe': 0.02, 'ear-shape-square-round': 0.01, 'ear-trans-backward-forward': 0.12, 'ear-rot': -0.25, 'ear-trans-down-up': -0.11, 'ear-scale-vert': -0.01, 'ear-flap': 0.03, 'ear-shape-pointed-triangle': -0.1, 'ear-scale': 0.03, 'ear-scale-depth': -0.09, 'ear-wing': 0.16, 'detail-1': 0.06, 'detail-2': -0.16, 'detail-3': 0.12, 'detail-4': -0.04, 'detail-5': -0.22, 'detail-6': -0.38, 'detail-7': -0.03, 'detail-8': -0.21, 'detail-9': 0.14, 'detail-10': -0.2 } },
+  { format: LOOK_FORMAT, name: 'Eurasian man', skin: { tone: 0.26, undertone: 0.25 }, hair: { color: '#271f16' }, eyes: { color: '#4a3020' },
+    phenotype: { gender: 0, age: 0.79, muscle: 0.55, weight: 0.5, height: 0.5, proportions: 0.5, african: 0, asian: 1, caucasian: 1 },
+    face: { 'head-scale-vert': 0.41, 'head-fat': -0.04, 'head-rectangular': 0.02, 'head-back-scale-depth': -1.21, 'head-scale-depth': 1.42, 'head-scale-horiz': 0.21, 'head-triangular': 0.06, 'forehead-temple': 0.01, 'forehead-trans': -0.2, 'forehead-scale-vert': 0.02, 'eyebrows-trans-down-up': -0.05, 'eyebrows-trans-backward-forward': 0.01, 'eye-corner1': 0.05, 'eye-height1': -0.05, 'eye-scale': 0.08, 'eye-push1': -0.09, 'eye-eyefold-down-up': -0.09, 'eye-height3': -0.16, 'eye-height2': -0.06, 'eye-bag-decr-incr': -0.05, 'eye-push2': -0.11, 'eye-trans-down-up': 0.19, 'eye-bag-height': -0.14, 'eye-epicanthus': 0.07, 'eye-eyefold-angle': 0.07, 'eye-bag-in-out': 0.04, 'eye-corner2': -0.05, 'eye-trans-in-out': 0.11, 'eye-eyefold-concave-convex': 0.27, 'nose-nostrils-angle': -0.09, 'nose-flaring': 0.03, 'nose-curve': -0.07, 'nose-scale-depth': -0.07, 'nose-scale-vert': -0.03, 'nose-point-width': -0.09, 'nose-scale-horiz': 0.07, 'nose-width1': 0.01, 'nose-trans-backward-forward': -0.25, 'nose-trans-down-up': 0.06, 'nose-hump': -0.03, 'nose-nostrils-width': 0.01, 'nose-greek': -0.13, 'nose-point': 0.06, 'nose-width2': 0.07, 'nose-width3': -0.1, 'nose-septumangle': 0.1, 'nose-base': 0.12, 'nose-compression': -0.01, 'nose-volume': -0.09, 'cheek-trans': -0.01, 'cheek-volume': 0.01, 'cheek-inner': 0.12, 'cheek-bones': 0.21, 'mouth-lowerlip-height': 0.22, 'mouth-scale-horiz': -0.07, 'mouth-scale-depth': -0.04, 'mouth-lowerlip-volume': 0.04, 'mouth-angles': -0.08, 'mouth-upperlip-ext': 0.02, 'mouth-lowerlip-width': 0.01, 'mouth-trans-backward-forward': 0.33, 'mouth-upperlip-width': 0.01, 'mouth-scale-vert': 0.2, 'mouth-dimples': 0.02, 'mouth-upperlip-height': 0.09, 'mouth-upperlip-volume': 0.03, 'mouth-cupidsbow-width': 0.02, 'mouth-lowerlip-ext': 0.1, 'mouth-upperlip-middle': 0.27, 'mouth-trans-down-up': -0.01, 'mouth-lowerlip-middle': 0.07, 'mouth-philtrum-volume': -0.03, 'chin-jaw-drop': 0.01, 'chin-prominent': -0.05, 'chin-bones': 0.14, 'chin-width': -0.06, 'chin-cleft': 0.01, 'chin-triangle': 0.04, 'chin-prognathism': -0.02, 'ear-lobe': 0.21, 'ear-shape-square-round': -0.02, 'ear-trans-backward-forward': -0.12, 'ear-rot': -0.01, 'ear-trans-down-up': -0.16, 'ear-scale-vert': -0.13, 'ear-flap': 0.21, 'ear-shape-pointed-triangle': 0.17, 'ear-scale': -0.14, 'ear-scale-depth': 0.11, 'ear-wing': 0.19, 'detail-1': 0.12, 'detail-2': 0.04, 'detail-3': -0.14, 'detail-4': -0.14, 'detail-5': -0.16, 'detail-6': -0.03, 'detail-7': 0.52, 'detail-8': 0.05, 'detail-9': 0.15, 'detail-10': 0.18 } },
 ];
 const LOOK_PARTS: any = { hair: null, brows: null, lashes: null, hairMeshes: [], eyes: [], iris: null };
 let currentLook: any = JSON.parse(JSON.stringify(BASELINE_LOOK));
@@ -1423,7 +1481,22 @@ function normaliseLook(o: any) {
     hair: { color: col(o.hair && o.hair.color, b.hair.color) },
     eyes: { color: col(o.eyes && o.eyes.color, b.eyes.color) },
     phenotype: Object.fromEntries(Object.keys(baselinePhenotype()).map((k) => [k, Math.round(num(ph[k], 0, 1, PHENOTYPE_DEFAULT) * 1000) / 1000])),
+    face: normaliseFace(o.face),
   };
+}
+// the face-shape values of a preset: known names within their ranges, zeros left out
+function normaliseFace(face: any) {
+  const out: any = {};
+  if (!face || typeof face !== 'object') return out;
+  const tables = MANIFEST?.shape?.face;
+  if (!tables) return out;
+  tables.names.forEach((name: string, i: number) => {
+    const v = face[name];
+    if (typeof v !== 'number' || !isFinite(v)) return;
+    const [lo, hi] = tables.ranges[i], r = Math.round(Math.min(hi, Math.max(lo, v)) * 1000) / 1000;
+    if (r !== 0) out[name] = r;
+  });
+  return out;
 }
 function applyLook(look: any, remember = true) {
   const L = normaliseLook(look);
@@ -1455,7 +1528,7 @@ function applyLook(look: any, remember = true) {
   }
   U.uWearOn.value.set(0, 0, 0, 0);
   U.uMannequin.value = 0;
-  applyBodyShape(L.phenotype);
+  applyBodyShape(L.phenotype, L.face);
   updateHairVisibility();
   if (remember) { try { localStorage.setItem('anny-look', JSON.stringify(L)); } catch (e) { /* storage unavailable */ } }
   shadowsDirty = true;
@@ -1571,6 +1644,7 @@ async function init() {
   });
   scene.add(head); opaque.push(head);
   buildBodySliders();
+  buildFaceSliders();
   initMotion(meta, B);
   initCorrectives(meta, B);
   STOOL = buildStool();
@@ -1610,6 +1684,8 @@ async function init() {
   const start = loadRememberedLook() || normaliseLook(BASELINE_LOOK);
   for (const s of BODY.sliders) if (q.has(s.name)) start.phenotype[s.name] = Math.min(1, Math.max(0, parseFloat(q.get(s.name))));
   applyLook(start, false);
+  // tests wait for this: the start look is on the body, so a look set from now on stays
+  (window as any).__READY = true;
   if (MOTION.cur) {
     const rm = SHOT ? null : loadRememberedMotion();
     if (rm) { MOTION.playing = rm.playing !== false; MOTION.speed = rm.speed || 1; }
@@ -1882,6 +1958,8 @@ function editLook(mut) {
   // an edited example look becomes a custom one; a pasted preset keeps its own name
   const ex = EXAMPLE_LOOKS.find(l => l.name === next.name);
   if (ex && !sameLook(ex, next)) next.name = 'Custom';
+  const ch = CHARACTERS.find(l => l.name === next.name);
+  if (ch && !sameCharacter(ch, next)) next.name = 'Custom';
   applyLook(next);
 }
 // the example looks set the colours and keep anny's slider values, so this comparison leaves the sliders out
@@ -1889,6 +1967,12 @@ function sameLook(a, b) {
   const A = normaliseLook(a), B = normaliseLook(b);
   return Math.abs(A.skin.tone - B.skin.tone) < 1e-3 && Math.abs(A.skin.undertone - B.skin.undertone) < 1e-3 &&
     A.hair.color === B.hair.color && A.eyes.color === B.eyes.color;
+}
+// a character also carries the slider values and the face
+function sameCharacter(a, b) {
+  const A = normaliseLook(a), B = normaliseLook(b);
+  const close = (x, y) => Object.keys(Object.assign({}, x, y)).every(k => Math.abs((x[k] ?? 0) - (y[k] ?? 0)) < 1e-3);
+  return sameLook(A, B) && close(A.phenotype, B.phenotype) && close(A.face, B.face);
 }
 function toneTrack() {
   const stops = [];
@@ -1919,6 +2003,7 @@ function syncEditor() {
   $('ed-hair-v').textContent = lookName('hair', L.hair.color);
   $('ed-eyes-v').textContent = lookName('eyes', L.eyes.color);
   $('ed-looks').querySelectorAll('.ed-chip').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.name === L.name && sameLook(EXAMPLE_LOOKS.find(l => l.name === b.dataset.name), L))));
+  $('ed-chars').querySelectorAll('.ed-chip').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.name === L.name && sameCharacter(CHARACTERS.find(l => l.name === b.dataset.name), L))));
   for (const s of BODY.sliders) {
     const inp = $('ed-b-' + s.name), out = $('ed-b-' + s.name + '-v');
     if (!inp) continue;
@@ -1929,9 +2014,22 @@ function syncEditor() {
   }
   const rb = $('ed-shape-reset');
   if (rb) rb.disabled = BODY.sliders.every(s => Math.abs((L.phenotype[s.name] ?? 0.5) - 0.5) < 1e-6);
+  for (const s of BODY.faceSliders) {
+    const inp = $('ed-f-' + s.name), out = $('ed-f-' + s.name + '-v');
+    if (!inp) continue;
+    const v = L.face?.[s.name] ?? 0;
+    if (document.activeElement !== inp) inp.value = v;
+    out.textContent = v.toFixed(2); inp.setAttribute('aria-valuetext', v.toFixed(2));
+  }
+  const fr = $('ed-face-reset');
+  if (fr) fr.disabled = !L.face || Object.keys(L.face).length === 0;
+  document.querySelectorAll('#ed-face details.po-group').forEach((d: any) => {
+    const n = BODY.faceSliders.filter(s => s.group === d.dataset.group && (L.face?.[s.name] ?? 0) !== 0).length;
+    const c = d.querySelector('.po-n'); if (c) c.textContent = n ? `${n} set` : '';
+  });
 }
 function shapeText(s, v) {
-  return v.toFixed(2);
+  return s.race ? `${Math.round(100 * raceShare(currentLook.phenotype, s.name))} %` : v.toFixed(2);
 }
 // body sliders, built once the model has loaded; the shape updates at most once a frame while a slider moves
 let bodyPending = null;
@@ -1946,7 +2044,15 @@ function buildBodySliders() {
   const box = $('ed-shape');
   if (!box || !BODY.ready) return;
   box.textContent = '';
+  let raceHead = false;
   for (const s of BODY.sliders) {
+    if (s.race && !raceHead) {
+      raceHead = true;
+      const h = document.createElement('div'); h.className = 'ed-sub'; h.textContent = 'Ethnicity';
+      const note = document.createElement('p'); note.className = 'ed-note';
+      note.textContent = 'The three values mix by their shares, shown on the right. Eurasian is Asian and Caucasian at equal values, with African at 0.';
+      box.append(h, note);
+    }
     const wrap = document.createElement('div'); wrap.className = 'ed-slider';
     const row = document.createElement('div'); row.className = 'ed-row';
     const lab = document.createElement('label'); lab.htmlFor = 'ed-b-' + s.name; lab.textContent = s.label;
@@ -1957,13 +2063,69 @@ function buildBodySliders() {
     inp.title = 'Double-click to return to anny\'s default (0.5)';
     inp.addEventListener('input', () => queueBody(s.name, parseFloat(inp.value)));
     inp.addEventListener('dblclick', () => { inp.value = '0.5'; queueBody(s.name, 0.5); });
-    const ends = document.createElement('div'); ends.className = 'ed-ends'; ends.setAttribute('aria-hidden', 'true');
-    for (const t of s.ends) { const sp = document.createElement('span'); sp.textContent = t; ends.appendChild(sp); }
-    wrap.append(row, inp, ends);
+    wrap.append(row, inp);
+    if (s.ends.length) {
+      const ends = document.createElement('div'); ends.className = 'ed-ends'; ends.setAttribute('aria-hidden', 'true');
+      for (const t of s.ends) { const sp = document.createElement('span'); sp.textContent = t; ends.appendChild(sp); }
+      wrap.appendChild(ends);
+    }
     box.appendChild(wrap);
   }
   $('ed-shape-sec').hidden = false;
   syncEditor();
+}
+// face sliders: one group per part of the face, closed at first; the face updates at most once a frame
+let facePending = null;
+function queueFace(name, v) {
+  if (!facePending) {
+    facePending = {};
+    requestAnimationFrame(() => {
+      const p = facePending; facePending = null;
+      editLook(n => { n.face = Object.assign({}, n.face || {}, p); for (const k of Object.keys(n.face)) if (n.face[k] === 0) delete n.face[k]; });
+    });
+  }
+  facePending[name] = v;
+}
+function buildFaceSliders() {
+  const box = $('ed-face');
+  if (!box || !BODY.ready || !BODY.face) return;
+  box.textContent = '';
+  for (const group of BODY.face.tables.group_order) {
+    const d = document.createElement('details'); d.className = 'po-group'; d.dataset.group = group;
+    const sum = document.createElement('summary'); sum.textContent = FACE_GROUP_TITLES[group] || group;
+    const count = document.createElement('span'); count.className = 'po-n'; sum.appendChild(count);
+    const list = document.createElement('div'); list.className = 'ed-shape ed-face-list';
+    for (const s of BODY.faceSliders.filter(x => x.group === group)) {
+      const wrap = document.createElement('div'); wrap.className = 'ed-slider';
+      const row = document.createElement('div'); row.className = 'ed-row';
+      const lab = document.createElement('label'); lab.htmlFor = 'ed-f-' + s.name; lab.textContent = s.label; lab.title = s.name;
+      const out = document.createElement('output'); out.id = 'ed-f-' + s.name + '-v'; out.setAttribute('for', 'ed-f-' + s.name);
+      row.append(lab, out);
+      const inp = document.createElement('input');
+      Object.assign(inp, { type: 'range', id: 'ed-f-' + s.name, min: String(s.range[0]), max: String(s.range[1]), step: '0.01', value: '0' });
+      if (s.range[0] < 0) inp.classList.add('ed-centred');
+      inp.title = 'Double-click to return to 0';
+      inp.addEventListener('input', () => queueFace(s.name, parseFloat(inp.value)));
+      inp.addEventListener('dblclick', () => { inp.value = '0'; queueFace(s.name, 0); });
+      const ends = document.createElement('div'); ends.className = 'ed-ends'; ends.setAttribute('aria-hidden', 'true');
+      for (const t of s.ends) { const sp = document.createElement('span'); sp.textContent = t; ends.appendChild(sp); }
+      wrap.append(row, inp, ends);
+      list.appendChild(wrap);
+    }
+    d.append(sum, list);
+    box.appendChild(d);
+  }
+  $('ed-face-random').hidden = !BODY.face.prior;
+  $('ed-face-sec').hidden = false;
+  syncEditor();
+}
+// a face drawn from anny's calibrated face-shape distribution for the current age, gender, weight and muscle
+function randomFace() {
+  if (!BODY.face?.prior) return;
+  const f = sampleFace(BODY.face, currentLook.phenotype);
+  const out: any = {};
+  BODY.face.tables.names.forEach((name: string, i: number) => { const r = Math.round(f[i] * 1000) / 1000; if (r !== 0) out[name] = r; });
+  editLook(n => { n.face = out; });
 }
 function wireEditor() {
   const ed = $('editor'), btn = $('toggle-editor');
@@ -1996,6 +2158,18 @@ function wireEditor() {
     if (e.key !== 'Escape') return;
     if (!ed.hidden) open(false); else if (po && !po.hidden) openPoser(false);
   });
+  // characters
+  const charChips = $('ed-chars');
+  for (const l of CHARACTERS) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'ed-chip'; b.dataset.name = l.name; b.setAttribute('aria-pressed', 'false');
+    const dot = document.createElement('i');
+    const c = skinBase(l.skin.tone, l.skin.undertone).map(v => Math.round(v * 255));
+    dot.style.background = `linear-gradient(135deg, rgb(${c.join(',')}) 50%, ${l.hair.color} 50%)`;
+    b.append(dot, document.createTextNode(l.name));
+    b.addEventListener('click', () => { applyLook(JSON.parse(JSON.stringify(l))); setEdMsg(''); });
+    charChips.appendChild(b);
+  }
   // example looks
   const chips = $('ed-looks');
   for (const l of EXAMPLE_LOOKS) {
@@ -2005,7 +2179,7 @@ function wireEditor() {
     const c = skinBase(l.skin.tone, l.skin.undertone).map(v => Math.round(v * 255));
     dot.style.background = `linear-gradient(135deg, rgb(${c.join(',')}) 50%, ${l.hair.color} 50%)`;
     b.append(dot, document.createTextNode(l.name));
-    b.addEventListener('click', () => { applyLook(Object.assign({}, l, { phenotype: currentLook.phenotype })); setEdMsg(''); });
+    b.addEventListener('click', () => { applyLook(Object.assign({}, l, { phenotype: currentLook.phenotype, face: currentLook.face })); setEdMsg(''); });
     chips.appendChild(b);
   }
   // skin sliders (the view refreshes while dragging)
@@ -2042,6 +2216,8 @@ function wireEditor() {
   box.addEventListener('input', tryLoad);
   $('ed-reset').addEventListener('click', () => { applyLook(BASELINE_LOOK); box.hidden = true; setEdMsg('Back to the baseline look and anny\'s defaults.'); });
   $('ed-shape-reset').addEventListener('click', () => editLook(n => { n.phenotype = baselinePhenotype(); }));
+  $('ed-face-reset').addEventListener('click', () => editLook(n => { n.face = {}; }));
+  $('ed-face-random').addEventListener('click', () => { randomFace(); setEdMsg(''); });
 }
 wireEditor();
 
@@ -2130,6 +2306,19 @@ window.setFrame = (name) => {
   while (accCount < MAX_ACC) renderPass();
   return true;
 };
+// a frontal portrait of the head for the photo benchmark (anny.faces.authoring.photos): the face framing seen from
+// the front, with the head of the current body
+window.setPortrait = (fov = 24, margin = 1.0) => {
+  const f = FRAMES.face, t = new THREE.Vector3(...f.target);
+  if (RIG.ready) t.applyMatrix4(_headFull);
+  camera.fov = fov; camera.updateProjectionMatrix();
+  placeCamera(0, 0, frameDistance(f) * (RIG.ready ? HEADMAP.k : 1) * margin, t.x, t.y, t.z);
+  tween = null;
+  resetAccum();
+  while (accCount < MAX_ACC) renderPass();
+  return true;
+};
+window.setHair = (on) => { hairWanted = !!on; updateHairVisibility(); return true; };
 window.setPreset = (n) => { applyPreset(n); return true; };
 window.setCorrectives = (on) => { setCorrectivesOn(on); return CORR.ready; };
 window.__CORR = CORR;
@@ -2141,4 +2330,7 @@ window.__BODY = BODY;
 // anny's sliders from a test: returns the times of the update (ms)
 window.setSliders = (v) => { applyLook(Object.assign({}, currentLook, { phenotype: Object.assign({}, currentLook.phenotype, v) }), false); return { body: BODY.lastMs, total: BODY.lastTotalMs, steps: BODY.lastTiming }; };
 window.__look = () => currentLook;
+// anny's face-shape values from a test (missing names take 0), and a face drawn from the distribution
+window.setFace = (v) => { applyLook(Object.assign({}, currentLook, { face: v }), false); return { body: BODY.lastMs, total: BODY.lastTotalMs }; };
+window.randomFace = () => { randomFace(); return currentLook.face; };
 init().catch(e => { console.error(e); showError('The model could not be loaded: ' + e.message); });

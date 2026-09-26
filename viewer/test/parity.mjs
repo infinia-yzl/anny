@@ -7,7 +7,7 @@
 // reads <folder>/input.json and binary inputs, writes binary outputs next to them.
 import fs from 'fs';
 import path from 'path';
-import { coefficients, makeRule, ShapeSpace } from '../src/anny_shape.ts';
+import { addFace, coefficients, faceRowWeights, faceScales, facePriorParameters, makeRule, sampleFace, ShapeSpace } from '../src/anny_shape.ts';
 import { FineSubdivision } from '../src/subdivision.ts';
 
 const dir = process.argv[2];
@@ -43,4 +43,30 @@ if (inp.subdivision) {
   const t2 = performance.now();
   fs.writeFileSync(path.join(dir, 'fine.bin'), Buffer.from(F.buffer));
   fs.writeFileSync(path.join(dir, 'timing.json'), JSON.stringify({ build_ms: t1 - t0, apply_ms: t2 - t1 }));
+}
+// anny's face shapes: group scales, row weights, the offsets of the rows on the coarse vertices and the bone heads,
+// and the mean of the face-shape distribution
+if (inp.face) {
+  const fi = inp.face;
+  const face = { tables: fi.tables, lmTemplate: f32('face_lm_template.bin'), lmBlend: f32('face_lm_blend.bin'), ids: u32('face_ids.bin'),
+    offsets: i16('face_offsets.bin'), boneDeltas: f32('face_bones.bin'), prior: fi.tables.prior ? f32('face_prior.bin') : undefined };
+  const n = fi.settings.length, G = fi.tables.scale_groups.length, R = fi.tables.row_param.length, F = fi.tables.names.length;
+  const S = new Float64Array(n * G), W = new Float64Array(n * R), V = new Float32Array(n * fi.vertices * 3), J = new Float32Array(n * fi.bones * 3);
+  const M = new Float64Array(n * F), Z = new Float64Array(n * F);
+  fi.settings.forEach((s, i) => {
+    const c = coefficients(rule, s.phenotype);
+    const sc = faceScales(face, c), w = faceRowWeights(fi.tables, s.face, sc);
+    S.set(sc, i * G); W.set(w, i * R);
+    const v = new Float32Array(fi.vertices * 3), j = new Float32Array(fi.bones * 3);
+    addFace(face, w, v, j);
+    V.set(v, i * fi.vertices * 3); J.set(j, i * fi.bones * 3);
+    if (face.prior) {
+      M.set(facePriorParameters(face, s.phenotype).mean, i * F);
+      // a random face from a fixed sequence of uniform numbers, repeated in Python
+      let k = 0;
+      Z.set(sampleFace(face, s.phenotype, () => ((++k) * 0.6180339887498949 + 0.1 * i) % 1), i * F);
+    }
+  });
+  for (const [name, arr] of [['face_scales.bin', S], ['face_weights.bin', W], ['face_coarse.bin', V], ['face_joints.bin', J], ['face_prior_mean.bin', M], ['face_samples.bin', Z]])
+    fs.writeFileSync(path.join(dir, name), Buffer.from(arr.buffer));
 }

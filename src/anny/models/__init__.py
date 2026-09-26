@@ -20,7 +20,12 @@ from anny.models.model_data import (
     cache_builder,
 )
 from anny.models.phenotype import Anny
-from anny.typing import LocalChanges, PoseParameterization, SkinningMethod
+from anny.typing import (
+    FaceShapes,
+    LocalChanges,
+    PoseParameterization,
+    SkinningMethod,
+)
 
 
 @cache_builder
@@ -29,6 +34,7 @@ def build_model_data(
     topology: TopologyConfig,
     local_changes: LocalChanges,
     facial_actions: bool,
+    face_shapes: FaceShapes = "none",
 ) -> ModelData:
     if rig.base_rig == "soma":
         import anny.models.soma
@@ -37,6 +43,7 @@ def build_model_data(
             topology=topology,
             local_changes=local_changes,
             facial_actions=facial_actions,
+            face_shapes=face_shapes,
         )
     if topology.base_mesh == "makehuman":
         import anny.models.full_model
@@ -46,6 +53,7 @@ def build_model_data(
             topology=topology,
             local_changes=local_changes,
             facial_actions=facial_actions,
+            face_shapes=face_shapes,
         )
     # Alternative topologies
     import anny.models.retopology
@@ -55,12 +63,14 @@ def build_model_data(
             rig=rig,
             local_changes=local_changes,
             facial_actions=facial_actions,
+            face_shapes=face_shapes,
         )
     if topology.base_mesh == "smpl":
         return anny.models.retopology.build_smpl_topology_model_data(
             rig=rig,
             local_changes=local_changes,
             facial_actions=facial_actions,
+            face_shapes=face_shapes,
         )
 
     return anny.models.retopology.build_alternative_topology_model_data(
@@ -69,6 +79,7 @@ def build_model_data(
         local_changes=local_changes,
         facial_actions=facial_actions,
         reference_topology="anny_from_soma" if topology.base_mesh == "soma" else "anny",
+        face_shapes=face_shapes,
     )
 
 

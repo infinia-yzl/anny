@@ -4,7 +4,7 @@
 from dataclasses import replace
 import torch
 from typing import Literal
-from anny.typing import AlternativeTopology, LocalChanges, FacialActions
+from anny.typing import AlternativeTopology, FaceShapes, LocalChanges, FacialActions
 from anny.utils import obj_utils
 from anny.models.full_model import build_anny_model_data
 from anny.models.model_data import with_bone_orientation, RigConfig, TopologyConfig
@@ -49,7 +49,10 @@ def _load_target_topology_mesh(target_topology: AlternativeTopology):
 
 
 def build_smplx_topology_model_data(
-    rig: RigConfig, local_changes: LocalChanges, facial_actions: FacialActions
+    rig: RigConfig,
+    local_changes: LocalChanges,
+    facial_actions: FacialActions,
+    face_shapes: FaceShapes = "none",
 ):
     source_rig = with_bone_orientation(rig, "blender")
     source_topology = TopologyConfig(
@@ -65,6 +68,7 @@ def build_smplx_topology_model_data(
         topology=source_topology,
         local_changes=local_changes,
         facial_actions=facial_actions,
+        face_shapes=face_shapes,
     )
 
     # Load the SMPL-X topology
@@ -97,7 +101,10 @@ def build_smplx_topology_model_data(
 
 
 def build_smpl_topology_model_data(
-    rig: RigConfig, local_changes: LocalChanges, facial_actions: FacialActions
+    rig: RigConfig,
+    local_changes: LocalChanges,
+    facial_actions: FacialActions,
+    face_shapes: FaceShapes = "none",
 ):
     source_rig = with_bone_orientation(rig, "blender")
     source_topology = TopologyConfig(
@@ -113,6 +120,7 @@ def build_smpl_topology_model_data(
         topology=source_topology,
         local_changes=local_changes,
         facial_actions=facial_actions,
+        face_shapes=face_shapes,
     )
 
     # Load the SMPL topology
@@ -150,6 +158,7 @@ def build_alternative_topology_model_data(
     local_changes: LocalChanges,
     facial_actions: FacialActions,
     reference_topology: Literal["legacy_default", "anny_from_soma", "anny"] = "anny",
+    face_shapes: FaceShapes = "none",
 ):
     # For soma, the template mesh has only attached vertices and eyes+tongue
     source_rig = with_bone_orientation(rig, "blender")
@@ -168,6 +177,7 @@ def build_alternative_topology_model_data(
         topology=source_topology,
         local_changes=local_changes,
         facial_actions=facial_actions,
+        face_shapes=face_shapes,
     )
     if reference_topology == "anny":
         reference_vertices = ref_data.template_vertices

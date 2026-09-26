@@ -1,0 +1,1617 @@
+{
+ "description": "anny's face-shape parameters: symmetric sums of MakeHuman targets (scripts/make_face_shape_spec.py)",
+ "groups": [
+  "head",
+  "forehead",
+  "brows",
+  "eyes",
+  "nose",
+  "cheeks",
+  "mouth",
+  "chin",
+  "ears",
+  "detail"
+ ],
+ "parameters": [
+  {
+   "name": "head-scale-vert",
+   "group": "head",
+   "positive": [
+    "head/head-scale-vert-incr"
+   ],
+   "negative": [
+    "head/head-scale-vert-decr"
+   ],
+   "range": [
+    -1.0,
+    1.5
+   ]
+  },
+  {
+   "name": "head-fat",
+   "group": "head",
+   "positive": [
+    "head/head-fat-incr"
+   ],
+   "negative": [
+    "head/head-fat-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "head-invertedtriangular",
+   "group": "head",
+   "positive": [
+    "head/head-invertedtriangular"
+   ],
+   "negative": [],
+   "range": [
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "name": "head-diamond",
+   "group": "head",
+   "positive": [
+    "head/head-diamond"
+   ],
+   "negative": [],
+   "range": [
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "name": "head-oval",
+   "group": "head",
+   "positive": [
+    "head/head-oval"
+   ],
+   "negative": [],
+   "range": [
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "name": "head-rectangular",
+   "group": "head",
+   "positive": [
+    "head/head-rectangular"
+   ],
+   "negative": [],
+   "range": [
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "name": "head-back-scale-depth",
+   "group": "head",
+   "positive": [
+    "head/head-back-scale-depth-incr"
+   ],
+   "negative": [
+    "head/head-back-scale-depth-decr"
+   ],
+   "range": [
+    -2.0,
+    2.0
+   ]
+  },
+  {
+   "name": "head-round",
+   "group": "head",
+   "positive": [
+    "head/head-round"
+   ],
+   "negative": [],
+   "range": [
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "name": "head-age",
+   "group": "head",
+   "positive": [
+    "head/head-age-incr"
+   ],
+   "negative": [
+    "head/head-age-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "head-scale-depth",
+   "group": "head",
+   "positive": [
+    "head/head-scale-depth-incr"
+   ],
+   "negative": [
+    "head/head-scale-depth-decr"
+   ],
+   "range": [
+    -1.5,
+    3.0
+   ]
+  },
+  {
+   "name": "head-scale-horiz",
+   "group": "head",
+   "positive": [
+    "head/head-scale-horiz-incr"
+   ],
+   "negative": [
+    "head/head-scale-horiz-decr"
+   ],
+   "range": [
+    -1.0,
+    1.5
+   ]
+  },
+  {
+   "name": "head-triangular",
+   "group": "head",
+   "positive": [
+    "head/head-triangular"
+   ],
+   "negative": [],
+   "range": [
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "name": "head-square",
+   "group": "head",
+   "positive": [
+    "head/head-square"
+   ],
+   "negative": [],
+   "range": [
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "name": "forehead-temple",
+   "group": "forehead",
+   "positive": [
+    "forehead/forehead-temple-incr"
+   ],
+   "negative": [
+    "forehead/forehead-temple-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "forehead-trans",
+   "group": "forehead",
+   "positive": [
+    "forehead/forehead-trans-forward"
+   ],
+   "negative": [
+    "forehead/forehead-trans-backward"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "forehead-scale-vert",
+   "group": "forehead",
+   "positive": [
+    "forehead/forehead-scale-vert-incr"
+   ],
+   "negative": [
+    "forehead/forehead-scale-vert-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "forehead-nubian",
+   "group": "forehead",
+   "positive": [
+    "forehead/forehead-nubian-incr"
+   ],
+   "negative": [
+    "forehead/forehead-nubian-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eyebrows-angle",
+   "group": "brows",
+   "positive": [
+    "eyebrows/eyebrows-angle-up"
+   ],
+   "negative": [
+    "eyebrows/eyebrows-angle-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eyebrows-trans-down-up",
+   "group": "brows",
+   "positive": [
+    "eyebrows/eyebrows-trans-up"
+   ],
+   "negative": [
+    "eyebrows/eyebrows-trans-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eyebrows-trans-backward-forward",
+   "group": "brows",
+   "positive": [
+    "eyebrows/eyebrows-trans-forward"
+   ],
+   "negative": [
+    "eyebrows/eyebrows-trans-backward"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-corner1",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-corner1-up",
+    "eyes/r-eye-corner1-up"
+   ],
+   "negative": [
+    "eyes/l-eye-corner1-down",
+    "eyes/r-eye-corner1-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-height1",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-height1-incr",
+    "eyes/r-eye-height1-incr"
+   ],
+   "negative": [
+    "eyes/l-eye-height1-decr",
+    "eyes/r-eye-height1-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-scale",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-scale-incr",
+    "eyes/r-eye-scale-incr"
+   ],
+   "negative": [
+    "eyes/l-eye-scale-decr",
+    "eyes/r-eye-scale-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-push1",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-push1-out",
+    "eyes/r-eye-push1-out"
+   ],
+   "negative": [
+    "eyes/l-eye-push1-in",
+    "eyes/r-eye-push1-in"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-eyefold-down-up",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-eyefold-up",
+    "eyes/r-eye-eyefold-up"
+   ],
+   "negative": [
+    "eyes/l-eye-eyefold-down",
+    "eyes/r-eye-eyefold-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-height3",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-height3-incr",
+    "eyes/r-eye-height3-incr"
+   ],
+   "negative": [
+    "eyes/l-eye-height3-decr",
+    "eyes/r-eye-height3-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-height2",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-height2-incr",
+    "eyes/r-eye-height2-incr"
+   ],
+   "negative": [
+    "eyes/l-eye-height2-decr",
+    "eyes/r-eye-height2-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-bag-decr-incr",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-bag-incr",
+    "eyes/r-eye-bag-incr"
+   ],
+   "negative": [
+    "eyes/l-eye-bag-decr",
+    "eyes/r-eye-bag-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-push2",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-push2-out",
+    "eyes/r-eye-push2-out"
+   ],
+   "negative": [
+    "eyes/l-eye-push2-in",
+    "eyes/r-eye-push2-in"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-trans-down-up",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-trans-up",
+    "eyes/r-eye-trans-up"
+   ],
+   "negative": [
+    "eyes/l-eye-trans-down",
+    "eyes/r-eye-trans-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-bag-height",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-bag-height-incr",
+    "eyes/r-eye-bag-height-incr"
+   ],
+   "negative": [
+    "eyes/l-eye-bag-height-decr",
+    "eyes/r-eye-bag-height-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-epicanthus",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-epicanthus-out",
+    "eyes/r-eye-epicanthus-out"
+   ],
+   "negative": [
+    "eyes/l-eye-epicanthus-in",
+    "eyes/r-eye-epicanthus-in"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-eyefold-angle",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-eyefold-angle-up",
+    "eyes/r-eye-eyefold-angle-up"
+   ],
+   "negative": [
+    "eyes/l-eye-eyefold-angle-down",
+    "eyes/r-eye-eyefold-angle-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-bag-in-out",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-bag-out",
+    "eyes/r-eye-bag-out"
+   ],
+   "negative": [
+    "eyes/l-eye-bag-in",
+    "eyes/r-eye-bag-in"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-corner2",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-corner2-up",
+    "eyes/r-eye-corner2-up"
+   ],
+   "negative": [
+    "eyes/l-eye-corner2-down",
+    "eyes/r-eye-corner2-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-trans-in-out",
+   "group": "eyes",
+   "positive": [
+    "eyes/l-eye-trans-out",
+    "eyes/r-eye-trans-out"
+   ],
+   "negative": [
+    "eyes/l-eye-trans-in",
+    "eyes/r-eye-trans-in"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "eye-eyefold-concave-convex",
+   "group": "eyes",
+   "positive": [
+    "eyes/r-eye-eyefold-convex",
+    "eyes/l-eye-eyefold-convex"
+   ],
+   "negative": [
+    "eyes/r-eye-eyefold-concave",
+    "eyes/l-eye-eyefold-concave"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-nostrils-angle",
+   "group": "nose",
+   "positive": [
+    "nose/nose-nostrils-angle-up"
+   ],
+   "negative": [
+    "nose/nose-nostrils-angle-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-flaring",
+   "group": "nose",
+   "positive": [
+    "nose/nose-flaring-incr"
+   ],
+   "negative": [
+    "nose/nose-flaring-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-curve",
+   "group": "nose",
+   "positive": [
+    "nose/nose-curve-convex"
+   ],
+   "negative": [
+    "nose/nose-curve-concave"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-scale-depth",
+   "group": "nose",
+   "positive": [
+    "nose/nose-scale-depth-incr"
+   ],
+   "negative": [
+    "nose/nose-scale-depth-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-scale-vert",
+   "group": "nose",
+   "positive": [
+    "nose/nose-scale-vert-incr"
+   ],
+   "negative": [
+    "nose/nose-scale-vert-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-point-width",
+   "group": "nose",
+   "positive": [
+    "nose/nose-point-width-incr"
+   ],
+   "negative": [
+    "nose/nose-point-width-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-scale-horiz",
+   "group": "nose",
+   "positive": [
+    "nose/nose-scale-horiz-incr"
+   ],
+   "negative": [
+    "nose/nose-scale-horiz-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-width1",
+   "group": "nose",
+   "positive": [
+    "nose/nose-width1-incr"
+   ],
+   "negative": [
+    "nose/nose-width1-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-trans-backward-forward",
+   "group": "nose",
+   "positive": [
+    "nose/nose-trans-forward"
+   ],
+   "negative": [
+    "nose/nose-trans-backward"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-trans-down-up",
+   "group": "nose",
+   "positive": [
+    "nose/nose-trans-up"
+   ],
+   "negative": [
+    "nose/nose-trans-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-hump",
+   "group": "nose",
+   "positive": [
+    "nose/nose-hump-incr"
+   ],
+   "negative": [
+    "nose/nose-hump-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-nostrils-width",
+   "group": "nose",
+   "positive": [
+    "nose/nose-nostrils-width-incr"
+   ],
+   "negative": [
+    "nose/nose-nostrils-width-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-trans-in-out",
+   "group": "nose",
+   "positive": [
+    "nose/nose-trans-out"
+   ],
+   "negative": [
+    "nose/nose-trans-in"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-greek",
+   "group": "nose",
+   "positive": [
+    "nose/nose-greek-incr"
+   ],
+   "negative": [
+    "nose/nose-greek-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-point",
+   "group": "nose",
+   "positive": [
+    "nose/nose-point-up"
+   ],
+   "negative": [
+    "nose/nose-point-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-width2",
+   "group": "nose",
+   "positive": [
+    "nose/nose-width2-incr"
+   ],
+   "negative": [
+    "nose/nose-width2-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-width3",
+   "group": "nose",
+   "positive": [
+    "nose/nose-width3-incr"
+   ],
+   "negative": [
+    "nose/nose-width3-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-septumangle",
+   "group": "nose",
+   "positive": [
+    "nose/nose-septumangle-incr"
+   ],
+   "negative": [
+    "nose/nose-septumangle-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-base",
+   "group": "nose",
+   "positive": [
+    "nose/nose-base-up"
+   ],
+   "negative": [
+    "nose/nose-base-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-compression",
+   "group": "nose",
+   "positive": [
+    "nose/nose-compression-uncompress"
+   ],
+   "negative": [
+    "nose/nose-compression-compress"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "nose-volume",
+   "group": "nose",
+   "positive": [
+    "nose/nose-volume-incr"
+   ],
+   "negative": [
+    "nose/nose-volume-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "cheek-trans",
+   "group": "cheeks",
+   "positive": [
+    "cheek/l-cheek-trans-up",
+    "cheek/r-cheek-trans-up"
+   ],
+   "negative": [
+    "cheek/l-cheek-trans-down",
+    "cheek/r-cheek-trans-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "cheek-volume",
+   "group": "cheeks",
+   "positive": [
+    "cheek/l-cheek-volume-incr",
+    "cheek/r-cheek-volume-incr"
+   ],
+   "negative": [
+    "cheek/l-cheek-volume-decr",
+    "cheek/r-cheek-volume-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "cheek-inner",
+   "group": "cheeks",
+   "positive": [
+    "cheek/l-cheek-inner-incr",
+    "cheek/r-cheek-inner-incr"
+   ],
+   "negative": [
+    "cheek/l-cheek-inner-decr",
+    "cheek/r-cheek-inner-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "cheek-bones",
+   "group": "cheeks",
+   "positive": [
+    "cheek/l-cheek-bones-incr",
+    "cheek/r-cheek-bones-incr"
+   ],
+   "negative": [
+    "cheek/l-cheek-bones-decr",
+    "cheek/r-cheek-bones-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-lowerlip-height",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-lowerlip-height-incr"
+   ],
+   "negative": [
+    "mouth/mouth-lowerlip-height-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-scale-horiz",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-scale-horiz-incr"
+   ],
+   "negative": [
+    "mouth/mouth-scale-horiz-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-cupidsbow",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-cupidsbow-incr"
+   ],
+   "negative": [
+    "mouth/mouth-cupidsbow-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-laugh-lines",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-laugh-lines-out"
+   ],
+   "negative": [
+    "mouth/mouth-laugh-lines-in"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-scale-depth",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-scale-depth-incr"
+   ],
+   "negative": [
+    "mouth/mouth-scale-depth-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-lowerlip-volume",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-lowerlip-volume-incr"
+   ],
+   "negative": [
+    "mouth/mouth-lowerlip-volume-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-angles",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-angles-up"
+   ],
+   "negative": [
+    "mouth/mouth-angles-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-upperlip-ext",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-upperlip-ext-up"
+   ],
+   "negative": [
+    "mouth/mouth-upperlip-ext-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-lowerlip-width",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-lowerlip-width-incr"
+   ],
+   "negative": [
+    "mouth/mouth-lowerlip-width-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-trans-backward-forward",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-trans-forward"
+   ],
+   "negative": [
+    "mouth/mouth-trans-backward"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-upperlip-width",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-upperlip-width-incr"
+   ],
+   "negative": [
+    "mouth/mouth-upperlip-width-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-scale-vert",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-scale-vert-incr"
+   ],
+   "negative": [
+    "mouth/mouth-scale-vert-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-dimples",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-dimples-out"
+   ],
+   "negative": [
+    "mouth/mouth-dimples-in"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-upperlip-height",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-upperlip-height-incr"
+   ],
+   "negative": [
+    "mouth/mouth-upperlip-height-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-upperlip-volume",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-upperlip-volume-incr"
+   ],
+   "negative": [
+    "mouth/mouth-upperlip-volume-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-cupidsbow-width",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-cupidsbow-width-incr"
+   ],
+   "negative": [
+    "mouth/mouth-cupidsbow-width-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-lowerlip-ext",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-lowerlip-ext-up"
+   ],
+   "negative": [
+    "mouth/mouth-lowerlip-ext-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-upperlip-middle",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-upperlip-middle-up"
+   ],
+   "negative": [
+    "mouth/mouth-upperlip-middle-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-trans-down-up",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-trans-up"
+   ],
+   "negative": [
+    "mouth/mouth-trans-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-trans-in-out",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-trans-out"
+   ],
+   "negative": [
+    "mouth/mouth-trans-in"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-lowerlip-middle",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-lowerlip-middle-up"
+   ],
+   "negative": [
+    "mouth/mouth-lowerlip-middle-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "mouth-philtrum-volume",
+   "group": "mouth",
+   "positive": [
+    "mouth/mouth-philtrum-volume-incr"
+   ],
+   "negative": [
+    "mouth/mouth-philtrum-volume-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "chin-jaw-drop",
+   "group": "chin",
+   "positive": [
+    "chin/chin-jaw-drop-incr"
+   ],
+   "negative": [
+    "chin/chin-jaw-drop-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "chin-height",
+   "group": "chin",
+   "positive": [
+    "chin/chin-height-incr"
+   ],
+   "negative": [
+    "chin/chin-height-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "chin-prominent",
+   "group": "chin",
+   "positive": [
+    "chin/chin-prominent-incr"
+   ],
+   "negative": [
+    "chin/chin-prominent-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "chin-bones",
+   "group": "chin",
+   "positive": [
+    "chin/chin-bones-incr"
+   ],
+   "negative": [
+    "chin/chin-bones-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "chin-width",
+   "group": "chin",
+   "positive": [
+    "chin/chin-width-incr"
+   ],
+   "negative": [
+    "chin/chin-width-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "chin-cleft",
+   "group": "chin",
+   "positive": [
+    "chin/chin-cleft-incr"
+   ],
+   "negative": [
+    "chin/chin-cleft-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "chin-triangle",
+   "group": "chin",
+   "positive": [
+    "chin/chin-triangle"
+   ],
+   "negative": [],
+   "range": [
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "name": "chin-prognathism",
+   "group": "chin",
+   "positive": [
+    "chin/chin-prognathism-incr"
+   ],
+   "negative": [
+    "chin/chin-prognathism-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "ear-lobe",
+   "group": "ears",
+   "positive": [
+    "ears/l-ear-lobe-incr",
+    "ears/r-ear-lobe-incr"
+   ],
+   "negative": [
+    "ears/l-ear-lobe-decr",
+    "ears/r-ear-lobe-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "ear-shape-square-round",
+   "group": "ears",
+   "positive": [
+    "ears/l-ear-shape-round",
+    "ears/r-ear-shape-round"
+   ],
+   "negative": [
+    "ears/l-ear-shape-square",
+    "ears/r-ear-shape-square"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "ear-trans-backward-forward",
+   "group": "ears",
+   "positive": [
+    "ears/l-ear-trans-forward",
+    "ears/r-ear-trans-forward"
+   ],
+   "negative": [
+    "ears/l-ear-trans-backward",
+    "ears/r-ear-trans-backward"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "ear-rot",
+   "group": "ears",
+   "positive": [
+    "ears/l-ear-rot-forward",
+    "ears/r-ear-rot-forward"
+   ],
+   "negative": [
+    "ears/l-ear-rot-backward",
+    "ears/r-ear-rot-backward"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "ear-trans-down-up",
+   "group": "ears",
+   "positive": [
+    "ears/l-ear-trans-up",
+    "ears/r-ear-trans-up"
+   ],
+   "negative": [
+    "ears/l-ear-trans-down",
+    "ears/r-ear-trans-down"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "ear-scale-vert",
+   "group": "ears",
+   "positive": [
+    "ears/l-ear-scale-vert-incr",
+    "ears/r-ear-scale-vert-incr"
+   ],
+   "negative": [
+    "ears/l-ear-scale-vert-decr",
+    "ears/r-ear-scale-vert-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "ear-flap",
+   "group": "ears",
+   "positive": [
+    "ears/l-ear-flap-incr",
+    "ears/r-ear-flap-incr"
+   ],
+   "negative": [
+    "ears/l-ear-flap-decr",
+    "ears/r-ear-flap-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "ear-shape-pointed-triangle",
+   "group": "ears",
+   "positive": [
+    "ears/l-ear-shape-triangle",
+    "ears/r-ear-shape-triangle"
+   ],
+   "negative": [
+    "ears/l-ear-shape-pointed",
+    "ears/r-ear-shape-pointed"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "ear-scale",
+   "group": "ears",
+   "positive": [
+    "ears/l-ear-scale-incr",
+    "ears/r-ear-scale-incr"
+   ],
+   "negative": [
+    "ears/l-ear-scale-decr",
+    "ears/r-ear-scale-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "ear-scale-depth",
+   "group": "ears",
+   "positive": [
+    "ears/l-ear-scale-depth-incr",
+    "ears/r-ear-scale-depth-incr"
+   ],
+   "negative": [
+    "ears/l-ear-scale-depth-decr",
+    "ears/r-ear-scale-depth-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "ear-wing",
+   "group": "ears",
+   "positive": [
+    "ears/l-ear-wing-incr",
+    "ears/r-ear-wing-incr"
+   ],
+   "negative": [
+    "ears/l-ear-wing-decr",
+    "ears/r-ear-wing-decr"
+   ],
+   "range": [
+    -1.0,
+    1.0
+   ]
+  },
+  {
+   "name": "detail-1",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-2",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-3",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-4",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-5",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-6",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-7",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-8",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-9",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  },
+  {
+   "name": "detail-10",
+   "group": "detail",
+   "positive": [],
+   "negative": [],
+   "range": [
+    -1.0,
+    1.0
+   ],
+   "source": "ict"
+  }
+ ]
+}

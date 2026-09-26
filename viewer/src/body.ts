@@ -10,7 +10,7 @@
 //   the lashes follow the triangles under their roots (anny.hair.StrandBinding): followStrands gives one frame
 //   per strand, and the page's hair shader places the points.
 
-import { coefficients, makeRule, ShapeSpace, type CoefficientRule } from './anny_shape.ts';
+import { addFace, coefficients, faceRowWeights, faceScales, makeRule, ShapeSpace, type CoefficientRule, type FaceData } from './anny_shape.ts';
 import { FineSubdivision } from './subdivision.ts';
 
 export interface StrandSet {
@@ -200,15 +200,18 @@ export class AnnyBody {
   scalpRef = 1; scalp = 1;
   eyes: Record<string, { center: number[]; scale: number }> = {};
   values: Record<string, number> = {};
+  face: FaceData | null = null;         // anny's face shapes (anny_shape.ts), when the data carries them
+  faceValues: Record<string, number> = {};
   timing: Record<string, number> = {};   // ms of each step of the last update
   jointsDefault: Float32Array;
   constructor(meta: any, bufs: {
     template: Float32Array; components: Int16Array; projection: Float32Array; jointTemplate: Float32Array; jointBlend: Float32Array;
     quads: Uint32Array; rows: Uint32Array; detail: Int16Array; relief?: Int16Array; index: Uint32Array; rest: Float32Array; nsmooth: Float32Array;
-    coarseSkin: Uint8Array;
+    coarseSkin: Uint8Array; face?: FaceData;
   }, positions?: Float32Array, normals?: Float32Array, nsmooth?: Float32Array) {
     const sm = meta.shape;
     this.meta = meta;
+    this.face = bufs.face || null;
     this.rule = makeRule(sm.tables);
     this.space = new ShapeSpace({ template: bufs.template, components: bufs.components, componentScale: sm.component_scale, projection: bufs.projection,
       jointTemplate: bufs.jointTemplate, jointBlend: bufs.jointBlend });
@@ -277,10 +280,20 @@ export class AnnyBody {
     }
   }
 
+  // the face-shape values in the order of the face tables (missing names take 0)
+  faceVector(face: Record<string, number>): Float64Array {
+    const names = this.face ? this.face.tables.names : [];
+    return Float64Array.from(names, (n) => (typeof face?.[n] === 'number' ? face[n] : 0));
+  }
+
   // the smooth surface: the subdivision of the coarse body, standing on the floor
-  private smoothSurface(values: Record<string, number>, marks?: [string, number][]) {
+  private smoothSurface(values: Record<string, number>, marks?: [string, number][], face?: Record<string, number>) {
     const c = coefficients(this.rule, values);
     const V = this.space.coarse(c, this.coarse), J = this.space.joints(c, this.joints);
+    if (this.face && face) {
+      const f = this.faceVector(face);
+      if (f.some((x) => x !== 0)) addFace(this.face, faceRowWeights(this.face.tables, f, faceScales(this.face, c)), V, J);
+    }
     marks?.push(['shape', performance.now()]);
     let minY = Infinity;
     for (let i = 0; i < this.nBody; i++) minY = Math.min(minY, V[i * 3 + 1]);
@@ -291,11 +304,12 @@ export class AnnyBody {
     marks?.push(['subdivision', performance.now()]);
   }
 
-  // anny's slider values (missing sliders take anny's default, 0.5)
-  update(values: Record<string, number>): { ms: number } {
+  // anny's slider values (missing sliders take anny's default, 0.5) and face-shape values (missing ones take 0)
+  update(values: Record<string, number>, face: Record<string, number> = {}): { ms: number } {
     const t0 = performance.now(), marks: [string, number][] = [];
     this.values = Object.assign({}, values);
-    this.smoothSurface(values, marks);
+    this.faceValues = Object.assign({}, face);
+    this.smoothSurface(values, marks, face);
     ringFrames(this.smooth, this.ring, this.sn, this.tan, this.area);
     // the detail layers (scaled with the size around the vertex), the normals and the smooth shading normals in the
     // frames of the smooth surface

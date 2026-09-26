@@ -270,12 +270,39 @@ def _compute_bone_vertex_weights(model, bone_idx: int, strategy: str) -> torch.T
         raise NotImplementedError(strategy)
 
 
+def _new_rows(output_path: str, blendshape_labels: list[str]):
+    """the existing cache and the rows of blendshape_labels that it lacks (append mode)"""
+    existing = torch.load(output_path, weights_only=True)
+    known = set(existing["blendshape_labels"])
+    rows = [i for i, label in enumerate(blendshape_labels) if label not in known]
+    return existing, rows
+
+
+def _append(existing: dict, new: dict, labels: list[str], output_path: str) -> None:
+    """append rows to a cache, after checking that the template matrices are unchanged"""
+    diff = torch.max(
+        torch.abs(
+            existing["bone_template_orientation_matrices"]
+            - new["bone_template_orientation_matrices"]
+        )
+    )
+    assert diff < 1e-9, f"the template orientation matrices changed ({diff:.3e})"
+    out = dict(existing)
+    for key in ("bone_heads_blendshapes", "bone_orientation_blendshapes"):
+        if key in new:
+            out[key] = torch.cat([existing[key], new[key].to(existing[key].dtype)])
+    out["blendshape_labels"] = list(existing["blendshape_labels"]) + labels
+    print(f"appending {len(labels)} rows (template matrices unchanged, {diff:.1e})")
+    _save(out, output_path)
+
+
 def main_anny(
     output_path="src/anny/data/cached/anny.pth",
     bone_orientation_weighting_strategy="skinning_squared",
     aim_weight=0.5,
     aim_target="tail",
     align_root_with_pelvis=True,
+    append=False,
 ):
     """
     Precompute the procrustes orientation data for the pruned anny rig.
@@ -283,13 +310,22 @@ def main_anny(
     bone_orientation_weighting_strategy: how are defined the vertices weights used for bone orientation estimation
     aim_weight: relative weight of the kinematic aiming term folded into the covariance (0 disables it)
     aim_target: "tail" (aim at each bone's authored tail) or "children" (aim at child joints)
+    append: compute only the blend shapes that the existing file lacks (such as the face shapes)
+        and append their rows, leaving the existing rows bit for bit
     """
     source_model = anny.Anny(
         rig="makehuman-notongue-nobreasts-nofacialexpression-pruned",
         topology="anny",
         local_changes="all",
         facial_actions="none",
+        face_shapes="all",
     )
+    rows = list(range(len(source_model.blendshape_labels)))
+    if append:
+        existing, rows = _new_rows(output_path, source_model.blendshape_labels)
+        if not rows:
+            print("nothing to append")
+            return
 
     # The bone orientations are inconsistent across shapes (which motivates the use of
     # a different orientation strategy).
@@ -312,9 +348,9 @@ def main_anny(
 
     orientation_data = compute_cached_orientation_data(
         template_vertices=source_model.template_vertices,
-        blendshapes=source_model.blendshapes,
+        blendshapes=source_model.blendshapes[rows],
         template_bone_origins=source_model.template_bone_heads,
-        bone_origins_blendshapes=source_model.bone_heads_blendshapes,
+        bone_origins_blendshapes=source_model.bone_heads_blendshapes[rows],
         bone_vertex_weights=bone_vertex_weights,
         reference_vertices=ref_output["rest_vertices"].squeeze(dim=0),
         reference_bone_orientations=reference_bone_orientations,
@@ -324,7 +360,7 @@ def main_anny(
         aim_target=aim_target,
         bone_parents=source_model.bone_parents,
         template_bone_tails=source_model.template_bone_tails,
-        bone_tails_blendshapes=source_model.bone_tails_blendshapes,
+        bone_tails_blendshapes=source_model.bone_tails_blendshapes[rows],
         reference_bone_tails=reference_bone_tails,
     )
 
@@ -358,6 +394,12 @@ def main_anny(
             :, pelvis_left_id
         ]
 
+    if append:
+        orientation_data["bone_heads_blendshapes"] = bone_heads_blendshapes[rows]
+        labels = [source_model.blendshape_labels[i] for i in rows]
+        _append(existing, orientation_data, labels, output_path)
+        return
+
     data = dict(
         # Metadata
         bone_orientation_weighting_strategy=bone_orientation_weighting_strategy,
@@ -380,6 +422,7 @@ def main_soma(
     weight_threshold=0.01,
     aim_weight=0.0,
     aim_target="tail",
+    append=False,
 ):
     """
     Precompute the procrustes orientation data for the SOMA rig.
@@ -407,8 +450,15 @@ def main_soma(
         local_changes="all",
         facial_actions="none",
         reference_topology="anny_from_soma",
+        face_shapes="all",
     )
     dtype = data.template_vertices.dtype
+    rows = list(range(len(data.metadata.blendshape_labels)))
+    if append:
+        existing, rows = _new_rows(output_path, data.metadata.blendshape_labels)
+        if not rows:
+            print("nothing to append")
+            return
 
     sparse_rbf_matrix = soma_rig_data["sparse_rbf_matrix"].to(dtype=dtype)
     skinning_weights = soma_rig_data["skinning_weights"].to(dtype=dtype)
@@ -438,15 +488,19 @@ def main_soma(
 
     orientation_data = compute_cached_orientation_data(
         template_vertices=data.template_vertices,
-        blendshapes=data.blendshapes,
+        blendshapes=data.blendshapes[rows],
         template_bone_origins=template_bone_origins,
-        bone_origins_blendshapes=bone_origins_blendshapes,
+        bone_origins_blendshapes=bone_origins_blendshapes[rows],
         bone_vertex_weights=bone_vertex_weights,
         reference_vertices=bind_shape,
         reference_bone_orientations=bind_world_transforms[:, :3, :3],
         reference_bone_origins=bind_world_transforms[:, :3, 3],
         bone_labels=bone_labels,
     )
+    if append:
+        labels = [data.metadata.blendshape_labels[i] for i in rows]
+        _append(existing, orientation_data, labels, output_path)
+        return
 
     output = dict(
         # Metadata
@@ -486,9 +540,14 @@ def main():
         default="tail",
         help="Aim at each bone's authored tail (default) or at its child joints.",
     )
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="compute only the blend shapes that the existing file lacks and append their rows",
+    )
     args = parser.parse_args()
     # Leave aim_weight to each rig's own default (0.5 for anny, 0 for soma) unless overridden.
-    kwargs = {"aim_target": args.aim_target}
+    kwargs = {"aim_target": args.aim_target, "append": args.append}
     if args.aim_weight is not None:
         kwargs["aim_weight"] = args.aim_weight
     if args.output:
