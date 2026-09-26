@@ -7,9 +7,11 @@ All notable changes to this project.
 Highlights:
 
 - **Web viewer.** `viewer/dist/anny_viewer.html` renders anny in the browser with skin,
-  eye and hair shading. Its Character panel holds anny's phenotype sliders, and every part
-  of the page follows them: the fine body, the skeleton, the eyes, the hair and the
-  corrective shapes. `python -m anny.viewer build` rebuilds the page.
+  eye and hair shading. Its Character panel holds anny's phenotype sliders, with the three
+  race phenotypes for any mix of ethnicities, and every part of the page follows them: the
+  fine body, the skeleton, the eyes, the hair and the corrective shapes. Character presets
+  (Asian and Eurasian women and men) set the body, the face and the colours at once.
+  `python -m anny.viewer build` rebuilds the page.
 - **Poses, soft tissue and hair for anny.** These parts come from the `3D Model`
   experiment, and they follow the phenotype sliders.
 - **Face and head shapes.** `Anny(face_shapes="all")` adds 103 named, symmetric shapes of the

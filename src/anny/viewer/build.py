@@ -42,7 +42,19 @@ from .geometry import fine_body, vertex_normals
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
 DEFAULT_OUT = REPO / "viewer" / "build"
-SLIDERS = ["gender", "age", "muscle", "weight", "height", "proportions"]
+# anny's phenotype sliders of the page: the default ones and the three race phenotypes, whose
+# values mix by their shares (anny's default, 0.5 each, is an equal mix)
+SLIDERS = [
+    "gender",
+    "age",
+    "muscle",
+    "weight",
+    "height",
+    "proportions",
+    "african",
+    "asian",
+    "caucasian",
+]
 M = ANNY_TO_LEGACY
 
 
@@ -319,7 +331,9 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
     if verbose:
         print(f"stages ready: {time.time() - t0:.0f} s")
 
-    model = anny.Anny(topology="anny-quads", face_shapes="all").to(dtype=torch.float64)
+    model = anny.Anny(topology="anny-quads", face_shapes="all", phenotypes="all").to(
+        dtype=torch.float64
+    )
     coarse = rig.preview["coarse"]
     base_index = coarse["base_index"]
     body_quads = coarse[
@@ -399,21 +413,21 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
     region = faces_weighted_to_bones(model, body_quads).astype(np.uint8)
     pk.add("coarse_quads", quads.reshape(-1), "raw", quads.size * 4, 1)
     pk.add("coarse_region", region, "raw", len(region), 1)
-    pk.add(
-        "coarse_template",
-        space["template"].astype(np.float32),
-        "raw",
-        space["template"].size * 4,
-        1,
-    )
     comp = space["components"]
     comp_scale = np.abs(comp).reshape(len(comp), -1).max(1) / 32767
     cq = np.round(comp / comp_scale[:, None, None]).astype(np.int16)
+    proj = space["projection"].astype(np.float32)
+    # the rounding of the components, centred on anny's default body: the template takes the rounding error of the
+    # default body, so each body keeps only the rounding error of its difference to the default body (the error is
+    # linear in the coefficients)
+    a0 = proj.astype(np.float64) @ export.coefficients(model, {})
+    rounding = comp - cq * comp_scale[:, None, None]
+    template = space["template"] + np.einsum("k, knd -> nd", a0, rounding)
+    pk.add("coarse_template", template.astype(np.float32), "raw", template.size * 4, 1)
     # one record of 4 values (x, y, z and a zero pad) per component and vertex: meshopt encodes them as
     # vertices, and the neighbouring vertices of a component move alike
     cq = np.concatenate([cq, np.zeros(cq.shape[:2] + (1,), np.int16)], 2).reshape(-1, 4)
     pk.add("shape_components", cq, "vertex", len(cq), 8)
-    proj = space["projection"].astype(np.float32)
     pk.add("shape_projection", proj, "raw", proj.size * 4, 1)
     jt = space["joint_template"].astype(np.float32)
     jb = space["joint_blend"].astype(np.float32)

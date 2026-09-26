@@ -117,7 +117,7 @@ The distribution takes the spread of faces from fits of anny to the ICT-FaceKit 
 
 ### Web viewer
 
-`viewer/dist/anny_viewer.html` renders anny in a browser with WebGL2, from one file. It carries skin shading with subsurface scattering, eyes with a refractive cornea and about 56,000 hair strands. Its Character panel holds anny's phenotype sliders, which run from 0 to 1 with anny's default at 0.5, and the face shapes, with a Random face button that draws from the calibrated distribution. Its Pose panel plays the poses and clips of `anny.poses` with the corrective shapes. To rebuild the page (node 22 or later is needed):
+`viewer/dist/anny_viewer.html` renders anny in a browser with WebGL2, from one file. It carries skin shading with subsurface scattering, eyes with a refractive cornea and about 56,000 hair strands. Its Character panel holds character presets (Asian and Eurasian women and men) that set the body, the face and the colours; colour looks; anny's phenotype sliders, which run from 0 to 1 with anny's default at 0.5, with the three race phenotypes, whose values mix by their shares (Eurasian is Asian and Caucasian at equal values); and the face shapes, with a Random face button that draws from the calibrated distribution. Its Pose panel plays the poses and clips of `anny.poses` with the corrective shapes. To rebuild the page (node 22 or later is needed):
 
 ```bash
 uv sync --extra viewer

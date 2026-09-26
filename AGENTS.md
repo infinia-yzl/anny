@@ -34,6 +34,7 @@ uv run python -m anny.faces.authoring.detail        # data/faces/detail_shapes.s
 uv run python -m anny.faces.authoring.mediapipe_map # data/keypoints/mediapipe.json
 uv run python -m anny.faces.authoring.calibrate     # data/shape_calibration/face_prior.safetensors
 uv run python -m anny.faces.authoring.benchmark     # benchmark.html in ANNY_CACHE_DIR/faces
+uv run python -m anny.faces.authoring.review        # review.png in ANNY_CACHE_DIR/faces: random faces to judge by eye
 ```
 
 ### Web viewer
@@ -115,7 +116,10 @@ forward chins and thin lips, which looked old and harsh. Check changes to the ca
 rendering random faces in the viewer as well as by the measurement check: fits that meet the
 numbers can still give implausible faces. Judge each random face by whether it passes as a normal
 person of that age, and show the calibrated mean in the grid, since the default face hides a shift
-of the mean.
+of the mean: `python -m anny.faces.authoring.review` renders that grid from the viewer page.
+`test.test_faces_calibration.TestPlausibleFaces` guards these choices and the facial spread of the
+approved prior (`APPROVED_FACIAL_SPREAD`); when a change breaks one of its tests, review the grid
+with the user before updating the test.
 
 ### Pose Parameterization
 
@@ -128,6 +132,12 @@ The pose, corrective and hair authoring code (`*/authoring/`) works on the autho
 ### Web Viewer
 
 `viewer/` is a node project (TypeScript, three.js, esbuild). `src/anny_shape.ts` and `src/subdivision.ts` repeat anny's coefficient maths and the subdivision, and `test/test_viewer_parity.py` checks them against Python. `src/body.ts` rebuilds the fine body for any slider setting, `src/shading.ts` holds the shaders, and `src/main.ts` holds the renderer and the panels. `npm run build` writes the single-file page `viewer/dist/anny_viewer.html`; `npx tsc --noEmit` type-checks.
+The Body section holds the sliders of `anny.viewer.build.SLIDERS`: anny's six default phenotypes and the three race
+phenotypes, whose values mix by their shares (the build uses `phenotypes="all"`, and 136 components reproduce the
+blend shapes exactly). The Characters row of the Character panel holds presets (`CHARACTERS` in `src/main.ts`) that
+set the phenotype sliders, the face and the colours, as a character creator's presets do; the Looks row sets the
+colours only. Random face draws with `sampleFace` (`src/anny_shape.ts`) at the spread of the exported prior, and
+`test/test_viewer_parity.py` checks it against Python.
 
 ### Optional Dependencies
 

@@ -766,6 +766,13 @@ function makeHairMesh(geo, p, defines, strands) {
 // joints follow, the fine surface is rebuilt by subdivision with its detail layers, and the eyes, the hair, the
 // skeleton and the corrective shapes follow the body. Every slider runs from 0 to 1, and anny's default is 0.5.
 const BODY: any = { ready: false, anny: null as AnnyBody | null, geo: null, values: null, face: null, faceSliders: [], sliders: [], lastMs: 0, lastTotalMs: 0, lastTiming: {} };
+// anny's race phenotypes: their values mix by their shares
+const RACES = ['african', 'asian', 'caucasian'];
+function raceShare(phenotype: any, name: string) {
+  const v = (k: string) => phenotype[k] ?? PHENOTYPE_DEFAULT;
+  const sum = RACES.reduce((a, k) => a + v(k), 0);
+  return sum > 0 ? v(name) / sum : 1 / RACES.length;
+}
 function sliderEnds(tables: any, label: string) {
   const v = tables.variations.find((x: any) => x[0] === label);
   const a = tables.anchors[label];
@@ -806,7 +813,8 @@ function initBody(meta: any, B: any, geo: any) {
   }, at.position.array, at.normal.array, at.nsmooth.array);
   body.detailStep = B.head_detail.info.step || 1e-5;
   BODY.anny = body; BODY.geo = geo;
-  BODY.sliders = sm.sliders.map((name: string) => ({ name, label: name.charAt(0).toUpperCase() + name.slice(1), ends: sliderEnds(sm.tables, name) }));
+  BODY.sliders = sm.sliders.map((name: string) => ({ name, label: name.charAt(0).toUpperCase() + name.slice(1),
+    race: RACES.includes(name), ends: RACES.includes(name) ? [] : sliderEnds(sm.tables, name) }));
   BODY.face = face || null;
   BODY.faceSliders = face ? face.tables.names.map((name: string, i: number) => ({ name, group: face.tables.groups[i],
     label: faceLabel(name, face.tables.groups[i]), range: face.tables.ranges[i], ends: (face.tables.ends || [])[i] || ['', ''] })) : [];
@@ -1437,6 +1445,23 @@ const EXAMPLE_LOOKS: any[] = [
   { format: LOOK_FORMAT, name: 'Olive', skin: { tone: 0.5, undertone: 0.45 }, hair: { color: '#141110' }, eyes: { color: '#4a3020' } },
   { format: LOOK_FORMAT, name: 'Deep', skin: { tone: 0.9, undertone: 0.1 }, hair: { color: '#141110' }, eyes: { color: '#4a3020' } },
 ];
+// characters: presets that set everything a look carries (the phenotype sliders, the face and the colours), as the
+// presets of a character creator do; the example looks set the colours only. The faces are random faces of the
+// calibrated distribution for each body, chosen on the review renders.
+const CHARACTERS: any[] = [
+  { format: LOOK_FORMAT, name: 'Asian woman', skin: { tone: 0.28, undertone: 0.4 }, hair: { color: '#141110' }, eyes: { color: '#4a3020' },
+    phenotype: { gender: 1, age: 0.78, muscle: 0.45, weight: 0.45, height: 0.5, proportions: 0.5, african: 0, asian: 1, caucasian: 0 },
+    face: { 'head-scale-vert': 0.51, 'head-fat': -0.02, 'head-invertedtriangular': 0.03, 'head-back-scale-depth': -0.96, 'head-round': 0.02, 'head-scale-depth': 1.76, 'head-scale-horiz': 0.43, 'forehead-temple': -0.01, 'forehead-trans': 0.25, 'forehead-scale-vert': 0.06, 'forehead-nubian': -0.01, 'eyebrows-angle': -0.01, 'eyebrows-trans-backward-forward': 0.04, 'eye-corner1': 0.34, 'eye-height1': 0.1, 'eye-scale': 0.04, 'eye-push1': -0.01, 'eye-eyefold-down-up': 0.03, 'eye-height3': 0.16, 'eye-height2': 0.13, 'eye-bag-decr-incr': -0.01, 'eye-push2': -0.06, 'eye-trans-down-up': 0.18, 'eye-bag-height': 0.03, 'eye-epicanthus': 0.02, 'eye-eyefold-angle': -0.1, 'eye-bag-in-out': -0.03, 'eye-corner2': -0.26, 'eye-trans-in-out': -0.22, 'eye-eyefold-concave-convex': 0.02, 'nose-nostrils-angle': 0.04, 'nose-flaring': -0.11, 'nose-curve': -0.02, 'nose-scale-depth': 0.01, 'nose-scale-vert': 0.04, 'nose-point-width': -0.11, 'nose-scale-horiz': 0.07, 'nose-width1': -0.01, 'nose-trans-backward-forward': 0.08, 'nose-trans-down-up': -0.06, 'nose-hump': -0.01, 'nose-nostrils-width': 0.05, 'nose-greek': 0.03, 'nose-point': -0.04, 'nose-width2': -0.05, 'nose-width3': 0.03, 'nose-septumangle': 0.06, 'nose-base': -0.04, 'nose-compression': -0.03, 'nose-volume': 0.01, 'cheek-trans': 0.08, 'cheek-inner': -0.04, 'cheek-bones': -0.17, 'mouth-lowerlip-height': -0.01, 'mouth-scale-horiz': -0.08, 'mouth-cupidsbow': -0.01, 'mouth-laugh-lines': 0.01, 'mouth-scale-depth': -0.17, 'mouth-lowerlip-volume': -0.18, 'mouth-angles': 0.1, 'mouth-upperlip-ext': 0.01, 'mouth-lowerlip-width': -0.01, 'mouth-trans-backward-forward': 0.06, 'mouth-scale-vert': 0.04, 'mouth-dimples': 0.05, 'mouth-upperlip-height': 0.03, 'mouth-upperlip-volume': 0.03, 'mouth-cupidsbow-width': 0.03, 'mouth-lowerlip-ext': -0.06, 'mouth-upperlip-middle': -0.1, 'mouth-trans-down-up': -0.04, 'mouth-lowerlip-middle': -0.06, 'mouth-philtrum-volume': 0.04, 'chin-jaw-drop': 0.01, 'chin-height': 0.09, 'chin-prominent': 0.01, 'chin-bones': -0.01, 'chin-width': 0.02, 'chin-triangle': 0.02, 'chin-prognathism': 0.09, 'ear-lobe': 0.11, 'ear-shape-square-round': -0.04, 'ear-trans-backward-forward': -0.18, 'ear-rot': 0.01, 'ear-trans-down-up': 0.03, 'ear-scale-vert': 0.04, 'ear-flap': 0.02, 'ear-shape-pointed-triangle': 0.11, 'ear-scale': 0.14, 'ear-scale-depth': -0.06, 'ear-wing': 0.03, 'detail-1': 0.08, 'detail-2': -0.17, 'detail-3': -0.11, 'detail-4': 0.12, 'detail-5': 0.03, 'detail-6': -0.2, 'detail-7': 0.01, 'detail-8': -0.21, 'detail-9': -0.33, 'detail-10': 0.09 } },
+  { format: LOOK_FORMAT, name: 'Asian man', skin: { tone: 0.32, undertone: 0.4 }, hair: { color: '#141110' }, eyes: { color: '#4a3020' },
+    phenotype: { gender: 0, age: 0.79, muscle: 0.55, weight: 0.5, height: 0.5, proportions: 0.5, african: 0, asian: 1, caucasian: 0 },
+    face: { 'head-scale-vert': 0.11, 'head-fat': -0.09, 'head-invertedtriangular': 0.07, 'head-back-scale-depth': -1.43, 'head-scale-depth': 0.81, 'head-scale-horiz': 0.11, 'forehead-temple': 0.08, 'forehead-trans': 0.07, 'forehead-scale-vert': -0.01, 'forehead-nubian': 0.01, 'eyebrows-angle': -0.03, 'eyebrows-trans-down-up': 0.02, 'eyebrows-trans-backward-forward': -0.03, 'eye-corner1': 0.02, 'eye-height1': 0.02, 'eye-scale': 0.14, 'eye-push1': -0.12, 'eye-eyefold-down-up': 0.02, 'eye-height3': -0.06, 'eye-height2': -0.06, 'eye-bag-decr-incr': 0.05, 'eye-push2': -0.26, 'eye-bag-height': 0.05, 'eye-epicanthus': 0.05, 'eye-eyefold-angle': 0.03, 'eye-bag-in-out': 0.04, 'eye-corner2': -0.04, 'eye-trans-in-out': 0.01, 'eye-eyefold-concave-convex': -0.13, 'nose-nostrils-angle': 0.01, 'nose-flaring': 0.04, 'nose-curve': -0.01, 'nose-scale-depth': -0.05, 'nose-scale-vert': 0.02, 'nose-point-width': -0.02, 'nose-scale-horiz': -0.02, 'nose-width1': -0.04, 'nose-trans-backward-forward': -0.08, 'nose-trans-down-up': -0.04, 'nose-hump': 0.02, 'nose-nostrils-width': -0.01, 'nose-greek': 0.04, 'nose-point': -0.04, 'nose-width2': 0.01, 'nose-width3': 0.06, 'nose-septumangle': -0.01, 'nose-base': 0.01, 'nose-compression': 0.01, 'cheek-trans': 0.02, 'cheek-volume': 0.01, 'cheek-inner': 0.07, 'cheek-bones': -0.04, 'mouth-lowerlip-height': 0.04, 'mouth-scale-horiz': -0.21, 'mouth-cupidsbow': 0.01, 'mouth-laugh-lines': 0.01, 'mouth-scale-depth': -0.13, 'mouth-lowerlip-volume': -0.07, 'mouth-angles': -0.04, 'mouth-upperlip-ext': -0.01, 'mouth-trans-backward-forward': 0.2, 'mouth-upperlip-width': -0.04, 'mouth-scale-vert': 0.06, 'mouth-dimples': 0.02, 'mouth-upperlip-height': -0.02, 'mouth-upperlip-volume': 0.02, 'mouth-cupidsbow-width': 0.03, 'mouth-upperlip-middle': 0.08, 'mouth-trans-down-up': 0.02, 'mouth-lowerlip-middle': 0.02, 'mouth-philtrum-volume': 0.03, 'chin-jaw-drop': 0.01, 'chin-prominent': 0.05, 'chin-bones': 0.18, 'chin-width': 0.04, 'chin-triangle': 0.04, 'chin-prognathism': 0.07, 'ear-lobe': 0.12, 'ear-shape-square-round': -0.13, 'ear-trans-backward-forward': 0.1, 'ear-rot': 0.03, 'ear-trans-down-up': 0.1, 'ear-scale-vert': 0.07, 'ear-flap': 0.05, 'ear-shape-pointed-triangle': -0.16, 'ear-scale': -0.09, 'ear-scale-depth': -0.18, 'ear-wing': 0.14, 'detail-1': 0.24, 'detail-2': -0.19, 'detail-3': -0.05, 'detail-4': -0.04, 'detail-5': -0.01, 'detail-6': 0.09, 'detail-7': -0.11, 'detail-8': -0.02, 'detail-9': -0.28, 'detail-10': 0.09 } },
+  { format: LOOK_FORMAT, name: 'Eurasian woman', skin: { tone: 0.22, undertone: 0.25 }, hair: { color: '#271f16' }, eyes: { color: '#875f3d' },
+    phenotype: { gender: 1, age: 0.78, muscle: 0.45, weight: 0.45, height: 0.5, proportions: 0.5, african: 0, asian: 1, caucasian: 1 },
+    face: { 'head-scale-vert': 0.34, 'head-fat': 0.07, 'head-invertedtriangular': 0.12, 'head-back-scale-depth': -0.82, 'head-round': 0.03, 'head-scale-depth': 1.48, 'head-scale-horiz': 0.21, 'forehead-temple': -0.23, 'forehead-trans': 0.05, 'forehead-scale-vert': 0.05, 'forehead-nubian': 0.01, 'eyebrows-angle': 0.01, 'eyebrows-trans-down-up': -0.02, 'eyebrows-trans-backward-forward': 0.07, 'eye-corner1': 0.12, 'eye-height1': -0.1, 'eye-scale': 0.24, 'eye-push1': 0.03, 'eye-eyefold-down-up': -0.04, 'eye-height3': -0.18, 'eye-height2': -0.14, 'eye-bag-decr-incr': -0.02, 'eye-push2': -0.04, 'eye-trans-down-up': 0.15, 'eye-bag-height': -0.04, 'eye-epicanthus': -0.01, 'eye-eyefold-angle': -0.06, 'eye-bag-in-out': -0.06, 'eye-corner2': -0.22, 'eye-trans-in-out': 0.01, 'eye-eyefold-concave-convex': 0.26, 'nose-nostrils-angle': -0.04, 'nose-flaring': -0.01, 'nose-curve': -0.07, 'nose-scale-depth': -0.03, 'nose-scale-vert': -0.1, 'nose-point-width': -0.06, 'nose-scale-horiz': -0.02, 'nose-width1': -0.04, 'nose-trans-backward-forward': 0.06, 'nose-trans-down-up': 0.02, 'nose-hump': -0.03, 'nose-nostrils-width': 0.09, 'nose-greek': -0.13, 'nose-point': -0.07, 'nose-width2': -0.03, 'nose-width3': -0.03, 'nose-septumangle': -0.11, 'nose-base': 0.16, 'nose-compression': 0.01, 'nose-volume': -0.14, 'cheek-trans': 0.04, 'cheek-volume': -0.08, 'cheek-inner': 0.07, 'cheek-bones': -0.12, 'mouth-lowerlip-height': -0.02, 'mouth-scale-horiz': -0.04, 'mouth-scale-depth': -0.01, 'mouth-lowerlip-volume': 0.12, 'mouth-angles': 0.1, 'mouth-lowerlip-width': 0.02, 'mouth-trans-backward-forward': -0.14, 'mouth-upperlip-width': 0.06, 'mouth-scale-vert': 0.01, 'mouth-dimples': -0.05, 'mouth-upperlip-height': 0.04, 'mouth-upperlip-volume': -0.08, 'mouth-lowerlip-ext': 0.02, 'mouth-upperlip-middle': 0.03, 'mouth-trans-down-up': 0.06, 'mouth-philtrum-volume': 0.03, 'chin-jaw-drop': -0.05, 'chin-height': -0.05, 'chin-prominent': -0.1, 'chin-width': -0.03, 'chin-prognathism': -0.17, 'ear-lobe': 0.02, 'ear-shape-square-round': 0.01, 'ear-trans-backward-forward': 0.12, 'ear-rot': -0.25, 'ear-trans-down-up': -0.11, 'ear-scale-vert': -0.01, 'ear-flap': 0.03, 'ear-shape-pointed-triangle': -0.1, 'ear-scale': 0.03, 'ear-scale-depth': -0.09, 'ear-wing': 0.16, 'detail-1': 0.06, 'detail-2': -0.16, 'detail-3': 0.12, 'detail-4': -0.04, 'detail-5': -0.22, 'detail-6': -0.38, 'detail-7': -0.03, 'detail-8': -0.21, 'detail-9': 0.14, 'detail-10': -0.2 } },
+  { format: LOOK_FORMAT, name: 'Eurasian man', skin: { tone: 0.26, undertone: 0.25 }, hair: { color: '#271f16' }, eyes: { color: '#4a3020' },
+    phenotype: { gender: 0, age: 0.79, muscle: 0.55, weight: 0.5, height: 0.5, proportions: 0.5, african: 0, asian: 1, caucasian: 1 },
+    face: { 'head-scale-vert': 0.41, 'head-fat': -0.04, 'head-rectangular': 0.02, 'head-back-scale-depth': -1.21, 'head-scale-depth': 1.42, 'head-scale-horiz': 0.21, 'head-triangular': 0.06, 'forehead-temple': 0.01, 'forehead-trans': -0.2, 'forehead-scale-vert': 0.02, 'eyebrows-trans-down-up': -0.05, 'eyebrows-trans-backward-forward': 0.01, 'eye-corner1': 0.05, 'eye-height1': -0.05, 'eye-scale': 0.08, 'eye-push1': -0.09, 'eye-eyefold-down-up': -0.09, 'eye-height3': -0.16, 'eye-height2': -0.06, 'eye-bag-decr-incr': -0.05, 'eye-push2': -0.11, 'eye-trans-down-up': 0.19, 'eye-bag-height': -0.14, 'eye-epicanthus': 0.07, 'eye-eyefold-angle': 0.07, 'eye-bag-in-out': 0.04, 'eye-corner2': -0.05, 'eye-trans-in-out': 0.11, 'eye-eyefold-concave-convex': 0.27, 'nose-nostrils-angle': -0.09, 'nose-flaring': 0.03, 'nose-curve': -0.07, 'nose-scale-depth': -0.07, 'nose-scale-vert': -0.03, 'nose-point-width': -0.09, 'nose-scale-horiz': 0.07, 'nose-width1': 0.01, 'nose-trans-backward-forward': -0.25, 'nose-trans-down-up': 0.06, 'nose-hump': -0.03, 'nose-nostrils-width': 0.01, 'nose-greek': -0.13, 'nose-point': 0.06, 'nose-width2': 0.07, 'nose-width3': -0.1, 'nose-septumangle': 0.1, 'nose-base': 0.12, 'nose-compression': -0.01, 'nose-volume': -0.09, 'cheek-trans': -0.01, 'cheek-volume': 0.01, 'cheek-inner': 0.12, 'cheek-bones': 0.21, 'mouth-lowerlip-height': 0.22, 'mouth-scale-horiz': -0.07, 'mouth-scale-depth': -0.04, 'mouth-lowerlip-volume': 0.04, 'mouth-angles': -0.08, 'mouth-upperlip-ext': 0.02, 'mouth-lowerlip-width': 0.01, 'mouth-trans-backward-forward': 0.33, 'mouth-upperlip-width': 0.01, 'mouth-scale-vert': 0.2, 'mouth-dimples': 0.02, 'mouth-upperlip-height': 0.09, 'mouth-upperlip-volume': 0.03, 'mouth-cupidsbow-width': 0.02, 'mouth-lowerlip-ext': 0.1, 'mouth-upperlip-middle': 0.27, 'mouth-trans-down-up': -0.01, 'mouth-lowerlip-middle': 0.07, 'mouth-philtrum-volume': -0.03, 'chin-jaw-drop': 0.01, 'chin-prominent': -0.05, 'chin-bones': 0.14, 'chin-width': -0.06, 'chin-cleft': 0.01, 'chin-triangle': 0.04, 'chin-prognathism': -0.02, 'ear-lobe': 0.21, 'ear-shape-square-round': -0.02, 'ear-trans-backward-forward': -0.12, 'ear-rot': -0.01, 'ear-trans-down-up': -0.16, 'ear-scale-vert': -0.13, 'ear-flap': 0.21, 'ear-shape-pointed-triangle': 0.17, 'ear-scale': -0.14, 'ear-scale-depth': 0.11, 'ear-wing': 0.19, 'detail-1': 0.12, 'detail-2': 0.04, 'detail-3': -0.14, 'detail-4': -0.14, 'detail-5': -0.16, 'detail-6': -0.03, 'detail-7': 0.52, 'detail-8': 0.05, 'detail-9': 0.15, 'detail-10': 0.18 } },
+];
 const LOOK_PARTS: any = { hair: null, brows: null, lashes: null, hairMeshes: [], eyes: [], iris: null };
 let currentLook: any = JSON.parse(JSON.stringify(BASELINE_LOOK));
 let hairWanted = true;
@@ -1933,6 +1958,8 @@ function editLook(mut) {
   // an edited example look becomes a custom one; a pasted preset keeps its own name
   const ex = EXAMPLE_LOOKS.find(l => l.name === next.name);
   if (ex && !sameLook(ex, next)) next.name = 'Custom';
+  const ch = CHARACTERS.find(l => l.name === next.name);
+  if (ch && !sameCharacter(ch, next)) next.name = 'Custom';
   applyLook(next);
 }
 // the example looks set the colours and keep anny's slider values, so this comparison leaves the sliders out
@@ -1940,6 +1967,12 @@ function sameLook(a, b) {
   const A = normaliseLook(a), B = normaliseLook(b);
   return Math.abs(A.skin.tone - B.skin.tone) < 1e-3 && Math.abs(A.skin.undertone - B.skin.undertone) < 1e-3 &&
     A.hair.color === B.hair.color && A.eyes.color === B.eyes.color;
+}
+// a character also carries the slider values and the face
+function sameCharacter(a, b) {
+  const A = normaliseLook(a), B = normaliseLook(b);
+  const close = (x, y) => Object.keys(Object.assign({}, x, y)).every(k => Math.abs((x[k] ?? 0) - (y[k] ?? 0)) < 1e-3);
+  return sameLook(A, B) && close(A.phenotype, B.phenotype) && close(A.face, B.face);
 }
 function toneTrack() {
   const stops = [];
@@ -1970,6 +2003,7 @@ function syncEditor() {
   $('ed-hair-v').textContent = lookName('hair', L.hair.color);
   $('ed-eyes-v').textContent = lookName('eyes', L.eyes.color);
   $('ed-looks').querySelectorAll('.ed-chip').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.name === L.name && sameLook(EXAMPLE_LOOKS.find(l => l.name === b.dataset.name), L))));
+  $('ed-chars').querySelectorAll('.ed-chip').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.name === L.name && sameCharacter(CHARACTERS.find(l => l.name === b.dataset.name), L))));
   for (const s of BODY.sliders) {
     const inp = $('ed-b-' + s.name), out = $('ed-b-' + s.name + '-v');
     if (!inp) continue;
@@ -1995,7 +2029,7 @@ function syncEditor() {
   });
 }
 function shapeText(s, v) {
-  return v.toFixed(2);
+  return s.race ? `${Math.round(100 * raceShare(currentLook.phenotype, s.name))} %` : v.toFixed(2);
 }
 // body sliders, built once the model has loaded; the shape updates at most once a frame while a slider moves
 let bodyPending = null;
@@ -2010,7 +2044,15 @@ function buildBodySliders() {
   const box = $('ed-shape');
   if (!box || !BODY.ready) return;
   box.textContent = '';
+  let raceHead = false;
   for (const s of BODY.sliders) {
+    if (s.race && !raceHead) {
+      raceHead = true;
+      const h = document.createElement('div'); h.className = 'ed-sub'; h.textContent = 'Ethnicity';
+      const note = document.createElement('p'); note.className = 'ed-note';
+      note.textContent = 'The three values mix by their shares, shown on the right. Eurasian is Asian and Caucasian at equal values, with African at 0.';
+      box.append(h, note);
+    }
     const wrap = document.createElement('div'); wrap.className = 'ed-slider';
     const row = document.createElement('div'); row.className = 'ed-row';
     const lab = document.createElement('label'); lab.htmlFor = 'ed-b-' + s.name; lab.textContent = s.label;
@@ -2021,9 +2063,12 @@ function buildBodySliders() {
     inp.title = 'Double-click to return to anny\'s default (0.5)';
     inp.addEventListener('input', () => queueBody(s.name, parseFloat(inp.value)));
     inp.addEventListener('dblclick', () => { inp.value = '0.5'; queueBody(s.name, 0.5); });
-    const ends = document.createElement('div'); ends.className = 'ed-ends'; ends.setAttribute('aria-hidden', 'true');
-    for (const t of s.ends) { const sp = document.createElement('span'); sp.textContent = t; ends.appendChild(sp); }
-    wrap.append(row, inp, ends);
+    wrap.append(row, inp);
+    if (s.ends.length) {
+      const ends = document.createElement('div'); ends.className = 'ed-ends'; ends.setAttribute('aria-hidden', 'true');
+      for (const t of s.ends) { const sp = document.createElement('span'); sp.textContent = t; ends.appendChild(sp); }
+      wrap.appendChild(ends);
+    }
     box.appendChild(wrap);
   }
   $('ed-shape-sec').hidden = false;
@@ -2113,6 +2158,18 @@ function wireEditor() {
     if (e.key !== 'Escape') return;
     if (!ed.hidden) open(false); else if (po && !po.hidden) openPoser(false);
   });
+  // characters
+  const charChips = $('ed-chars');
+  for (const l of CHARACTERS) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'ed-chip'; b.dataset.name = l.name; b.setAttribute('aria-pressed', 'false');
+    const dot = document.createElement('i');
+    const c = skinBase(l.skin.tone, l.skin.undertone).map(v => Math.round(v * 255));
+    dot.style.background = `linear-gradient(135deg, rgb(${c.join(',')}) 50%, ${l.hair.color} 50%)`;
+    b.append(dot, document.createTextNode(l.name));
+    b.addEventListener('click', () => { applyLook(JSON.parse(JSON.stringify(l))); setEdMsg(''); });
+    charChips.appendChild(b);
+  }
   // example looks
   const chips = $('ed-looks');
   for (const l of EXAMPLE_LOOKS) {
