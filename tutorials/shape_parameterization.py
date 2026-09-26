@@ -253,18 +253,19 @@ display(
 #
 # - its **spread** comes from fits of anny to 10,000 faces of the ICT-FaceKit identity space (the
 #   named shapes explain 86.5 % of the variation of held-out faces, and 95.7 % with the detail
-#   shapes), scaled per group of shapes to meet the SDs of the data;
-# - its **mean** moves from anny's own face for each age, as little as it can, to meet the head and
-#   face measurements of the ANSUR II survey (adults), the 3D Facial Norms database (3 to 40
-#   years) and the CDC growth charts (head circumference below 3 years).
+#   shapes), narrowed per group of shapes to meet the SDs of the data but never widened; children
+#   draw no detail shapes, which come from the scans of adults;
+# - its **mean** is anny's own face for each age, apart from the size of the skull, which meets the
+#   head measurements of the ANSUR II survey (adults), the 3D Facial Norms database (3 to 40 years)
+#   and the CDC growth charts (head circumference below 3 years).
 #
-# Against those data, the median standardised mean difference of the measurements at each age
-# falls from 0.9 to 1.9 SD for anny's own faces (4 to 5 SD for the head circumference of infants)
-# to 0.4 SD or less, and the median ratio of the SDs rises from 0.2–0.7 to 0.9–1.1. Two conflicts
-# remain: ANSUR II and 3D Facial Norms differ by 5 mm on the height of the face, and the face depths
-# of 3D Facial Norms, measured from the tragion, widen anny's face at the ears by 1 to 2 SD. The
-# sources and their licences are in `src/anny/data/faces/SOURCES.md`, and
-# `python -m anny.faces.authoring.benchmark` reports the comparison.
+# `sample()` draws at 0.6 of that spread (`DEFAULT_SPREAD`). An earlier calibration also moved the
+# facial features to meet the measurements of the nose, the lips and the depths of the face, which
+# depend on where the landmarks sit on anny's mesh; it met them through big noses, forward chins
+# and thin lips, and its random faces looked old and harsh. The facial measurements now keep the
+# gaps of anny's own faces (0.9 to 1.9 SD for adults). `python -m anny.faces.authoring.review`
+# renders random faces to judge by eye, and the sources and their licences are in
+# `src/anny/data/faces/SOURCES.md`.
 
 # %%
 import anny.faces.distribution
@@ -316,13 +317,8 @@ scene.show()
 # photos of FairFace. MediaPipe measures 13 face proportions both on the photos and on renders of
 # anny's populations from the viewer page (2,347 of 2,700 renders kept):
 #
-# - the calibrated faces spread like the photos (median SD ratio 0.78, against 0.15 for anny's own
-#   faces), and they bring the height and width proportions of the face closer to the photos;
-# - the proportions of the eyes and the lips move further away (median |SMD| over all proportions
-#   0.84, against 0.71 for anny's own faces), although the same eyes meet 3D Facial Norms in 3D:
-#   MediaPipe finds the eye corners and the lips differently on renders and on photos;
-# - a classifier still tells the renders from the photos (C2ST AUC 0.99; 0.79 for faces drawn
-#   uniformly over the slider ranges, whose wide spread covers the scatter of the photos);
+# - it reports the spread and the proportions of anny's random faces against the photos, and how
+#   well a classifier tells the renders from the photos;
 # - fitted to the landmarks of 1,107 photos, anny with its face shapes has half the landmark error
 #   (normalised mean error 0.033 of the eye width, against 0.062 without face shapes), with the
 #   same error in every age group (0.033 to 0.036) and race group (0.033 to 0.034).
