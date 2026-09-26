@@ -65,12 +65,12 @@ class TestHairPage(unittest.TestCase):
             browser = p.chromium.launch(args=args, **kw)
             tab = browser.new_page(viewport=dict(width=320, height=320))
             cls.errors = []
-            tab.on(
-                "console",
-                lambda m: cls.errors.append(m.text)
-                if "Shader Error" in m.text
-                else None,
-            )
+
+            def shader_errors(m):
+                if "Shader Error" in m.text:
+                    cls.errors.append(m.text)
+
+            tab.on("console", shader_errors)
             tab.goto(PAGE.resolve().as_uri() + "?shot=1&acc=1")
             tab.wait_for_function(
                 "window.__READY && window.__BODY.ready", timeout=900000

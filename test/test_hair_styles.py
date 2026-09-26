@@ -321,6 +321,45 @@ class TestStrands(unittest.TestCase):
         )
 
 
+class TestBodyClearance(unittest.TestCase):
+    def test_hair_on_the_body_keeps_its_gap(self):
+        from anny.hair.authoring.groom import BODY_CLEARANCE, clear_body
+
+        # a sphere for a shoulder, and guides draped over it at 1 mm from its surface
+        centre, radius = np.array([0.15, 0.3, 0.0]), 0.05
+
+        def sdf(P):
+            d = P - centre
+            n = np.linalg.norm(d, axis=1, keepdims=True)
+            return n[:, 0] - radius, d / n
+
+        a = np.linspace(-1.2, 1.2, 25)
+        X = np.stack(
+            [
+                centre
+                + (radius + 0.001)
+                * np.stack(
+                    [
+                        np.sin(a) * np.cos(b),
+                        np.cos(a) * np.cos(b),
+                        np.full_like(a, np.sin(b)),
+                    ],
+                    1,
+                )
+                for b in np.linspace(-0.6, 0.6, 7)
+            ]
+        )
+        seg = np.linalg.norm(np.diff(X, axis=1), axis=2)
+        Y = clear_body(sdf, X)
+        self.assertLess(
+            np.abs(np.linalg.norm(np.diff(Y, axis=1), axis=2) - seg).max(), 1e-9
+        )
+        self.assertTrue(np.array_equal(Y[:, 0], X[:, 0]))
+        # the chain from the fixed root keeps the first points a little closer
+        gap = sdf(Y[:, 3:].reshape(-1, 3))[0]
+        self.assertGreater(gap.min(), 0.8 * BODY_CLEARANCE)
+
+
 class TestDensityVolume(unittest.TestCase):
     def test_cover_follows_the_fade(self):
         from anny.hair import styles as H

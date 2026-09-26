@@ -181,6 +181,30 @@ class SDFUnion:
 
 HEAD_BOX = ((-0.11, 0.39, -0.10), (0.11, 0.67, 0.18))
 BODY_BOX = ((-0.26, 0.12, -0.16), (0.26, 0.44, 0.20))
+# m: the gap between hair and the neck, the shoulders and the chest. The render strands are
+# straight between the points of a guide (1.4 cm apart on long hair), so on a shoulder they dip
+# about 0.5 mm below the points; the clumps and waves of the page move them by as much again.
+BODY_CLEARANCE = 2.5 * MM
+
+
+def clear_body(sdf_body, X, clearance=BODY_CLEARANCE, iters=4):
+    """
+    Push the points of the guides X (G, M, 3) that lie on the body (inside BODY_BOX) out to
+    ``clearance`` from it, and keep the length of each segment (the roots stay).
+    """
+    X = X.copy()
+    seg = np.linalg.norm(np.diff(X, axis=1), axis=2)
+    lo, hi = np.array(BODY_BOX[0]), np.array(BODY_BOX[1])
+    for _ in range(iters):
+        flat = X[:, 1:].reshape(-1, 3)
+        inside = np.all((flat >= lo) & (flat <= hi), axis=1)
+        sd, g = sdf_body(flat)
+        low = inside & (sd < clearance)
+        flat[low] += g[low] * (clearance - sd[low])[:, None]
+        X[:, 1:] = flat.reshape(X.shape[0], -1, 3)
+        for i in range(1, X.shape[1]):
+            X[:, i] = X[:, i - 1] + nrm(X[:, i] - X[:, i - 1]) * seg[:, i - 1, None]
+    return X
 
 
 def body_sdfs(V, N, T=None, with_body=False, cache=True):
@@ -642,6 +666,8 @@ def grow(V, T, N, spec, layout, points=24, verbose=True, sdfs=None):
     low = sd < 0.25 * MM
     flat[low] += grad[low] * (0.25 * MM - sd[low])[:, None]
     X2[:, 1:] = flat.reshape(G, M - 1, 3)
+    if g.get("body_collision"):
+        X2 = clear_body(sdfs["body"], X2)
     length, flick = cut(sdf, fields, X2, info, rng)
     pts, avail = resample_uniform(X2, points)
     if verbose:
