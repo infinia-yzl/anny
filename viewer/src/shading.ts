@@ -262,6 +262,9 @@ attribute vec3 rest;   // rest shape: skin detail, moles and creases stay fixed 
 uniform vec4 uWearOn;
 varying vec3 vWPos; varying vec3 vN; varying vec3 vNs; varying vec3 vAlb; varying vec3 vObj; varying vec4 vA; varying vec4 vB; varying vec4 vC; varying vec4 vD; varying vec3 vAx;
 varying vec3 vN0; varying vec3 vR0; varying vec3 vR1; varying vec3 vR2; varying vec3 vHOut;
+// the hair over the skin (anny.hair.styles.density_volume, on anny's default head): occlusion and the density near the
+// scalp, which tints it
+uniform highp sampler3D uHairOcc; uniform vec3 uHairOccLo; uniform vec3 uHairOccSize; uniform float uHairOn; uniform mat4 uHeadInv;
 ${COVER_GLSL}
 void main() {
   mat4 S = skinMat();
@@ -275,6 +278,12 @@ void main() {
   vHOut = M * headOutRest(rest);   // the head of anny's default body (uHeadInv maps to it)
   vAlb = pow(albedo, vec3(2.2));
   vA = attrA; vB = attrB; vC = attrC; vD = attrD;
+  if (uHairOn > 0.5) {
+    vec3 hq = (uHeadInv * vec4(wp.xyz + vN * 0.0015, 1.0)).xyz;
+    vec2 hv = textureLod(uHairOcc, (hq - uHairOccLo) / uHairOccSize, 0.0).rg;
+    vA.z *= pow(hv.x, 0.6);
+    vA.w = smoothstep(0.08, 0.45, hv.y);
+  }
   // contact shade from the wearables that are on (one slot each)
   vec4 wz = mix(vec4(1.0), attrW, uWearOn);
   vA.x *= wz.x * wz.y * wz.z * wz.w;
@@ -444,7 +453,7 @@ void main() {
   // skin tone: a tint over the baked colour (the moist lining around the eyes keeps most of its pink),
   // and the scalp under the hair takes a colour between the skin and the hair
   vec3 tint = mix(uSkinTint, pow(uSkinTint, vec3(0.3)), wet);
-  vec3 albedo = clamp(vAlb, 0.0, 1.0) * tint + (uScalpCol - uScalp0 * tint) * 0.9 * scalp;
+  vec3 albedo = mix(clamp(vAlb, 0.0, 1.0) * tint, uScalpCol, 0.9 * scalp * (1.0 - ear));
   albedo = max(albedo, vec3(0.0)) * mix(0.90, 1.0, cav);
   float m1 = vn3(vObj * 260.0) * 0.6 + vn3(vObj * 620.0) * 0.4;
   float m2 = vn3(vObj * 1500.0 + 7.0);

@@ -21,7 +21,7 @@ const out = path.join(here, 'dist', 'anny_viewer.html');
 await MeshoptEncoder.ready;
 const man = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json')));
 const read = (name) => new Uint8Array(fs.readFileSync(path.join(dir, name + '.raw')));
-const META_KEYS = ['eyes', 'eye_mesh', 'lut', 'skin', 'rig', 'motion', 'correctives', 'shape', 'stool', 'authoring'];
+const META_KEYS = ['eyes', 'eye_mesh', 'lut', 'skin', 'rig', 'motion', 'correctives', 'shape', 'stool', 'authoring', 'hair'];
 const header = { buffers: [], meta: Object.fromEntries(META_KEYS.map((k) => [k, man[k]])) };
 const parts = [];
 let offset = 0;

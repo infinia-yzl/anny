@@ -41,10 +41,29 @@ STYLE_DIR = DATA_DIR / "styles"
 GUIDES_PATH = DATA_DIR / "styles.safetensors"
 SIMILARITY = 0.55  # guides that flow another way than the nearest one do not blend in
 SECTOR_RADIUS = 0.6 * 0.0042 * 0.5  # centre of a fine clump from its guide root
-TIP_BIND_DISTANCE = (
-    0.01  # a guide tip within 1 cm of the skin follows the skin under it
+# a guide tip within 1 cm of the skin follows the skin under it
+TIP_BIND_DISTANCE = 0.01
+PIVOT_BLEND = (
+    0.02  # m: the turn to the root normal fades out over this arc before the pivot
 )
 DEFAULT_PARAMS = dict(length=1.0, curl=1.0, volume=1.0, density=1.0, fade=0.0)
+# the waves that the curl slider adds to a straight style (radius, period in mm)
+DEFAULT_CURL = (4.0, 40.0)
+
+
+def style_params(spec: dict) -> dict:
+    """the page's parameters at their defaults for a style: a straight style starts without curl"""
+    cu = spec["render"].get("curl") or {}
+    return dict(DEFAULT_PARAMS, curl=1.0 if cu.get("radius_mm", 0) > 0 else 0.0)
+
+
+def curl_shape(spec: dict):
+    """radius and period (mm) of the curl at the parameter 1: the style's own, or waves"""
+    cu = spec["render"].get("curl") or {}
+    ramp = cu.get("ramp", 0.15)
+    if cu.get("radius_mm", 0) > 0:
+        return cu["radius_mm"], cu["period_mm"], ramp
+    return DEFAULT_CURL[0], DEFAULT_CURL[1], ramp
 
 
 # ---------------------------------------------------------------------------------------------- random values
@@ -94,6 +113,9 @@ class HairStyle:
     length: np.ndarray  # (G,) default length (m)
     group: np.ndarray  # (G,) uint8
     flick: np.ndarray  # (G,) flick amplitude (m)
+    pivot: (
+        np.ndarray
+    )  # (G,) arc length (m) where the guide leaves the head (a tie, or where it hangs)
 
     @property
     def name(self) -> str:
@@ -108,7 +130,9 @@ class HairStyle:
         """the style on the other side (a side part on the right): guide k takes guide mirror[k]"""
         m = layout.guide_mirror
         pts = self.points[m] * np.array([-1.0, 1.0, 1.0])
-        return HairStyle(self.spec, pts, self.length[m], self.group[m], self.flick[m])
+        return HairStyle(
+            self.spec, pts, self.length[m], self.group[m], self.flick[m], self.pivot[m]
+        )
 
 
 def style_names() -> list[str]:
@@ -130,8 +154,9 @@ def load_style(name: str, layout: Layout | None = None, path=GUIDES_PATH) -> Hai
         length = f.get_tensor(f"{name}.length").astype(np.float64)
         group = f.get_tensor(f"{name}.group")
         flick = f.get_tensor(f"{name}.flick").astype(np.float64)
+        pivot = f.get_tensor(f"{name}.pivot").astype(np.float64)
     points = decode_curves(layout.guide_position, seg, codes)
-    return HairStyle(spec, points, length, group, flick)
+    return HairStyle(spec, points, length, group, flick, pivot)
 
 
 # ---------------------------------------------------------------------------------------------- binding
@@ -289,13 +314,17 @@ def strands(
     count: int | None = None,
     points: int | None = None,
     head_centre=CRANIUM_CENTRE,
+    scale: float = 1.0,
 ):
     """
     Pass B: the render strands (count, points, 3) of a style from its posed guides (G, P, 3), the
     posed guide root normals, and the render roots, for the page's parameters ``params``
     (length, curl, volume, fade shift; see DEFAULT_PARAMS). Also returns the strand lengths.
+
+    ``scale`` is the size of the head against anny's default head (the guides follow the body
+    with it): every length of the strands scales with it.
     """
-    prm = dict(DEFAULT_PARAMS, **(params or {}))
+    prm = dict(style_params(style.spec), **(params or {}))
     rs = style.spec["render"]
     n = count or layout.roots
     P = points or guides.shape[1]
@@ -321,13 +350,12 @@ def strands(
         thin = rnd(key, 2) < th["share"]
         jit = np.where(thin, jit * lerp_range(rnd(key, 3), th["range"]), jit)
     avail = style.available
-    seg = avail / (guides.shape[1] - 1)
-    ell = prm["length"] * (w * style.length[gid]).sum(1) * jit
-    ell = np.minimum(ell, (w * avail[gid]).sum(1))
+    seg = avail / (guides.shape[1] - 1) * scale
+    ell = prm["length"] * (w * style.length[gid]).sum(1) * jit * scale
+    ell = np.minimum(ell, (w * avail[gid]).sum(1) * scale)
     phi, el = layout.root_chart[:n, 0], layout.root_chart[:n, 1]
-    ell = np.minimum(
-        ell, fade_length(phi, el, rs.get("fade"), prm["fade"], rs.get("hairline"))
-    )
+    fade = fade_length(phi, el, rs.get("fade"), prm["fade"], rs.get("hairline"))
+    ell = np.minimum(ell, fade * scale)
     alive = rnd(key, 4) < coverage(phi, el, rs.get("hairline"))
     ell = np.where(alive, ell, 0.0)
     # base: the blended offsets of the guides, turned to the strand root
@@ -337,15 +365,38 @@ def strands(
     xr = roots.position[:n]
     base = np.repeat(xr[:, None], P, 1).copy()
     tng = np.zeros_like(base)
+    # the height of the blended guides over their roots, from the head centre, and the weight of
+    # the turn (before the pivots)
+    lift = np.zeros((n, P))
+    turn = np.zeros((n, P))
+    # the turn to the root normal ends at the pivot of each guide, where the hair leaves the head:
+    # hanging and tied hair stays parallel
     for j in range(gid.shape[1]):
         k = gid[:, j]
+        piv = style.pivot[k][:, None] * scale
+        rho = (1.0 - smoothstep(piv - PIVOT_BLEND * scale, piv, s))[..., None]
         pts, dirs = sample_curve(guides[k], seg[k], s)
         off = pts - guides[k, 0][:, None]
-        off = rotate_between(guide_normal[k][:, None], nr[:, None], off)
-        dirs = rotate_between(guide_normal[k][:, None], nr[:, None], dirs)
+        gn = guide_normal[k][:, None]
+        off = off + rho * (rotate_between(gn, nr[:, None], off) - off)
+        dirs = dirs + rho * (rotate_between(gn, nr[:, None], dirs) - dirs)
         base += w[:, j, None, None] * off
         tng += w[:, j, None, None] * dirs
+        radius = np.linalg.norm(pts - head_centre, axis=-1)
+        lift += w[:, j, None] * (
+            radius - np.linalg.norm(guides[k, 0] - head_centre, axis=-1)[:, None]
+        )
+        turn += w[:, j, None] * rho[..., 0]
     tng /= np.maximum(np.linalg.norm(tng, axis=-1, keepdims=True), 1e-12)
+    # on the head, each point keeps the height of the guides over the root: blending offsets that
+    # turn over a curved scalp would lift the strands off it or sink them into it
+    rel = base - head_centre
+    rad = np.linalg.norm(rel, axis=-1)
+    want = np.linalg.norm(xr - head_centre, axis=-1)[:, None] + lift
+    base = (
+        head_centre
+        + rel * (1.0 + turn * (want / np.maximum(rad, 1e-9) - 1.0))[..., None]
+    )
     # clumps: the lateral offset of the root from its guide shrinks along the strand, first toward
     # the centre of its sector (fine clumps), then toward the guide (coarse clumps)
     cl = rs["clump"]
@@ -358,7 +409,7 @@ def strands(
     ang = np.arctan2((d * b).sum(1), (d * a).sum(1))
     q = np.clip(np.floor((ang / (2 * np.pi) + 0.5) * S), 0, S - 1).astype(np.uint32)
     qa = (q + 0.5) / S * 2 * np.pi - np.pi
-    centre = (np.cos(qa)[:, None] * a + np.sin(qa)[:, None] * b) * SECTOR_RADIUS
+    centre = (np.cos(qa)[:, None] * a + np.sin(qa)[:, None] * b) * SECTOR_RADIUS * scale
     skey = sector_key(k0, q, S)
     fs = lerp_range(rnd(skey, 1), cl["fine"])
     fp = lerp_range(rnd(skey, 2), cl["fine_power"])
@@ -379,13 +430,13 @@ def strands(
     b1 /= np.maximum(np.linalg.norm(b1, axis=-1, keepdims=True), 1e-12)
     b2 = np.cross(tng, b1)
     # curl: a helix about the strand, in phase within a fine clump
-    cu = rs.get("curl")
-    if cu and cu["radius_mm"] > 0 and prm["curl"] > 0:
-        rad = prm["curl"] * cu["radius_mm"] * MM * lerp_range(rnd(key, 5), [0.8, 1.2])
-        per = cu["period_mm"] * MM * lerp_range(rnd(skey, 3), [0.85, 1.15])
+    c_rad, c_per, c_ramp = curl_shape(style.spec)
+    if prm["curl"] > 0:
+        rad = prm["curl"] * c_rad * MM * scale * lerp_range(rnd(key, 5), [0.8, 1.2])
+        per = c_per * MM * scale * lerp_range(rnd(skey, 3), [0.85, 1.15])
         phase = 2 * np.pi * (rnd(skey, 4) + 0.08 * rnd(key, 6))
         th_ = 2 * np.pi * s / per[:, None] + phase[:, None]
-        ramp = smoothstep(0.0, cu.get("ramp", 0.15), t)[None, :] * rad[:, None]
+        ramp = smoothstep(0.0, c_ramp, t)[None, :] * rad[:, None]
         out = out + ramp[..., None] * (
             np.cos(th_)[..., None] * b1 + np.sin(th_)[..., None] * b2
         )
@@ -393,7 +444,10 @@ def strands(
     fr = rs.get("frizz")
     if fr:
         amp = (
-            lerp_range(rnd(key, 7), fr["mm"]) * MM * np.clip(ell / (30 * MM), 0.2, 1.0)
+            lerp_range(rnd(key, 7), fr["mm"])
+            * MM
+            * scale
+            * np.clip(ell / (30 * MM * scale), 0.2, 1.0)
         )
         cyc = lerp_range(rnd(key, 8), fr["cycles"])
         p1, p2 = 2 * np.pi * rnd(key, 9), 2 * np.pi * rnd(key, 10)
@@ -405,16 +459,15 @@ def strands(
     # flyaways
     fl = rs.get("flyaways")
     if fl:
-        fly = (rnd(key, 11) < fl["share"]) & (ell > 25 * MM)
+        fly = (rnd(key, 11) < fl["share"]) & (ell > 25 * MM * scale)
         root_out = xr - head_centre
         root_out /= np.maximum(np.linalg.norm(root_out, axis=-1, keepdims=True), 1e-12)
         drift = root_out * lerp_range(rnd(key, 12), fl["mm"])[:, None] * MM
-        drift = (
-            drift + (np.stack([rnd(key, 13 + i) for i in range(3)], 1) - 0.5) * 3.6 * MM
-        )
+        rand3 = np.stack([rnd(key, 13 + i) for i in range(3)], 1)
+        drift = (drift + (rand3 - 0.5) * 3.6 * MM) * scale
         out = out + (fly[:, None] * drift)[:, None] * (t**2)[None, :, None]
     # flick: the ends of the perimeter pieces turn outward
-    fk = style.flick[k0]
+    fk = style.flick[k0] * scale
     out = (
         out + outward * (fk[:, None] * smoothstep(0.6, 1.0, t)[None, :] ** 2)[..., None]
     )
@@ -427,3 +480,114 @@ def strands(
         k = 1.0 + (vol - 1.0) * np.maximum(rho - rho_r, 0.0) / np.maximum(rho, 1e-9)
         out = head_centre + rel * k[..., None]
     return out, ell
+
+
+# ---------------------------------------------------------------------------------------------- density
+VOLUME_STEP = 0.003  # voxel size (m)
+VOLUME_SAMPLE = 0.0034  # spacing of the samples along the guides (m)
+VOLUME_RAY = 7  # voxels walked outward for the occlusion
+VOLUME_K = (
+    0.044  # occlusion per unit of density walked (matches the legacy groom's occlusion)
+)
+VOLUME_NEAR = 60.0  # the density at which the scalp tint is full
+
+
+def guide_strands(style: HairStyle, layout: Layout, count: int | None = None):
+    """the number of drawn render strands whose nearest guide is each guide (with the hairline)"""
+    n = count or layout.roots
+    rs = style.spec["render"]
+    phi, el = layout.root_chart[:n, 0], layout.root_chart[:n, 1]
+    cov = coverage(phi, el, rs.get("hairline"))
+    return np.bincount(layout.root_guides[:n, 0], weights=cov, minlength=layout.guides)
+
+
+def density_volume(
+    style: HairStyle,
+    layout: Layout,
+    params: dict | None = None,
+    count: int | None = None,
+):
+    """
+    A grid over the hair of a style on anny's default body: in channel 0 the occlusion of a point
+    by the hair outward of it (``exp(-k * density walked outward from the head centre)``), in
+    channel 1 the local density against VOLUME_NEAR (the scalp tint). Both are uint8. Returns the
+    grid (nx, ny, nz, 2), its lower corner and its step. The page builds the same grid
+    (``viewer/src/hair/data.ts``) when the style or its parameters change.
+    """
+    prm = dict(style_params(style.spec), **(params or {}))
+    rs = style.spec["render"]
+    n_g = guide_strands(style, layout, count)
+    avail = style.available
+    D = np.minimum(style.length * prm["length"], avail)
+    phi, el = layout.guide_chart[:, 0], layout.guide_chart[:, 1]
+    D = np.minimum(
+        D, fade_length(phi, el, rs.get("fade"), prm["fade"], rs.get("hairline"))
+    )
+    live = (n_g > 0) & (D > 0)
+    pts, wts = [], []
+    P = style.points.shape[1]
+    seg = avail / (P - 1)
+    for g in np.nonzero(live)[0]:
+        m = int(np.ceil(D[g] / VOLUME_SAMPLE))
+        s = (np.arange(m) + 0.5) * D[g] / m
+        p, _ = sample_curve(style.points[g : g + 1], seg[g : g + 1], s[None, :])
+        pts.append(p[0])
+        wts.append(np.full(m, n_g[g] * (D[g] / m) / VOLUME_SAMPLE))
+    if not pts:
+        empty = np.zeros((2, 2, 2, 2), np.uint8)
+        empty[..., 0] = 255  # no hair: no occlusion and no scalp tint
+        return empty, CRANIUM_CENTRE - VOLUME_STEP, VOLUME_STEP
+    pts, wts = np.concatenate(pts), np.concatenate(wts)
+    h = VOLUME_STEP
+    lo = np.floor((pts.min(0) - 0.01) / h) * h
+    dims = (np.ceil((pts.max(0) + 0.01 - lo) / h)).astype(int) + 1
+    grid = np.zeros(dims)
+    # trilinear splat
+    u = (pts - lo) / h
+    i0 = np.floor(u).astype(int)
+    f = u - i0
+    for dx in (0, 1):
+        for dy in (0, 1):
+            for dz in (0, 1):
+                wgt = (
+                    (f[:, 0] if dx else 1 - f[:, 0])
+                    * (f[:, 1] if dy else 1 - f[:, 1])
+                    * (f[:, 2] if dz else 1 - f[:, 2])
+                )
+                np.add.at(
+                    grid, (i0[:, 0] + dx, i0[:, 1] + dy, i0[:, 2] + dz), wts * wgt
+                )
+    # two passes of a [1, 2, 1] / 4 blur along each axis
+    for _ in range(2):
+        for ax in range(3):
+            pad = np.pad(grid, [(1, 1) if a == ax else (0, 0) for a in range(3)])
+            sl = [slice(None)] * 3
+            a_, b_, c_ = list(sl), list(sl), list(sl)
+            a_[ax], b_[ax], c_[ax] = slice(0, -2), slice(1, -1), slice(2, None)
+            grid = 0.25 * pad[tuple(a_)] + 0.5 * pad[tuple(b_)] + 0.25 * pad[tuple(c_)]
+    # occlusion: the density walked outward from each voxel (nearest voxel at each step)
+    idx = np.stack(
+        np.meshgrid(*[np.arange(d) for d in dims], indexing="ij"), -1
+    ).reshape(-1, 3)
+    centre = lo + idx * h
+    d = centre - CRANIUM_CENTRE
+    d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+    acc = np.zeros(len(idx))
+    for st in range(1, VOLUME_RAY + 1):
+        q = np.floor((centre + d * (st * h) - lo) / h + 0.5).astype(int)
+        ok = np.all((q >= 0) & (q < dims), axis=1)
+        acc[ok] += grid[q[ok, 0], q[ok, 1], q[ok, 2]]
+    occ = np.exp(-VOLUME_K * acc).reshape(dims)
+    near = np.clip(grid / VOLUME_NEAR, 0, 1)
+    out = np.stack([occ, near], -1)
+    return np.round(out * 255).astype(np.uint8), lo, h
+
+
+def sample_volume(volume, lo, h, P, channel=0):
+    """trilinear value in [0, 1] of a channel of the density volume at points (n, 3)"""
+    from scipy.ndimage import map_coordinates
+
+    c = ((np.asarray(P) - lo) / h).T
+    return map_coordinates(
+        volume[..., channel].astype(np.float64) / 255.0, c, order=1, mode="nearest"
+    )

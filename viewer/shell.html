@@ -127,6 +127,8 @@
   .ed-row label { font-size: 13px; color: var(--text); }
   .ed-val, .ed-row output { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .ed-slider { display: grid; gap: 6px; }
+  .ed-hair-styles { display: grid; gap: 8px; }
+  .ed-hair-styles .ed-chips { padding-top: 4px; }
   .ed-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
   .editor input[type="range"] {
     -webkit-appearance: none; appearance: none; width: 100%; height: 22px; margin: 0; background: transparent; cursor: pointer;
@@ -307,8 +309,11 @@
       </div>
     </section>
     <section class="ed-sec" aria-labelledby="ed-l-hair">
-      <div class="ed-row"><h3 id="ed-l-hair">Hair</h3><span class="ed-val" id="ed-hair-v"></span></div>
-      <div class="ed-swatches" id="ed-hair" role="group" aria-labelledby="ed-l-hair"></div>
+      <div class="ed-row"><h3 id="ed-l-hair">Hair</h3><span class="ed-val" id="ed-hair-style-v"></span></div>
+      <div class="ed-hair-styles" id="ed-hair-styles"></div>
+      <div class="ed-shape" id="ed-hair-params"></div>
+      <div class="ed-row"><span class="ed-sub" id="ed-l-hair-colour">Colour</span><span class="ed-val" id="ed-hair-v"></span></div>
+      <div class="ed-swatches" id="ed-hair" role="group" aria-labelledby="ed-l-hair-colour"></div>
     </section>
     <section class="ed-sec" aria-labelledby="ed-l-eyes">
       <div class="ed-row"><h3 id="ed-l-eyes">Eyes</h3><span class="ed-val" id="ed-eyes-v"></span></div>

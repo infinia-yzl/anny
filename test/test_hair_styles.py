@@ -244,6 +244,7 @@ class TestStrands(unittest.TestCase):
             np.full(len(G), 0.03),
             np.zeros(len(G), np.uint8),
             np.zeros(len(G)),
+            np.full(len(G), 1000.0),
         )
         cls.V, cls.T = V, T
 

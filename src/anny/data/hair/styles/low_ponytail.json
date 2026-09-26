@@ -1,0 +1,98 @@
+{
+ "name": "low_ponytail",
+ "label": "Low ponytail",
+ "family": "tied",
+ "groom": {
+  "seed": 51,
+  "tie": {
+   "azimuth": 180,
+   "elevation": -14,
+   "offset_mm": 8,
+   "radius_mm": 10,
+   "bundle_mm": 9,
+   "tail_mm": 240,
+   "droop": 1.4,
+   "spread": 1.8
+  },
+  "longest": 1.3,
+  "body_collision": true
+ },
+ "render": {
+  "points": 40,
+  "width_mm": 0.12,
+  "tip_width": 0.45,
+  "strand_jitter": [
+   0.95,
+   1.03
+  ],
+  "thinning": null,
+  "clump": {
+   "coarse": [
+    0.5,
+    0.8
+   ],
+   "coarse_tip": 0.3,
+   "fine": [
+    0.3,
+    0.6
+   ],
+   "fine_power": [
+    1.0,
+    1.5
+   ],
+   "sectors": 6
+  },
+  "curl": {
+   "radius_mm": 0.0,
+   "period_mm": 20.0,
+   "ramp": 0.15
+  },
+  "frizz": {
+   "mm": [
+    0.1,
+    0.35
+   ],
+   "cycles": [
+    0.8,
+    2.0
+   ]
+  },
+  "flyaways": {
+   "share": 0.004,
+   "mm": [
+    1.5,
+    4.0
+   ]
+  },
+  "hairline": null,
+  "fade": null,
+  "density": 1.0
+ },
+ "physics": {
+  "global_stiffness": [
+   1.0,
+   0.05
+  ],
+  "local_stiffness": 0.5,
+  "damping": 0.06,
+  "gravity": 0.6
+ },
+ "controls": {
+  "length": [
+   0.6,
+   1.3
+  ],
+  "curl": [
+   0.0,
+   1.0
+  ],
+  "volume": [
+   0.9,
+   1.2
+  ],
+  "density": [
+   0.6,
+   1.0
+  ]
+ }
+}

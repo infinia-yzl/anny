@@ -135,12 +135,11 @@ def skin_record(si, sw):
 
 
 # ------------------------------------------------------------------ stages
-def grow_hair(body):
-    from anny.hair.authoring import brows_lashes, groom
+def grow_brows_lashes(body):
+    from anny.hair.authoring import brows_lashes
 
-    g = groom.grow(body.V, body.T, body.N)
     bl = brows_lashes.grow(body.V, body.T, body.N, body.eye_centers)
-    return dict(g, brows=bl["brows"], lashes=bl["lashes"])
+    return dict(brows=bl["brows"], lashes=bl["lashes"])
 
 
 def attributes(body, hair):
@@ -324,8 +323,8 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
     t0 = time.time()
     rig = P.RIG
     body = fine_body()
-    hair = cached("hair", lambda: grow_hair(body))
-    A = cached("attributes", lambda: attributes(body, hair))
+    hair = cached("brows_lashes", lambda: grow_brows_lashes(body))
+    A = cached("attributes", lambda: attributes(body, hair), version=2)
     weights = cached("weights", lambda: fine_skin_weights(body))
     lut = cached("lut", skin_lut)
     if verbose:
@@ -403,6 +402,7 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
         16,
         influences=8,
     )
+
     man["skin"] = json.loads(str(A["skin"]))
     man["skin"]["wearables"] = []
 
@@ -572,55 +572,29 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
     pk.add("corr_support", support, "raw", support.size * 4, 1)
     man["correctives"] = dict(step=1e-5, nstep=0.01, shapes=entries, spec=drivers)
 
-    # ---------------- hair, brows and lashes: strands of anny's default body, bound to the skin
-    hp = hair["P"]
-    hao = np.exp(-0.1 * hair["ao"])
+    # ---------------- hair: the scalp layout and the styles (anny.hair.styles), bound to the skin
+    man["hair"] = hair_buffers(pk, body, weights, len(space["bones"]))
+
+    # ---------------- brows and lashes: strands of anny's default body, bound to the skin
     allpts = np.concatenate(
-        [hp.reshape(-1, 3), hair["brows"].reshape(-1, 3), hair["lashes"].reshape(-1, 3)]
+        [hair["brows"].reshape(-1, 3), hair["lashes"].reshape(-1, 3)]
     )
     slo, shi = allpts.min(0) - 1e-4, allpts.max(0) + 1e-4
     for name, S, ao_, step, mx in (
-        ("hair", hp, hao, 0.0034, 26),
         ("brows", hair["brows"], np.full(hair["brows"].shape[:2], 0.75), 0.0012, 7),
         ("lashes", hair["lashes"], np.full(hair["lashes"].shape[:2], 0.85), 0.0012, 8),
     ):
         pack_strands(pk, name, S, ao_, slo, shi, step, mx)
-        tri, bary, _ = closest_triangles(S[:, 0], V, body.T)
-        corners = body.T[tri].astype(np.uint32)
-        rb = np.zeros((len(S), 20), np.uint8)
-        rb[:, 0:12] = corners.astype("<u4").view(np.uint8).reshape(-1, 12)
-        rb[:, 12:20] = bary[:, :2].astype("<f4").view(np.uint8).reshape(-1, 8)
         pk.add(
-            name + "_bind", rb, "sparse", len(S), 20, body="head", fields=3, sort="none"
+            name + "_bind",
+            bind_record(*closest_triangles(S[:, 0], V, body.T)[:2], body.T),
+            "sparse",
+            len(S),
+            20,
+            body="head",
+            fields=3,
+            sort="none",
         )
-        if name == "hair":
-            # the skin under each tip (anny.hair.StrandBinding with tips=True)
-            tri, bary_tip, _ = closest_triangles(S[:, -1], V, body.T)
-            tb = np.zeros((len(S), 20), np.uint8)
-            tb[:, 0:12] = body.T[tri].astype("<u4").view(np.uint8).reshape(-1, 12)
-            tb[:, 12:20] = bary_tip[:, :2].astype("<f4").view(np.uint8).reshape(-1, 8)
-            pk.add(
-                "hair_tip", tb, "sparse", len(S), 20, body="head", fields=3, sort="none"
-            )
-            # every strand follows the skin under its root, with four bones
-            W = np.zeros((len(S), len(space["bones"])))
-            for k in range(3):
-                vi = corners[:, k]
-                for j in range(8):
-                    np.add.at(
-                        W,
-                        (np.arange(len(S)), weights["si"][vi, j]),
-                        bary[:, k] * weights["sw"][vi, j],
-                    )
-            si, sw = top_weights(W, 4)
-            pk.add(
-                "hair_skin",
-                skin_record(si, sw).reshape(-1),
-                "raw",
-                len(S) * 8,
-                1,
-                strands=int(len(S)),
-            )
 
     # ---------------- eyes and the skin lookup table
     info = json.loads(str(A["eye_info"]))
@@ -647,6 +621,108 @@ def build(out_dir=DEFAULT_OUT, verbose=True):
             f"viewer data: {tot / 1e6:.1f} MB raw -> {out_dir} ({time.time() - t0:.0f} s)"
         )
     return man
+
+
+def chart_record(phi, el):
+    """azimuth and elevation (degrees) as two int16 in steps of 0.01 degree"""
+    return np.round(np.stack([phi, el], 1) * 100).astype(np.int16)
+
+
+def bind_record(tri, bary, T):
+    """the 3 fine vertices (uint32) and 2 barycentric coordinates (float32) of each binding"""
+    rb = np.zeros((len(tri), 20), np.uint8)
+    rb[:, 0:12] = T[tri].astype("<u4").view(np.uint8).reshape(-1, 12)
+    rb[:, 12:20] = bary[:, :2].astype("<f4").view(np.uint8).reshape(-1, 8)
+    return rb
+
+
+def hair_buffers(pk, body, weights, n_bones):
+    """
+    The scalp layout and every style (anny.hair.layout, anny.hair.styles) for the page:
+
+    - ``hair_guide_root`` (float32 x 3): the guide roots on anny's default body;
+    - ``hair_guide_bind``, ``hair_root_bind``: the triangles under the guide and render roots;
+    - ``hair_guide_info``: per guide the mirror, the three simulated guides (uint16) and their
+      weights (uint8), and a pad byte;
+    - ``hair_guide_skin``: the four bones of the skin under each guide root, as ``head_skin``;
+    - ``hair_root_data``: per render root its four guides (uint16), their weights (uint8) and its
+      chart (int16, 0.01 degree);
+    - per style ``hair_<name>_codes`` (the octahedral codes of the guide segments),
+      ``hair_<name>_guide`` (float32: segment, default length, flick, pivot; uint8: group, tip
+      bound)
+      and ``hair_<name>_tip`` (the triangles under the guide tips).
+
+    Returns the manifest entry: the layout meta and the specs without their groom part.
+    """
+    from safetensors.numpy import load_file
+
+    from anny.hair import styles as H
+    from anny.hair.layout import load_layout
+
+    V, T = body.V, body.T
+    layout = load_layout()
+    binding = H.Binding.build(layout, V, T)
+    G, R = layout.guides, layout.roots
+    pk.add("hair_guide_root", layout.guide_position.astype(np.float32), "raw", G * 12, 1)
+    pk.add("hair_guide_bind", bind_record(binding.guide_tri, binding.guide_bary, T),
+           "sparse", G, 20, body="head", fields=3, sort="none")
+    pk.add("hair_root_bind", bind_record(binding.root_tri, binding.root_bary, T),
+           "sparse", R, 20, body="head", fields=3, sort="none")
+    info = np.zeros((G, 12), np.uint8)
+    u16 = np.concatenate([layout.guide_mirror[:, None], layout.guide_sim], 1)
+    info[:, 0:8] = u16.astype("<u2").view(np.uint8).reshape(G, 8)
+    info[:, 8:11] = layout.guide_sim_weights
+    pk.add("hair_guide_info", info, "raw", G * 12, 1)
+    # the skin under each guide root: the weights of its triangle's corners, four bones
+    W = np.zeros((G, n_bones))
+    corners = T[binding.guide_tri]
+    for k in range(3):
+        vi = corners[:, k]
+        for j in range(weights["si"].shape[1]):
+            np.add.at(W, (np.arange(G), weights["si"][vi, j]), binding.guide_bary[:, k] * weights["sw"][vi, j])
+    si, sw = top_weights(W, 4)
+    pk.add("hair_guide_skin", skin_record(si, sw), "raw", G * 8, 1)
+    data = np.zeros((R, 16), np.uint8)
+    data[:, 0:8] = layout.root_guides.astype("<u2").view(np.uint8).reshape(R, 8)
+    data[:, 8:12] = layout.root_weights
+    data[:, 12:16] = chart_record(*layout.root_chart.T).view(np.uint8).reshape(R, 4)
+    pk.add("hair_root_data", data, "raw", R * 16, 1)
+    tensors = load_file(str(H.GUIDES_PATH))
+    styles = []
+    for name in H.style_names():
+        style = H.load_style(name, layout)
+        codes = tensors[f"{name}.codes"]
+        P = codes.shape[1] + 1
+        pk.add(f"hair_{name}_codes", codes, "raw", codes.size, 1)
+        rec = np.zeros((G, 20), np.uint8)
+        f32 = np.stack([tensors[f"{name}.segment"], style.length, style.flick, style.pivot], 1)
+        rec[:, 0:16] = f32.astype("<f4").view(np.uint8).reshape(G, 16)
+        tri, bary, on = H.tip_binding(style, V, T)
+        rec[:, 16] = style.group
+        rec[:, 17] = on
+        pk.add(f"hair_{name}_guide", rec, "raw", G * 20, 1)
+        pk.add(f"hair_{name}_tip", bind_record(tri, bary, T),
+               "sparse", G, 20, body="head", fields=3, sort="none")
+        spec = {k: v for k, v in style.spec.items() if k != "groom"}
+        styles.append(dict(spec, points=int(P)))
+    from anny.hair import chart as C
+
+    return dict(
+        layout=dict(layout.meta),
+        styles=styles,
+        centre=C.CRANIUM_CENTRE.tolist(),
+        hairline=dict(phi=C.HAIRLINE_PHI.tolist(), el=C.HAIRLINE_EL.tolist()),
+        curve_phi=C.CURVE_PHI.tolist(),
+        similarity=H.SIMILARITY,
+        sector_radius=H.SECTOR_RADIUS,
+        volume=dict(
+            step=H.VOLUME_STEP,
+            sample=H.VOLUME_SAMPLE,
+            ray=H.VOLUME_RAY,
+            k=H.VOLUME_K,
+            near=H.VOLUME_NEAR,
+        ),
+    )
 
 
 def pack_strands(pk, name, P_, ao, lo, hi, step, max_pts, dq=0.00004):

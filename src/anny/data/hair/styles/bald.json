@@ -1,0 +1,92 @@
+{
+ "name": "bald",
+ "label": "Bald",
+ "family": "short",
+ "groom": {
+  "bald": true
+ },
+ "render": {
+  "points": 2,
+  "width_mm": 0.12,
+  "tip_width": 0.45,
+  "strand_jitter": [
+   0.95,
+   1.03
+  ],
+  "thinning": {
+   "share": 0.28,
+   "range": [
+    0.55,
+    0.85
+   ]
+  },
+  "clump": {
+   "coarse": [
+    0.5,
+    0.82
+   ],
+   "coarse_tip": 0.55,
+   "fine": [
+    0.3,
+    0.65
+   ],
+   "fine_power": [
+    1.0,
+    1.5
+   ],
+   "sectors": 6
+  },
+  "curl": {
+   "radius_mm": 0.0,
+   "period_mm": 20.0,
+   "ramp": 0.15
+  },
+  "frizz": {
+   "mm": [
+    0.15,
+    0.55
+   ],
+   "cycles": [
+    1.0,
+    2.6
+   ]
+  },
+  "flyaways": {
+   "share": 0.005,
+   "mm": [
+    1.5,
+    4.5
+   ]
+  },
+  "hairline": null,
+  "fade": null,
+  "density": 0.0
+ },
+ "physics": {
+  "global_stiffness": [
+   0.9,
+   0.08
+  ],
+  "local_stiffness": 0.6,
+  "damping": 0.08,
+  "gravity": 0.35
+ },
+ "controls": {
+  "length": [
+   1.0,
+   1.0
+  ],
+  "curl": [
+   0.0,
+   0.0
+  ],
+  "volume": [
+   1.0,
+   1.0
+  ],
+  "density": [
+   0.0,
+   0.0
+  ]
+ }
+}

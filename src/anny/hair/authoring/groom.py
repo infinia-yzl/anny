@@ -153,19 +153,30 @@ class SDF:
 
 
 class SDFUnion:
-    """the union of several grids: the smallest distance, with the gradient of that grid"""
+    """
+    The union of several grids: the smallest distance, with the gradient of that grid. A grid
+    counts only inside its own box (outside, its clamped values mean nothing); a point outside
+    every box takes the first grid.
+    """
 
     def __init__(self, *sdfs):
         self.sdfs = sdfs
 
     def __call__(self, P, grad=True):
-        res = [s(P, grad) for s in self.sdfs]
-        if not grad:
-            return np.min(res, axis=0)
+        res = [s(P, True) for s in self.sdfs]
         sd = np.stack([r[0] for r in res])
+        for i, s in enumerate(self.sdfs):
+            hi = s.lo + (s.dims - 1) * s.h
+            out = ~np.all((P >= s.lo) & (P <= hi), axis=1)
+            sd[i, out] = np.inf
+        none = np.isinf(sd).all(0)
+        sd[0, none] = res[0][0][none]
         k = np.argmin(sd, axis=0)
-        g = np.stack([r[1] for r in res])[k, np.arange(len(P))]
-        return sd[k, np.arange(len(P))], g
+        r = np.arange(len(P))
+        if not grad:
+            return sd[k, r]
+        g = np.stack([x[1] for x in res])[k, r]
+        return sd[k, r], g
 
 
 HEAD_BOX = ((-0.11, 0.39, -0.10), (0.11, 0.67, 0.18))
@@ -305,7 +316,12 @@ def make_guides(sdf, fields, roots, normals, rng, M):
     )
     d0 = nrm(Nn * np.cos(alpha)[:, None] + comb * np.sin(alpha)[:, None])
     jit = spec.get("length_jitter", [0.94, 1.06])
-    L = fields.length(P) * rng.uniform(*jit, G) + spec.get("length_extra_mm", 10) * MM
+    # the guides grow to the longest length of the page's slider; the default cut trims them
+    longest = spec.get("longest", 1.0)
+    L = (
+        fields.length(P) * rng.uniform(*jit, G) * longest
+        + spec.get("length_extra_mm", 10) * MM
+    )
     # short hair below the perimeter (sideburns, nape): clipper length
     below = P[:, 1] < fields.perimeter(phi) + 0.002
     sb = spec.get("below_perimeter_mm", [9, 13])
@@ -342,6 +358,8 @@ def relax(
     stiff0=2.2,
     stiff1=0.25,
     comb_k=0.00016,
+    band_floor=-np.inf,
+    stiff_ref_mm=None,
 ):
     """follow-the-leader relaxation with gravity, stiffness toward the tip, collision and a scalp band"""
     G, M, _ = X.shape
@@ -352,7 +370,10 @@ def relax(
     X[:, 1] = root + d0 * seg[:, None]
     Xp = X.copy()
     s = np.linspace(0, 1, M)
-    stiff = stiff0 + (stiff1 - stiff0) * s**0.7
+    stiff = np.broadcast_to(stiff0 + (stiff1 - stiff0) * s**0.7, (G, M))
+    if stiff_ref_mm:
+        # the bending stiffness per segment, for segments of stiff_ref_mm: longer segments bend more
+        stiff = stiff * np.clip(stiff_ref_mm * MM / seg, 0.1, 1.0)[:, None]
     gvec = np.array([0, -1.0, 0])
     scale = seg[:, None, None] / 0.004
     a = np.repeat(info["ang"], M - 2)
@@ -367,17 +388,22 @@ def relax(
             flat = X[:, 2:].reshape(-1, 3)
             sd, g = sdf(flat)
             c = nrm(rotate_about(fields.comb(flat - g * sd[:, None], g), g, a))
-            X[:, 2:] += (c * (comb_k * 2 * wgt)[:, None]).reshape(G, M - 2, 3) * scale
+            # the comb holds the hair that lies on the head; below band_floor it hangs
+            on_head = (flat[:, 1] > band_floor).astype(float)
+            X[:, 2:] += (c * (comb_k * 2 * wgt * on_head)[:, None]).reshape(
+                G, M - 2, 3
+            ) * scale
         for i in range(2, M):
             dcur = X[:, i] - X[:, i - 1]
             dprev = nrm(X[:, i - 1] - X[:, i - 2])
-            dnew = nrm(nrm(dcur) + stiff[i] * dprev)
+            dnew = nrm(nrm(dcur) + stiff[:, i, None] * dprev)
             X[:, i] = X[:, i - 1] + dnew * seg[:, None]
         flat = X[:, 2:].reshape(-1, 3)
         sd, g = sdf(flat)
         lo_ = sd < o
         flat[lo_] += g[lo_] * (o[lo_] - sd[lo_])[:, None]
-        hi_ = sd > o + bd
+        # the band holds the hair to the head; below band_floor the hair hangs free
+        hi_ = (sd > o + bd) & (flat[:, 1] > band_floor)
         flat[hi_] -= g[hi_] * ((sd[hi_] - o[hi_] - bd[hi_]) * 0.35)[:, None]
         X[:, 2:] = flat.reshape(G, M - 2, 3)
     # final length fix
@@ -410,11 +436,41 @@ def sway(sdf, X, info, offs, rng, amount=0.18, power=1.6):
     return out
 
 
+def smooth(sdf, X, offs, seg, iters=6, k=0.5):
+    """
+    Laplacian smoothing of the guides after the relaxation: it removes the kinks that the
+    collisions leave, then restores the segment lengths and pushes the points back out of the skin.
+    """
+    G, M, _ = X.shape
+    X = X.copy()
+    o = offs[:, 2:].reshape(-1)
+    for _ in range(iters):
+        X[:, 2:-1] += k * (0.5 * (X[:, 1:-2] + X[:, 3:]) - X[:, 2:-1])
+        for i in range(2, M):
+            X[:, i] = X[:, i - 1] + nrm(X[:, i] - X[:, i - 1]) * seg[:, None]
+        flat = X[:, 2:].reshape(-1, 3)
+        sd, g = sdf(flat)
+        lo_ = sd < o
+        flat[lo_] += g[lo_] * (o[lo_] - sd[lo_])[:, None]
+        X[:, 2:] = flat.reshape(G, M - 2, 3)
+    for i in range(2, M):
+        X[:, i] = X[:, i - 1] + nrm(X[:, i] - X[:, i - 1]) * seg[:, None]
+    return X
+
+
 LAYER_KERNEL = np.array([[0.05, 0.12, 0.05], [0.12, 0.32, 0.12], [0.05, 0.12, 0.05]])
 
 
 def layer_offsets(
-    X, info, whorl, base=0.6 * MM, per_guide=1.25 * MM, cell=2.0, buckets=64
+    X,
+    info,
+    whorl,
+    base=0.6 * MM,
+    per_guide=1.25 * MM,
+    cell=2.0,
+    buckets=64,
+    floor=-np.inf,
+    cap=np.inf,
 ):
     """
     Volume: each guide rests on the hair that lies below it (guides farther from the crown lie
@@ -432,11 +488,14 @@ def layer_offsets(
     offs = np.zeros((G, M))
     ker = LAYER_KERNEL / LAYER_KERNEL.sum()
     s = np.linspace(0, 1, M)
+    # the layers stack on the head alone: below ``floor`` the hair hangs and takes the base offset
+    on_head = X[..., 1] > floor
     for group in np.array_split(order, min(buckets, G)):
-        offs[group] = base + Tk[ci[group], cj[group]]
+        offs[group] = base + np.minimum(Tk[ci[group], cj[group]], cap) * on_head[group]
         # splat the ribbon thickness of the bucket along its paths (skip the root segment)
-        a = ci[group, 1:].ravel()
-        b = cj[group, 1:].ravel()
+        keep = on_head[group, 1:].ravel()
+        a = ci[group, 1:].ravel()[keep]
+        b = cj[group, 1:].ravel()[keep]
         for di in (-1, 0, 1):
             for dj in (-1, 0, 1):
                 np.add.at(
@@ -474,6 +533,7 @@ def cut(sdf, fields, X, info, rng):
     tex[longer] = -rng.uniform(1.5, 4.0, longer.sum()) * MM
     phiS = chart(X.reshape(-1, 3))[0].reshape(G, M)
     ycut = fields.perimeter(phiS) + tex[:, None]
+    ycut = np.where(np.isfinite(ycut), ycut, -10.0)
     under = X[..., 1] < ycut
     under[:, 0] = False
     has = under.any(1) & ~below
@@ -514,9 +574,37 @@ def grow(V, T, N, spec, layout, points=24, verbose=True, sdfs=None):
     """
     t0 = time.time()
     g = spec["groom"]
+    G = layout.guides
+    if g.get("bald"):
+        # no hair: every guide has no length
+        pts = np.repeat(layout.guide_position[:, None], points, 1)
+        return dict(
+            points=pts,
+            length=np.zeros(G),
+            group=np.zeros(G, np.uint8),
+            flick=np.zeros(G),
+            pivot=np.zeros(G),
+        )
+    if g.get("tie"):
+        return grow_tied(
+            V,
+            T,
+            N,
+            spec,
+            layout,
+            points,
+            sdfs or body_sdfs(V, N, with_body=True),
+            verbose,
+        )
     rng = np.random.default_rng(g.get("seed", 11))
-    sdfs = sdfs or body_sdfs(V, N)
+    sdfs = sdfs or body_sdfs(V, N, with_body=bool(g.get("body_collision")))
     sdf, sdf_full = sdfs["head"], sdfs["full"]
+    if g.get("ears"):
+        # hair that covers the ears lies on them
+        sdf = sdf_full
+    if g.get("body_collision"):
+        # long hair: the neck, the shoulders and the chest as well
+        sdf, sdf_full = SDFUnion(sdf, sdfs["body"]), SDFUnion(sdf_full, sdfs["body"])
     fields = Fields(g, sdf)
     roots = layout.guide_position
     normals = root_normals(roots, V, T, N)
@@ -526,7 +614,14 @@ def grow(V, T, N, spec, layout, points=24, verbose=True, sdfs=None):
     rl = g.get("relax", {})
     offs = np.full((G, M), 1.0 * MM)
     el_r = chart(roots)[1]
-    band = np.full((G, M), 2.5 * MM) + (3.5 * MM * smoothstep(35, 55, el_r))[:, None]
+    # the band above the scalp that holds the hair: thicker on top, and at the front for volume
+    bd = g.get("band_mm", [2.5, 3.5, 0.0])
+    phi_r = chart(roots)[0]
+    front = smoothstep(55, 25, np.abs(phi_r)) * smoothstep(55, 20, el_r)
+    band = (
+        np.full((G, M), bd[0] * MM)
+        + (bd[1] * MM * smoothstep(35, 55, el_r) + bd[2] * MM * front)[:, None]
+    )
     X1 = relax(sdf, fields, X, info, offs, band, **rl)
     ly = g.get("layers", {})
     offs = layer_offsets(X1, info, fields.whorl, **ly)
@@ -539,6 +634,8 @@ def grow(V, T, N, spec, layout, points=24, verbose=True, sdfs=None):
     X2 = relax(sdf, fields, X1, info, offs, band, **rl)
     for amount, power in g.get("sway", [[0.18, 1.6]]):
         X2 = sway(sdf, X2, info, offs, rng, amount, power)
+    if g.get("smooth"):
+        X2 = smooth(sdf, X2, offs, info["L"] / (M - 1), iters=g["smooth"])
     # final collision against the whole head (ears included)
     flat = X2[:, 1:].reshape(-1, 3)
     sd, grad = sdf_full(flat)
@@ -554,4 +651,196 @@ def grow(V, T, N, spec, layout, points=24, verbose=True, sdfs=None):
         length=np.minimum(length, avail),
         group=info["below"].astype(np.uint8),
         flick=flick,
+        pivot=pivots(X2, g.get("hang_below")),
+    )
+
+
+NO_PIVOT = 1000.0  # m: the guide never leaves the head
+
+
+def pivots(X, hang_below=None):
+    """
+    The arc length where each guide leaves the head (the pivot): the first point below the height
+    ``hang_below``. Before it the strands between guides turn with the scalp; after it they hang
+    parallel, and the physics lets them swing.
+    """
+    G, M, _ = X.shape
+    out = np.full(G, NO_PIVOT)
+    if hang_below is None:
+        return out
+    cum = np.concatenate(
+        [np.zeros((G, 1)), np.cumsum(np.linalg.norm(np.diff(X, axis=1), axis=2), 1)], 1
+    )
+    below = X[..., 1] < hang_below
+    below[:, 0] = False
+    has = below.any(1)
+    j = np.argmax(below, axis=1)
+    out[has] = cum[np.nonzero(has)[0], j[has]]
+    return out
+
+
+# ---------------------------------------------------------------------------------------------- ties
+def tie_point(sdf, tie):
+    """the point of a tie: over the head at a chart direction, lifted from the scalp"""
+    az, el = np.radians(tie["azimuth"]), np.radians(tie["elevation"])
+    d = np.array([np.sin(az) * np.cos(el), np.sin(el), np.cos(az) * np.cos(el)])
+    p = C + d * 0.12
+    for _ in range(3):
+        sd, g = sdf(p[None])
+        p = p - g[0] * sd[0]
+    _, n = sdf(p[None])
+    return p + n[0] * tie["offset_mm"] * MM, n[0]
+
+
+def hang(sdf, start, direction, length, M, iters=240):
+    """one strand of ``length`` from ``start``, first along ``direction``, that settles under
+    gravity against the body (follow-the-leader)"""
+    seg = length / (M - 1)
+    X = start + np.linspace(0, length, M)[:, None] * direction[None]
+    Xp = X.copy()
+    stiff = np.linspace(1.5, 0.15, M)
+    for _ in range(iters):
+        vel = (X - Xp) * 0.7
+        Xp = X.copy()
+        X[1:] += vel[1:] + np.array([0, -0.0006, 0]) * (seg / 0.01)
+        for i in range(1, M):
+            prev = direction if i == 1 else nrm(X[i - 1] - X[i - 2])
+            X[i] = X[i - 1] + nrm(nrm(X[i] - X[i - 1]) + stiff[i] * prev) * seg
+        sd, g = sdf(X[1:])
+        low = sd < 4 * MM
+        X[1:][low] += g[low] * (4 * MM - sd[low])[:, None]
+    for i in range(1, M):
+        X[i] = X[i - 1] + nrm(X[i] - X[i - 1]) * seg
+    return X
+
+
+def transport_frames(X):
+    """unit tangents and a frame (a, b) carried along a polyline by parallel transport"""
+    t = np.gradient(X, axis=0)
+    t /= np.linalg.norm(t, axis=1, keepdims=True)
+    a = np.zeros_like(X)
+    ref = np.array([1.0, 0, 0]) if abs(t[0, 0]) < 0.9 else np.array([0, 1.0, 0])
+    a[0] = nrm(ref - (ref @ t[0]) * t[0])
+    for i in range(1, len(X)):
+        v = a[i - 1] - (a[i - 1] @ t[i]) * t[i]
+        a[i] = nrm(v)
+    return t, a, np.cross(t, a)
+
+
+EARS = [np.array([0.075, 0.500, 0.035]), np.array([-0.075, 0.500, 0.035])]
+
+
+def grow_tied(V, T, N, spec, layout, points, sdfs, verbose=True):
+    """
+    Tied hair (ponytail, bun): each guide runs over the scalp to the tie, then into the tail. The
+    scalp paths follow the tangent toward the tie at a small height; at the tie the guides sit in
+    a bundle whose disk keeps the angle at which they arrive; the tail follows one hanging (or
+    coiled) centre line with the bundle's offsets, widening toward the end. The pivot of each
+    guide is its arc length at the tie.
+    """
+    t0 = time.time()
+    g = spec["groom"]
+    tie = g["tie"]
+    rng = np.random.default_rng(g.get("seed", 11))
+    sdf = sdfs["head"]
+    body = SDFUnion(sdfs["full"], sdfs["body"]) if "body" in sdfs else sdf
+    Tp, nT = tie_point(sdf, tie)
+    roots = layout.guide_position
+    G = len(roots)
+    # the tie's frame: its normal, and the direction down the head from it
+    e1 = nrm(
+        np.cross(nT, [0, 1.0, 0]) if abs(nT[1]) < 0.95 else np.cross(nT, [1.0, 0, 0])
+    )
+    e2 = np.cross(nT, e1)
+    height = (1.0 + 3.0 * rng.random(G)) * MM
+    step = 2.0 * MM
+    capture = tie["radius_mm"] * MM
+    # every guide walks over the scalp toward the tie at once: the tangent of the direction to the tie
+    x = roots.copy()
+    walk = [x.copy()]
+    active = np.ones(G, bool)
+    ends = np.zeros(G, int)
+    for it in range(400):
+        dT = Tp - x
+        dist = np.linalg.norm(dT, axis=1)
+        arrived = active & (dist < capture)
+        ends[arrived] = it
+        active &= ~arrived
+        if not active.any():
+            break
+        sd, gr = sdf(x)
+        # toward the tie, over the top of the ears
+        over = np.zeros(len(x))
+        for ear in EARS:
+            de = np.linalg.norm(x - ear, axis=1)
+            below = smoothstep(ear[1] + 0.03, ear[1] + 0.01, x[:, 1])
+            over = np.maximum(over, smoothstep(0.045, 0.025, de) * below)
+        dT = nrm(dT) + 1.5 * over[:, None] * np.array([0, 1.0, 0])
+        tng = dT - (dT * gr).sum(1, keepdims=True) * gr
+        nx = x + nrm(tng) * step
+        sd, gr = sdf(nx)
+        near = smoothstep(4 * capture, capture, np.linalg.norm(Tp - nx, axis=1))
+        h = height * (1 - near) + tie["offset_mm"] * MM * near
+        nx = nx + gr * (h - sd)[:, None]
+        x = np.where(active[:, None], nx, x)
+        walk.append(x.copy())
+    ends[active] = len(walk) - 1
+    walk = np.array(walk)  # (steps, G, 3)
+    flat = walk.reshape(-1, 3)
+    sd, gr = sdfs["full"](flat)
+    low = sd < 0.8 * MM
+    flat[low] += gr[low] * (0.8 * MM - sd[low])[:, None]
+    walk = flat.reshape(walk.shape)
+    paths, s_tie, disk = [], np.zeros(G), np.zeros((G, 3))
+    rad = tie["bundle_mm"] * MM * np.sqrt(rng.random(G))
+    for k in range(G):
+        P = walk[: ends[k] + 1, k]
+        # the place in the bundle: the angle of arrival, a random radius
+        arrive = P[-1] - Tp
+        ang = np.arctan2(arrive @ e2, arrive @ e1)
+        disk[k] = rad[k] * (np.cos(ang) * e1 + np.sin(ang) * e2)
+        P = np.concatenate([P, (Tp + disk[k])[None]])
+        paths.append(P)
+        s_tie[k] = np.linalg.norm(np.diff(P, axis=0), axis=1).sum()
+    # the tail's centre line
+    L_tail = tie["tail_mm"] * MM * g.get("longest", 1.0)
+    Mt = 48
+    if tie.get("bun"):
+        # a coil around the bun's centre, winding inward and outward from the head
+        r0, r1 = tie["bun_mm"][0] * MM, tie["bun_mm"][1] * MM
+        s_ = np.linspace(0, L_tail, Mt)
+        r = r0 + (r1 - r0) * s_ / L_tail
+        th = np.cumsum(np.r_[0, np.diff(s_) / np.maximum(r[:-1], 1e-3)])
+        centre = Tp + nT * (0.6 * r0)
+        lift = nT[None] * ((0.8 * r0) * np.sin(np.pi * s_ / L_tail))[:, None]
+        line = (
+            centre[None]
+            + (np.cos(th)[:, None] * e1 + np.sin(th)[:, None] * e2) * r[:, None]
+            + lift
+        )
+        line = np.concatenate([Tp[None], line[1:]])
+    else:
+        d0 = nrm(nT + np.array([0, -tie.get("droop", 0.8), 0]))
+        line = hang(body, Tp, d0, L_tail, Mt)
+    tng, a, b = transport_frames(line)
+    s_line = np.linspace(0, 1, Mt)
+    spread = 1.0 + (tie.get("spread", 1.6) - 1.0) * s_line
+    out = []
+    for k in range(G):
+        # the offset in the bundle, carried along the centre line and widening toward the end
+        u, v = disk[k] @ a[0], disk[k] @ b[0]
+        tail = line + (u * a + v * b) * spread[:, None]
+        tail = tail + rng.normal(0, 0.6 * MM, tail.shape) * s_line[:, None]
+        full = np.concatenate([paths[k], tail[1:]])
+        out.append(resample_uniform(full[None], points)[0][0])
+    pts = np.array(out)
+    if verbose:
+        print(f"groom {spec['name']}: {G} guides, {time.time() - t0:.0f} s")
+    return dict(
+        points=pts,
+        # the default cut: the scalp path and the default tail (the curve holds the longest tail)
+        length=s_tie + tie["tail_mm"] * MM,
+        group=np.zeros(G, np.uint8),
+        flick=np.zeros(G),
+        pivot=s_tie,
     )

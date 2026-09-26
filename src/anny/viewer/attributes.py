@@ -20,29 +20,6 @@ from anny.hair.chart import chart, hairline
 from . import bake, eyes, regions
 
 
-def hair_occlusion(V, N, strands):
-    """how much hair lies outward of each skin point"""
-    from scipy.ndimage import gaussian_filter
-
-    hp = strands.reshape(-1, 3)
-    lo = hp.min(0) - 0.02
-    h = 0.0015
-    dims = np.ceil((hp.max(0) + 0.02 - lo) / h).astype(int) + 1
-    gi = np.floor((hp - lo) / h).astype(int)
-    grid = np.zeros(dims, np.float32)
-    np.add.at(grid, (gi[:, 0], gi[:, 1], gi[:, 2]), 1.0)
-    grid = gaussian_filter(grid, 1.0)
-    acc = np.zeros(len(V))
-    for st in range(1, 12):
-        q = V + N * (st * h)
-        qi = np.floor((q - lo) / h).astype(int)
-        ok = np.all((qi >= 0) & (qi < dims), axis=1)
-        vv = np.zeros(len(V))
-        vv[ok] = grid[qi[ok, 0], qi[ok, 1], qi[ok, 2]]
-        acc += vv
-    return np.exp(-0.06 * acc)
-
-
 def eyeball_meshes(eye_centers, nlat=48, nlon=64):
     Pe, Te, _ = eyes.eyeball_mesh(nlat, nlon)
     out = {}
@@ -55,7 +32,11 @@ def eyeball_meshes(eye_centers, nlat=48, nlon=64):
 def skin_attributes(body, hair=None, nrays=48, verbose=True):
     """
     Attributes of the fine body (``anny.viewer.geometry.FineBody``); ``hair`` holds the
-    strands of the groom and the brows (legacy frame).
+    strands of the brows (legacy frame).
+
+    The head is baked without its hair: the scalp tint (``attrB.w``) and the occlusion by the
+    hair (``attrB.z``) come from the style that the page draws (``anny.hair.styles``), so
+    ``attrB.z`` is 1 and ``attrB.w`` is 0 here.
     """
     import time
 
@@ -89,7 +70,6 @@ def skin_attributes(body, hair=None, nrays=48, verbose=True):
     if hair is not None:
         from scipy.spatial import cKDTree
 
-        hocc = hair_occlusion(V, N, hair["P"])
         br = hair["brows"][:, 0, :]
         dd, _ = cKDTree(br).query(V, k=12, distance_upper_bound=0.004)
         w = np.where(np.isfinite(dd), np.exp(-((dd / 0.0015) ** 2)), 0).sum(1)
@@ -97,9 +77,7 @@ def skin_attributes(body, hair=None, nrays=48, verbose=True):
         cnt = np.array([len(x) for x in cKDTree(br).query_ball_point(V, 0.0016)])
         brow = np.clip(cnt / 6.0, 0, 1)
     centers = [body.eye_centers["l"], body.eye_centers["r"]]
-    alb, masks = regions.compute_albedo(
-        V, N, ao, centers, eyes.R_SCLERA, scalp=scalp * 0.9, brow=brow_pre
-    )
+    alb, masks = regions.compute_albedo(V, N, ao, centers, eyes.R_SCLERA, brow=brow_pre)
     J = regions.joint_positions()
     alb, bmask = regions.body_albedo(V, N, alb, J)
     alb, lm = regions.body_tone(V, N, alb, J)
@@ -116,6 +94,7 @@ def skin_attributes(body, hair=None, nrays=48, verbose=True):
             wet,
             regions.smoothstep(eyes.R_SCLERA + 0.0016, eyes.R_SCLERA + 0.0003, dist),
         )
+    zeros = np.zeros(len(V))
     earm = regions.ear_mask(V)
     pore = regions.pore_mask(V, masks["lip"], earm)
     # thickness for light through thin parts: rays that end in a closed cavity (mouth, eye
@@ -128,13 +107,12 @@ def skin_attributes(body, hair=None, nrays=48, verbose=True):
     ) * (V[:, 2] > 0.1)
     thick = np.maximum(thick, 0.03 * regions.smoothstep(0.25, 0.6, mouth))
     thick = bake.smooth_values(thick, E, len(V), 4)
-    zeros = np.zeros(len(V))
     attrs = dict(
         normal=N,
         nsmooth=Ns,
         albedo=alb,
         attrA=np.stack([ao, np.clip(curv / 1000.0, -1, 1), th * 1000.0, oil], 1),
-        attrB=np.stack([masks["lip"], np.clip(masks["red"], 0, 1), hocc, scalp], 1),
+        attrB=np.stack([masks["lip"], np.clip(masks["red"], 0, 1), hocc, zeros], 1),
         attrC=np.stack([wet, brow, earm, zeros], 1),
         attrD=np.stack([thick, oil, vein, facew], 1),
         attrE=np.stack([fuzz, pore, zeros, zeros], 1),
