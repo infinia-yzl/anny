@@ -84,7 +84,7 @@ export class Hair {
   style: HairStyle | null = null;
   params: HairParams = { ...DEFAULT_PARAMS };
   count = 0;
-  lod = 1;   // the share of the strands drawn (phones draw half, with wider strands)
+  lod = 1;   // the share of the strands drawn: fewer, wider strands where the head is small on screen (main.ts)
   frames = floatTexture(1); local = floatTexture(1); tipLocal = floatTexture(1); info = floatTexture(1);
   mat: { tex: THREE.DataTexture; data: Float32Array }; motion = floatTexture(1);
   rootRest: { tex: THREE.DataTexture; data: Float32Array };
@@ -243,11 +243,26 @@ export class Hair {
     u.uLength.value = p.length; u.uCurl.value = p.curl; u.uVolume.value = p.volume; u.uFadeShift.value = p.fade;
   }
 
-  private applyCount() {
+  // the strands of the style at its density, before the level of detail
+  fullCount(): number {
     const d = this.style ? (this.style.spec.render.density ?? 1) : 1;
-    this.count = Math.max(0, Math.min(this.layout.R, Math.round(this.layout.R * d * this.params.density * this.lod)));
+    return Math.max(0, Math.min(this.layout.R, Math.round(this.layout.R * d * this.params.density)));
+  }
+
+  private applyCount() {
+    this.count = Math.min(this.fullCount(), Math.round(this.fullCount() * this.lod));
     this.B.mat.uniforms.uCount.value = this.count;
     if (this.geometry) this.geometry.instanceCount = this.count;
+  }
+
+  // the level of detail: a prefix of the render roots (their progressive order keeps any prefix even); pass B runs
+  // again only for more strands
+  setLod(lod: number) {
+    if (lod === this.lod) return;
+    const before = this.count;
+    this.lod = lod;
+    this.applyCount();
+    if (this.count > before) this.dirtyB = true;
   }
 
   setParams(p: Partial<HairParams>) {
@@ -263,7 +278,8 @@ export class Hair {
 
   private rebuildVolume() {
     const s = this.style!;
-    const v = this.volume = densityVolume(this.meta, this.layout, s, this.params, this.count);
+    // the volume of all the strands of the style: occlusion and tint stay the same at every level of detail
+    const v = this.volume = densityVolume(this.meta, this.layout, s, this.params, this.fullCount());
     this.occ.dispose();
     const [nx, ny, nz] = v.dims;
     this.occ = new THREE.Data3DTexture(v.data, nx, ny, nz);
@@ -412,6 +428,9 @@ export class Hair {
     if (!this.dirtyA && !this.dirtyB) return false;
     const prev = renderer.getRenderTarget();
     if (this.dirtyA) { renderer.setRenderTarget(this.rtA); renderer.render(this.A.scene, this.cam); }
+    // pass B over the rows of the drawn strands alone
+    const n = Math.max(1, rows(this.count * this.uP.value));
+    this.rtB.viewport.set(0, 0, TEX_W, n); this.rtB.scissor.set(0, 0, TEX_W, n); this.rtB.scissorTest = true;
     renderer.setRenderTarget(this.rtB); renderer.render(this.B.scene, this.cam);
     renderer.setRenderTarget(prev);
     this.dirtyA = this.dirtyB = false;
@@ -472,6 +491,7 @@ export class Hair {
     const bytes = rt(this.rtA) + rt(this.rtB) + tex(this.frames.tex) + tex(this.local.tex) + tex(this.tipLocal.tex) + tex(this.info.tex)
       + tex(this.mat.tex) + tex(this.motion.tex) + tex(this.simInfo.tex) + tex(this.rootRest.tex) + tex(this.rootData) + v + geo;
     return { gpu_bytes: bytes, strands: this.count, points: this.uP.value, guides: this.layout.G, style: this.style?.spec.name,
+      lod: this.lod, vertices: this.count * this.uP.value * 2,
       available: this.style ? Array.from(available(this.style)).reduce((a, b) => a + b, 0) / this.layout.G : 0,
       physics: this.physics, asleep: this.asleep, sim: this.simStats };
   }

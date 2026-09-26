@@ -709,6 +709,35 @@ function makeHairMesh(geo, p, defines, strands) {
 }
 // the strands of anny's hair (hair/gpu.ts): instanced ribbons that read the points of pass B
 let HAIR: Hair | null = null;
+let HAIR_MESH: any = null;
+// the level of detail of the hair: the share of the strands drawn follows the area of the head on screen (all of
+// them once the head is 600 rendered pixels tall), in steps of 1/sqrt(2) that change beyond a 10% margin; phones draw
+// half. Fewer strands are wider by the root of the inverse share, so the hair keeps its coverage.
+const LOD = { full: 600, steps: [1, 0.71, 0.5, 0.35, 0.25], i: 0, base: isSmall ? 0.5 : 1 };
+const HAIR_SHADOW_SHARE = 0.5;
+function applyHairWidth() {
+  if (!HAIR || !HAIR_MESH) return;
+  const u = HAIR_MESH.userData, k = 1 / Math.sqrt(HAIR.lod), kd = k / Math.sqrt(HAIR_SHADOW_SHARE);
+  u.hu.uWidth.value = u.width * k; u.hu.uTipWidth.value = u.width * u.tip * k;
+  const du = u.depthMat.uniforms;
+  du.uWidth.value = u.width * kd; du.uTipWidth.value = u.width * u.tip * kd;
+}
+function updateHairLod(h: number) {
+  if (!HAIR || !RIG.ready) return;
+  const d = Math.max(1e-3, camera.position.distanceTo(HAIR.uHeadC.value));
+  const px = 0.24 * HEADMAP.k / (2 * d * Math.tan(camera.fov * DEG / 2)) * h;
+  const want = Math.min(1, (px / LOD.full) ** 2), S = LOD.steps;
+  const up = LOD.i > 0 ? S[LOD.i - 1] : Infinity;
+  if (want >= up * 1.1 || want < S[LOD.i] / 1.1) {
+    LOD.i = S.findIndex((v) => v <= want);
+    if (LOD.i < 0) LOD.i = S.length - 1;
+  }
+  const lod = LOD.base * S[LOD.i];
+  if (lod === HAIR.lod) return;
+  HAIR.setLod(lod);
+  applyHairWidth();
+  shadowsDirty = true;
+}
 function makeStrandMesh(hair: Hair, p, defines) {
   const hu = Object.assign({}, U, {
     uPoints: hair.uPoints, uP: hair.uP,
@@ -718,10 +747,13 @@ function makeStrandMesh(hair: Hair, p, defines) {
   });
   const opts = { vertexShader: STRAND_VS, fragmentShader: toMRT(HAIR_FS), side: THREE.DoubleSide, glslVersion: THREE.GLSL3, blending: THREE.NoBlending };
   const m = new THREE.ShaderMaterial(Object.assign({ uniforms: hu, defines }, opts));
-  const dm = new THREE.ShaderMaterial(Object.assign({ uniforms: Object.assign({}, hu, { uViewportH: { value: SHADOW_SIZE / 2 }, uMinPix: { value: 1.2 } }),
+  // the shadow of the hair draws a share of the strands (HAIR_SHADOW_SHARE), wider by the root of its inverse
+  const dm = new THREE.ShaderMaterial(Object.assign({ uniforms: Object.assign({}, hu, { uViewportH: { value: SHADOW_SIZE / 2 }, uMinPix: { value: 1.2 },
+    uWidth: { value: p.width }, uTipWidth: { value: p.width * p.tip } }),
     defines: Object.assign({ HAIR_DEPTH: '' }, defines) }, opts));
   const mesh = new THREE.Mesh(hair.geometry, m);
   mesh.frustumCulled = false; mesh.userData.depthMat = dm; mesh.userData.hu = hu;
+  mesh.userData.width = p.width; mesh.userData.tip = p.tip;
   mesh.userData.center = new THREE.Vector3().copy(hair.uHeadC.value);
   hair.onGeometry = (g) => { mesh.geometry = g; };
   scene.add(mesh); hairObjs.push(mesh);
@@ -1667,7 +1699,7 @@ async function init() {
   await nextFrame();
   // the hair: the scalp layout and its styles (hair/gpu.ts); it binds first, since its guide roots set the scalp size
   HAIR = new Hair(meta.hair, (name) => B[name].data, BODY.anny, U.uHeadInv);
-  HAIR.lod = isSmall ? 0.5 : 1;
+  HAIR.lod = LOD.base;
   HAIR.setStyle(meta.hair.styles.some((x) => x.name === 'medium_tousled') ? 'medium_tousled' : meta.hair.styles[0].name);
   // the physics runs unless the page takes still pictures (tests and reviews) or the address turns it off
   HAIR.setPhysics(qs.has('physics') ? qs.get('physics') !== 'off' : !SHOT);
@@ -1678,7 +1710,8 @@ async function init() {
   U.uHairOn.value = 1;
   setProgress(0.75, 'Placing strands');
   await nextFrame();
-  const hairMesh = makeStrandMesh(HAIR, { width: 0.00012 / Math.sqrt(HAIR.lod), tip: 0.45, color: [0.020, 0.0125, 0.0082], rough: 0.38, diff: 1.3, spec: 0.38 }, ENV_DEFINES);
+  const hairMesh = HAIR_MESH = makeStrandMesh(HAIR, { width: 0.00012, tip: 0.45, color: [0.020, 0.0125, 0.0082], rough: 0.38, diff: 1.3, spec: 0.38 }, ENV_DEFINES);
+  applyHairWidth();
   const browB = strandBinding(B, 'brows', decodeStrands(B, 'brows'));
   const browMesh = makeHairMesh(buildRibbons(browB.local, null, 5), { width: 0.00010, tip: 0.3, color: [0.016, 0.009, 0.006], rough: 0.62, spec: 0.15, diff: 1.3, center: [0, 0.515, 0.06] }, ENV_DEFINES, browB.tex);
   const lashB = strandBinding(B, 'lashes', decodeStrands(B, 'lashes'));
@@ -1721,7 +1754,10 @@ function renderShadows() {
   renderer.setRenderTarget(bodyShadowRT); renderer.clear(); renderer.render(scene, bodyShadowCam);
   opaque.forEach((o, i) => { o.material = saved[i]; o.visible = false; });
   hairObjs.forEach((o, i) => { o.visible = hv[i]; o.userData.mainMat = o.material; o.material = o.userData.depthMat; });
+  const hg = HAIR ? HAIR.geometry : null, drawn = hg ? hg.instanceCount : 0;
+  if (hg) hg.instanceCount = Math.ceil(drawn * HAIR_SHADOW_SHARE);
   renderer.setRenderTarget(hairShadowRT); renderer.clear(); renderer.render(scene, shadowCam);
+  if (hg) hg.instanceCount = drawn;
   hairObjs.forEach(o => { o.material = o.userData.mainMat; });
   opaque.forEach((o, i) => { o.visible = ov[i]; });
   renderer.setRenderTarget(null);
@@ -1744,9 +1780,30 @@ function allocRTs() {
     sceneRT.textures[1].minFilter = sceneRT.textures[1].magFilter = THREE.LinearFilter;
     sssRT = new THREE.WebGLRenderTarget(w, h, Object.assign({}, rtOpts, { depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter }));
   }
-  accRT = [0, 1].map(() => new THREE.WebGLRenderTarget(w, h, Object.assign({}, rtOpts, { depthBuffer: false })));
+  // linear filtering: the display pass scales up the smaller frames of the dynamic resolution
+  accRT = [0, 1].map(() => new THREE.WebGLRenderTarget(w, h, Object.assign({}, rtOpts, { depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter })));
   BG.uRes.value.set(w, h);
   for (const o of hairObjs) o.userData.hu.uViewportH.value = h;
+  DYN.last = 0;
+}
+// dynamic resolution: while the figure or the camera moves, the scene, subsurface and accumulation passes draw into
+// a corner of their targets at the scale s, which a controller lowers when frames come slower than 48 per second
+// and raises after two seconds at the display's rate; once everything rests, the page refines at full resolution
+const DYN = { steps: [1, 0.85, 0.7, 0.6, 0.5], k: 0, last: 0, ema: 1 / 60, slow: 0, fast: 0, lastReset: -1e9, resetFrame: -10,
+  frame: 0, rendered: false, on: !SHOT && qs.get('dyn') !== 'off' };
+// moving: the accumulation started again in this frame or one of the two before it (or within 100 ms, for short gaps
+// in a drag)
+function moving() { return DYN.frame - DYN.resetFrame <= 2 || performance.now() - DYN.lastReset < 100; }
+function tuneScale(dt: number) {
+  if (!DYN.on || !moving() || !DYN.rendered) { DYN.slow = DYN.fast = 0; return; }
+  DYN.ema += (dt - DYN.ema) * 0.15;
+  if (DYN.ema > 1 / 48) { DYN.slow += dt; DYN.fast = 0; } else if (DYN.ema < 1 / 55) { DYN.fast += dt; DYN.slow = 0; } else { DYN.slow = DYN.fast = 0; }
+  if (DYN.slow > 0.4 && DYN.k < DYN.steps.length - 1) { DYN.k++; DYN.slow = 0; }
+  if (DYN.fast > 2.0 && DYN.k > 0) { DYN.k--; DYN.fast = 0; }
+}
+function renderScale() { return DYN.on && moving() ? DYN.steps[DYN.k] : 1; }
+function setRegion(rt: any, w: number, h: number) {
+  rt.viewport.set(0, 0, w, h); rt.scissor.set(0, 0, w, h); rt.scissorTest = w < rt.width || h < rt.height;
 }
 const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const FSQ_VS = 'varying vec2 vUv; void main(){ vUv = position.xy*0.5+0.5; gl_Position = vec4(position.xy, 0.0, 1.0); }';
@@ -1781,10 +1838,11 @@ const sssU = {
   uWidth: { value: 0.001 / 1.124 * parseFloat(qs.get('sssw') || '1.15') },
   uNear: { value: camera.near }, uFar: { value: camera.far }, uFrameS: { value: 0 },
   uSSSRaw: { value: qs.get('dbg') === 'raw' ? 1 : 0 },
+  uUvScale: { value: new THREE.Vector2(1, 1) },   // the corner of the targets that the dynamic resolution draws
 };
 const sssMat = new THREE.ShaderMaterial({
   uniforms: sssU, vertexShader: FSQ_VS,
-  fragmentShader: SSS_GLSL(SSS_N) + '\nuniform sampler2D tSSS; varying vec2 vUv; void main(){ gl_FragColor = sssBlur(tSSS, vUv, vec2(1.0, 0.0)); }',
+  fragmentShader: SSS_GLSL(SSS_N) + '\nuniform sampler2D tSSS; uniform vec2 uUvScale; varying vec2 vUv; void main(){ gl_FragColor = sssBlur(tSSS, vUv * uUvScale, vec2(1.0, 0.0)); }',
   depthTest: false, depthWrite: false, toneMapped: false, blending: THREE.NoBlending,
 });
 allocRTs();
@@ -1793,23 +1851,27 @@ const accMat = new THREE.ShaderMaterial({
   defines: SSS_ON ? { SSS: '' } : {},
   vertexShader: FSQ_VS,
   fragmentShader: SSS_GLSL(SSS_N) + `
-uniform sampler2D tNew; uniform sampler2D tAcc; uniform float uW; uniform sampler2D tSSSH; varying vec2 vUv;
+uniform sampler2D tNew; uniform sampler2D tAcc; uniform float uW; uniform sampler2D tSSSH; uniform vec2 uUvScale; varying vec2 vUv;
 void main(){
-  vec4 c = texture2D(tNew, vUv);
+  vec2 uv = vUv * uUvScale;
+  vec4 c = texture2D(tNew, uv);
 #ifdef SSS
-  c.rgb += sssBlur(tSSSH, vUv, vec2(0.0, 1.0)).rgb;
+  c.rgb += sssBlur(tSSSH, uv, vec2(0.0, 1.0)).rgb;
 #endif
-  gl_FragColor = mix(texture2D(tAcc, vUv), c, uW);
+  gl_FragColor = mix(texture2D(tAcc, uv), c, uW);
 }`,
   depthTest: false, depthWrite: false, toneMapped: false, blending: THREE.NoBlending,
 });
 const dispMat = new THREE.ShaderMaterial({
-  uniforms: { tAcc: { value: null }, uSeed: { value: 0 }, uSat: { value: parseFloat(qs.get('sat') || '1.15') }, uContrast: { value: parseFloat(qs.get('con') || '1.05') }, uVignette: { value: 0.22 } },
+  uniforms: { tAcc: { value: null }, uSeed: { value: 0 }, uSat: { value: parseFloat(qs.get('sat') || '1.15') }, uContrast: { value: parseFloat(qs.get('con') || '1.05') }, uVignette: { value: 0.22 },
+    uUvScale: sssU.uUvScale, uUvMax: { value: new THREE.Vector2(1, 1) } },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = position.xy*0.5+0.5; gl_Position = vec4(position.xy, 0.0, 1.0); }',
-  fragmentShader: `uniform sampler2D tAcc; uniform float uSeed; uniform float uSat; uniform float uContrast; uniform float uVignette; varying vec2 vUv;
+  fragmentShader: `uniform sampler2D tAcc; uniform float uSeed; uniform float uSat; uniform float uContrast; uniform float uVignette; uniform vec2 uUvScale;
+    uniform vec2 uUvMax; varying vec2 vUv;
     float h12(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233)) + uSeed) * 43758.5453); }
     void main(){
-      vec3 rgb = texture2D(tAcc, vUv).rgb;
+      // the corner that the frame fills, up to the centre of its last texel (beyond it lies an older frame)
+      vec3 rgb = texture2D(tAcc, min(vUv * uUvScale, uUvMax)).rgb;
       vec2 q = vUv - 0.5; rgb *= 1.0 - uVignette * dot(q, q) * 1.6;
       rgb = toneMapping(rgb);
       float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
@@ -1825,9 +1887,22 @@ const quadMesh = new THREE.Mesh(triGeo, accMat); quadMesh.frustumCulled = false;
 const quadScene = new THREE.Scene(); quadScene.add(quadMesh);
 function halton(i, b) { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; }
 function renderPass() {
+  const t0 = performance.now();
+  // a change of scale starts the accumulation again (without counting as a move)
+  const sc = renderScale();
+  if (sc !== DYN.last) { accCount = 0; DYN.last = sc; }
+  const W = sceneRT.width, H = sceneRT.height;
+  const w = Math.max(1, Math.round(W * sc)), h = Math.max(1, Math.round(H * sc));
+  sssU.uUvScale.value.set(w / W, h / H);
+  dispMat.uniforms.uUvMax.value.set((w - 0.5) / W, (h - 0.5) / H);
+  BG.uRes.value.set(w, h);
+  for (const o of hairObjs) o.userData.hu.uViewportH.value = h;
+  if (accCount === 0) updateHairLod(h);
   if (HAIR && HAIR.update(renderer)) shadowsDirty = true;
   if (shadowsDirty) renderShadows();
-  const w = sceneRT.width, h = sceneRT.height;
+  setRegion(sceneRT, w, h);
+  if (SSS_ON) setRegion(sssRT, w, h);
+  accRT.forEach((r) => setRegion(r, w, h));
   const jx = accCount === 0 ? 0 : halton(accCount, 2) - 0.5;
   const jy = accCount === 0 ? 0 : halton(accCount, 3) - 0.5;
   camera.setViewOffset(w, h, jx, jy, w, h);
@@ -1838,7 +1913,7 @@ function renderPass() {
   if (SSS_ON) {
     sssU.tSSS.value = sceneRT.textures[1]; sssU.tDepth.value = sceneRT.depthTexture;
     sssU.uProj.value = h / (2 * Math.tan(camera.fov * DEG / 2));
-    sssU.uTexel.value.set(1 / w, 1 / h);
+    sssU.uTexel.value.set(1 / W, 1 / H);
     sssU.uFrameS.value = accCount;
     quadMesh.material = sssMat;
     renderer.setRenderTarget(sssRT); renderer.render(quadScene, quadCam);
@@ -1853,9 +1928,11 @@ function renderPass() {
   quadMesh.material = dispMat;
   renderer.setRenderTarget(null); renderer.render(quadScene, quadCam);
   accCount++;
+  DYN.rendered = true;
+  PERF.passes++; PERF.passMs += performance.now() - t0; PERF.w = w; PERF.h = h;
   updateStatus();
 }
-function resetAccum() { accCount = 0; }
+function resetAccum() { accCount = 0; DYN.lastReset = performance.now(); DYN.resetFrame = DYN.frame; }
 controls.addEventListener('change', resetAccum);
 controls.addEventListener('start', () => { document.body.classList.add('interacted'); });
 let lastFrameT = performance.now();
@@ -1864,6 +1941,9 @@ const _hc = new THREE.Vector3();
 function animate() {
   requestAnimationFrame(animate);
   const now = performance.now(), dt = Math.min(0.1, (now - lastFrameT) / 1000); lastFrameT = now;
+  DYN.frame++;
+  tuneScale(dt);
+  DYN.rendered = false;
   if (tickMotion(dt) && currentFrame === 'face' && !tween) {
     // the close view of the face keeps the head in frame while the figure moves
     _hc.set(0, 0.495, 0.035).applyMatrix4(_headFull);
@@ -1884,6 +1964,8 @@ function animate() {
   // the hair's physics: it sleeps once the hair rests, so the picture can refine
   if (HAIR && hairWanted && !hairClock && HAIR.stepPhysics(dt)) { shadowsDirty = true; resetAccum(); }
   if (accCount < MAX_ACC) renderPass();
+  if (DYN.rendered) { PERF.frames++; PERF.jsMs += performance.now() - now; }
+  updatePerf(now);
 }
 window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
@@ -1903,6 +1985,28 @@ function showError(msg) {
   const l = $('loadlabel'); if (l) l.textContent = msg;
   document.body.classList.add('failed');
 }
+// the frame readout (the status button, or ?stats=1): frames per second while the page draws, the JavaScript time of
+// a frame, the render scale and the work of the hair
+const PERF = { frames: 0, passes: 0, jsMs: 0, passMs: 0, t0: performance.now(), w: 0, h: 0, fps: 0, js: 0, idle: true };
+function frameStats() {
+  const st = HAIR ? HAIR.stats() : null;
+  return { fps: +PERF.fps.toFixed(1), js_ms: +PERF.js.toFixed(2), idle: PERF.idle, scale: DYN.last || 1, width: PERF.w, height: PERF.h,
+    hair: st ? { strands: st.strands, vertices: st.vertices, lod: st.lod, physics: st.physics ? (st.asleep ? 'asleep' : +st.sim.ms.toFixed(2)) : 'off' } : null };
+}
+function updatePerf(now: number) {
+  if (now - PERF.t0 < 500) return;
+  const sec = (now - PERF.t0) / 1000;
+  PERF.idle = PERF.frames === 0;
+  PERF.fps = PERF.frames / sec; PERF.js = PERF.frames ? PERF.jsMs / PERF.frames : 0;
+  PERF.frames = 0; PERF.passes = 0; PERF.jsMs = 0; PERF.passMs = 0; PERF.t0 = now;
+  const el = $('perf');
+  if (!el || el.hidden) return;
+  const f = frameStats(), h = f.hair;
+  el.textContent = (f.idle ? 'idle (refined)' : `${f.fps.toFixed(0)} fps   ${f.js_ms.toFixed(1)} ms JS`)
+    + `\nscale ${Math.round(f.scale * 100)}%   ${f.width} x ${f.height}`
+    + (h ? `\nhair ${h.strands.toLocaleString()} strands, lod ${Math.round(h.lod * 100)}%\n${(h.vertices / 1e6).toFixed(2)} M vertices per draw`
+      + `\nphysics ${typeof h.physics === 'number' ? h.physics.toFixed(2) + ' ms' : h.physics}` : '');
+}
 let lastStatus = '';
 function updateStatus() {
   const el = $('status'); if (!el) return;
@@ -1920,6 +2024,15 @@ function wireUI() {
     document.querySelectorAll('[data-preset]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     applyPreset(b.dataset.preset);
   }));
+  const statusBtn = $('status'), perfEl = $('perf');
+  const showPerf = (on: boolean) => {
+    if (!statusBtn || !perfEl) return;
+    perfEl.hidden = !on; statusBtn.setAttribute('aria-expanded', String(on));
+    statusBtn.title = on ? 'Hide the frame rate' : 'Show the frame rate';
+    if (on) { perfEl.textContent = 'measuring'; PERF.t0 = performance.now() - 500; }
+  };
+  statusBtn?.addEventListener('click', () => showPerf(perfEl ? perfEl.hidden : false));
+  if (qs.get('stats') === '1') showPerf(true);
   const hairBtn = $('toggle-hair');
   hairBtn?.addEventListener('click', () => {
     const on = hairBtn.getAttribute('aria-pressed') !== 'true';
@@ -2436,6 +2549,7 @@ window.hairStats = () => HAIR ? HAIR.stats() : null;
 window.hairPoints = (n) => { HAIR.update(renderer); return Array.from(HAIR.readPoints(renderer, n)); };
 window.hairRest = (n) => HAIR.readRest(renderer, n);
 window.hairGuides = () => HAIR.readGuides(renderer);
+window.frameStats = frameStats;
 window.stepHair = (dt = 1 / 60) => { hairClock = true; if (HAIR.stepPhysics(dt)) { shadowsDirty = true; resetAccum(); } return HAIR.stats(); };
 window.setHairPhysics = (on) => { HAIR.setPhysics(!!on); const b = $('toggle-physics'); if (b) b.setAttribute('aria-pressed', String(!!on)); return HAIR.physics; };
 window.setPreset = (n) => { applyPreset(n); return true; };

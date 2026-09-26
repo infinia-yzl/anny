@@ -9,7 +9,10 @@ when Playwright or the built page is missing.
 - pass A: the guides of a style on anny's default body match the decoded guides of the data;
 - pass B: from the page's own guides and render roots, the reference builds the same strands;
 - the physics: while the head nods, pass A adds the motion of the simulated guides as
-  anny.hair.styles.sim_offsets blends it, and the solver sleeps once the head rests.
+  anny.hair.styles.sim_offsets blends it, and the solver sleeps once the head rests;
+- the level of detail: the Body view draws fewer strands than the Face view, and the density
+  volume stays the same;
+- a frame of a clip uploads the vertices that the correctives move, in one small block.
 """
 
 import pathlib
@@ -19,8 +22,15 @@ import numpy as np
 
 from anny.hair import styles as H
 from anny.hair.layout import load_layout
+from anny.viewer.benchmark import WRAP
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
+# the level of detail of the page, and the sum of the bytes of its density volume
+LOD = """() => {
+  const s = window.hairStats();
+  return { lod: s.lod, strands: s.strands, full: __HAIR.fullCount(),
+    volume: __HAIR.volume.data.reduce((a, b) => a + b, 0) };
+}"""
 PAGE = REPO / "viewer" / "dist" / "anny_viewer.html"
 CHROMIUM = pathlib.Path("/opt/pw-browsers/chromium")
 N = 3000
@@ -63,7 +73,9 @@ class TestHairPage(unittest.TestCase):
         with sync_playwright() as p:
             kw = dict(executable_path=str(CHROMIUM)) if CHROMIUM.exists() else {}
             browser = p.chromium.launch(args=args, **kw)
-            tab = browser.new_page(viewport=dict(width=320, height=320))
+            ctx = browser.new_context(viewport=dict(width=320, height=320))
+            ctx.add_init_script(WRAP)
+            tab = ctx.new_page()
             cls.errors = []
 
             def shader_errors(m):
@@ -96,6 +108,22 @@ class TestHairPage(unittest.TestCase):
             cls.after = [
                 tab.evaluate("() => window.stepHair(1 / 60)") for _ in range(240)
             ]
+            # at a desktop size, where the head of the Face view is several hundred pixels tall
+            tab.set_viewport_size(dict(width=900, height=900))
+            cls.lod = {}
+            for view in ("body", "face"):
+                tab.evaluate(f"() => window.setFrame('{view}')")
+                cls.lod[view] = tab.evaluate(LOD)
+            # the uploads of a frame of the run clip
+            tab.evaluate("() => window.setMotion('run', 0.1, true)")
+            tab.evaluate("() => window.setFrame('face')")
+            tab.evaluate(
+                "() => { window.setMotion('run', 0.2, true); __gl.bytes = {}; }"
+            )
+            tab.evaluate("() => window.setFrame('face')")
+            cls.upload = tab.evaluate(
+                "() => (__gl.bytes.bufferSubData || 0) + (__gl.bytes.bufferData || 0)"
+            )
             browser.close()
         cls.layout = load_layout()
         cls.style = H.load_style(cls.style_name, cls.layout)
@@ -156,6 +184,20 @@ class TestHairPage(unittest.TestCase):
         ref = H.sim_offsets(self.layout, style, motion)
         self.assertGreater(np.abs(motion).max(), 0.005)
         self.assertLess(np.abs((on - off) - ref).max(), 2e-5)
+
+    def test_level_of_detail(self):
+        body, face = self.lod["body"], self.lod["face"]
+        self.assertLess(body["lod"], face["lod"])
+        for v in (body, face):
+            self.assertEqual(v["strands"], round(v["full"] * v["lod"]))
+        self.assertEqual(body["volume"], face["volume"])
+        # the pass B test reads the first N strands of the Body view
+        self.assertGreaterEqual(body["strands"], N)
+
+    def test_clip_uploads_one_small_block(self):
+        # the correctives move 54,244 vertices: position, normal and smooth normal of 12 bytes each
+        self.assertGreater(self.upload, 0)
+        self.assertLess(self.upload, 2.5e6)
 
     def test_physics_sleeps(self):
         asleep = [s["asleep"] for s in self.after]

@@ -79,6 +79,16 @@
     box-shadow: 0 0 0 3px rgba(201, 164, 106, 0.18);
   }
   .status[data-done="1"]::before { background: #7fae84; box-shadow: 0 0 0 3px rgba(127, 174, 132, 0.18); }
+  /* the status is also the button of the frame readout */
+  button.status { background: none; border: 0; padding: 4px 6px; margin: -4px -6px; font: inherit; font-size: 12px; cursor: pointer; border-radius: 8px; }
+  button.status:hover, button.status[aria-expanded="true"] { color: var(--text); }
+  button.status:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .perf {
+    position: fixed; right: 24px; bottom: calc(env(safe-area-inset-bottom, 0px) + 58px); margin: 0; padding: 10px 12px;
+    font: 11.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums;
+    color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    white-space: pre; pointer-events: none; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  }
 
   .hint {
     position: fixed; left: 50%; transform: translateX(-50%); margin: 0;
@@ -234,6 +244,7 @@
     .sep { display: none; }
     .bar button { padding: 9px 10px; font-size: 12.5px; }
     .status { right: 16px; top: calc(env(safe-area-inset-top, 0px) + 20px); bottom: auto; }
+    .perf { right: 16px; top: calc(env(safe-area-inset-top, 0px) + 48px); bottom: auto; }
     .hint { bottom: calc(env(safe-area-inset-bottom, 0px) + var(--bar-h, 96px) + 22px); }
   }
   @media (prefers-reduced-motion: reduce) {
@@ -247,7 +258,7 @@
 <header class="title">
   <p class="eyebrow">Anny, the human body model</p>
   <h1>Anny Viewer</h1>
-  <p class="caption">anny's body with medium tousled hair. The Character panel holds anny's phenotype sliders, and your browser renders the figure live with about 56,000 hair strands.</p>
+  <p class="caption">anny's body with medium tousled hair. The Character panel holds anny's phenotype sliders and 25 hairstyles, and your browser renders the figure live with up to 64,000 hair strands.</p>
 </header>
 
 <nav class="bar" aria-label="Viewer controls">
@@ -369,7 +380,8 @@
 </aside>
 
 <p class="hint">Drag to turn the figure. Scroll or pinch toward any point to move closer.</p>
-<p id="status" class="status" aria-live="polite">Refining</p>
+<button type="button" id="status" class="status" aria-live="polite" aria-expanded="false" aria-controls="perf" title="Show the frame rate">Refining</button>
+<p id="perf" class="perf" hidden></p>
 
 <div class="loader" aria-live="polite">
   <div class="loadbox">

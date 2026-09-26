@@ -53,6 +53,7 @@ uv run python -m anny.hair.authoring.review                 # review.png in ANNY
 uv sync --extra viewer                # scipy, tetgen, embreex for the build
 uv run python -m anny.viewer build    # data (cached under ANNY_CACHE_DIR/viewer) and the page viewer/dist/anny_viewer.html
 cd viewer && npx tsc --noEmit         # type-check the page
+uv run --with playwright python -m anny.viewer.benchmark   # uploads, draws and vertices of a moving frame
 ```
 
 ## Architecture
@@ -153,7 +154,11 @@ The hair lives in `src/hair/`: `data.ts` decodes the scalp layout and the styles
 `glsl.ts` holds pass A (the guides follow the body, the pose and the physics) and pass B (the render strands, into a
 float texture that the ribbons read), `gpu.ts` holds the `Hair` class, `sim.ts` the solver and `colliders.ts` its
 capsules. Each piece of data lives at the level where it changes (layout, style, body, pose), and every style control is
-a uniform or an instance count. `test/test_hair_parity.py`, `test/test_hair_page.py` and `test/test_hair_dynamics.py`
+a uniform or an instance count. `Hair.setLod` draws a prefix of the render roots; `main.ts` sets it from the size of the
+head on screen (`updateHairLod`). Moving frames render at the scale of `DYN` in `main.ts` (the dynamic resolution),
+and the build puts the vertices of the corrective shapes first (`HOT` in `build.mjs`), so a frame of a clip uploads one
+small range. `python -m anny.viewer.benchmark` counts the uploads, draw calls and vertices of a moving frame, and the
+status label opens a readout of the frame rate (`window.frameStats`). `test/test_hair_parity.py`, `test/test_hair_page.py` and `test/test_hair_dynamics.py`
 check the page's hair against `anny.hair.styles` and `anny.hair.dynamics`.
 
 ### Optional Dependencies

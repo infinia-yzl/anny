@@ -127,6 +127,8 @@ uv run python -m anny.viewer build
 
 The Hair section of the Character panel holds the 25 styles of `anny.hair.styles` and their sliders: length, curl, volume, density and, on the fades, the height of the fade. The styles with a side part can take it on either side. The GPU builds the strands from the guides of the style, so a slider moves the hair at once and a still picture costs no hair work. The Physics button next to the Hair button turns the hair's physics on and off. The solver moves 384 guides with the dynamic follow-the-leader method of Müller et al. (2012) and the shape constraints of Han and Harada (2012), against capsules on the head, the neck, the chest and the shoulders. The groom keeps its shape while the head rests, since only the change of gravity in the head's frame acts on it, and the solver sleeps once the hair comes to rest.
 
+While the figure or the camera moves, the page draws at a lower resolution when frames come slower than 48 per second, and it draws fewer, wider strands when the head is small on screen. It refines the still picture at full resolution. The status label at the corner opens a readout of the frame rate, the render scale and the work of the hair.
+
 The build caches its slow stages, such as the bakes and the hair groom, under the cache directory (see [Caching](#caching)). For hosts that limit the size of a file, `node viewer/build.mjs --parts <dir>` also writes the page with its model data in separate text files that the page fetches next to itself. The viewer grew from an earlier stand-alone experiment, the `3D Model` folder, which git history keeps at commit `b10538d`.
 
 ## Technical details

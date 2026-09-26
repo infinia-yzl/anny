@@ -35,6 +35,9 @@ function push(entry, bytes) {
 const bufs = Object.fromEntries(man.buffers.map((b) => [b.name, b]));
 const COMPANIONS = ['_row', '_detail', '_skin'];
 const REMAP = {};
+// the vertices that the page moves on every frame of a clip: the records of these sparse buffers (the corrective
+// shapes). They go first in the vertex order, so the upload of a frame is one small range.
+const HOT = { head: ['corr'] };
 
 // meshes: '<name>_v' with '<name>_i' are reordered for the vertex cache; the companion streams follow
 function encodeMesh(prefix) {
@@ -42,6 +45,20 @@ function encodeMesh(prefix) {
   const vdata = read(prefix + '_v');
   const idx = new Uint32Array(read(prefix + '_i').buffer.slice(0));
   const [remap, unique] = MeshoptEncoder.reorderMesh(idx, true, false);
+  // a stable partition of the optimised order: the hot vertices, then the others
+  const hot = new Uint8Array(unique);
+  for (const name of HOT[prefix] || []) {
+    const b = bufs[name];
+    if (!b) continue;
+    const dv = new DataView(read(name).buffer.slice(0));
+    for (let i = 0; i < b.count; i++) hot[remap[dv.getUint32(i * b.stride, true)]] = 1;
+  }
+  const perm = new Uint32Array(unique);
+  let nHot = 0;
+  for (let v = 0; v < unique; v++) if (hot[v]) perm[v] = nHot++;
+  for (let v = 0, k = nHot; v < unique; v++) if (!hot[v]) perm[v] = k++;
+  for (let i = 0; i < remap.length; i++) if (remap[i] !== 0xffffffff) remap[i] = perm[remap[i]];
+  for (let i = 0; i < idx.length; i++) idx[i] = perm[idx[i]];
   const nv = new Uint8Array(unique * hv.stride);
   for (let i = 0; i < hv.count; i++) { const r = remap[i]; if (r !== 0xffffffff) nv.set(vdata.subarray(i * hv.stride, (i + 1) * hv.stride), r * hv.stride); }
   push({ name: prefix + '_v', enc: 'mv', count: unique, stride: hv.stride, lo: hv.lo, hi: hv.hi }, MeshoptEncoder.encodeVertexBufferLevel(nv, unique, hv.stride, 3, 1));
@@ -58,7 +75,7 @@ function encodeMesh(prefix) {
     delete entry.kind;
     push(entry, MeshoptEncoder.encodeVertexBufferLevel(nm, unique, mb.stride, 3, 1));
   }
-  console.log(prefix, unique, 'vertices,', idx.length / 3, 'triangles');
+  console.log(prefix, unique, 'vertices,', idx.length / 3, 'triangles,', nHot, 'moved on every frame');
 }
 const meshes = man.buffers.filter((b) => b.name.endsWith('_v') && bufs[b.name.slice(0, -2) + '_i']).map((b) => b.name.slice(0, -2));
 meshes.forEach(encodeMesh);
