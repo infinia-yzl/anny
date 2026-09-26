@@ -87,11 +87,18 @@ def face_shape_spec() -> tuple[FaceShapeParameter, ...]:
 
 
 def face_shape_data_digest() -> str:
-    """a digest of the files that the face-shape rows and the craniofacial landmarks of the
-    model data come from, for the model cache"""
+    """
+    a digest of the data that the face-shape rows and the craniofacial landmarks of the model data
+    come from, for the model cache. The slider ranges stay out: the calibration rewrites them, and
+    they do not change the rows, so a new calibration keeps the cached models.
+    """
     h = hashlib.sha256()
+    with open(FACES_DIR / "face_shapes.json") as f:
+        spec = json.load(f)
+    rows = [{k: v for k, v in p.items() if k != "range"} for p in spec["parameters"]]
+    h.update(json.dumps(rows, sort_keys=True).encode())
     landmarks = get_anny_root_dir() / "data" / "keypoints" / "craniofacial.json"
-    for path in (FACES_DIR / "face_shapes.json", DETAIL_PATH, landmarks):
+    for path in (DETAIL_PATH, landmarks):
         if path.exists():
             h.update(path.read_bytes())
     return h.hexdigest()[:16]
