@@ -9,11 +9,15 @@ Build the calibrated distribution of anny's face shapes
    :mod:`anny.faces.authoring.fit_3d`, with Ledoit–Wolf shrinkage, conditioned on gender,
    weight and muscle at their mean, gives the covariance of the face values: how faces vary
    around their mean. The ear shapes, which the fits leave out, get an independent SD of
-   ``UNSEEN_SD``, and the two asymmetric shapes (the sideways shifts of the nose and the mouth)
-   stay at 0.
-2. **Calibrated means.** At each anchor age and for each sex, the mean face values move from
-   anny's default face (0) so that the measurements of the simulated bodies
-   (:mod:`anny.faces.measurements`) meet the data:
+   ``UNSEEN_SD``. The two asymmetric shapes (the sideways shifts of the nose and the mouth) and
+   ``head-age`` (``FIXED_SHAPES``: anny's age phenotype carries age) stay at 0.
+2. **Calibrated means.** At each anchor age and for each sex, the skull-size shapes
+   (``MEAN_SHAPES``) move from anny's default face (0) so that the measurements of the
+   simulated bodies (:mod:`anny.faces.measurements`) meet the data. All other shapes keep
+   anny's default face for that age: renders showed that means which also moved the facial
+   features met the targets of the nose, the lips and the face depths (which depend on where
+   the landmarks sit on anny's mesh) through big noses, forward chins and thin lips, and those
+   faces looked older and harsher than anny's own. The targets are:
 
    - adults (28 years): the 13 head and face measurements of ANSUR II and the other
      measurements of 3D Facial Norms (ages 18 to 40);
@@ -24,22 +28,21 @@ Build the calibrated distribution of anny's face shapes
 
    The fit is a Gauss-Newton MAP estimate (``map_mean``) with measurement noise of 15 % of the
    target SD (50 % for the arcs and circumferences, ``noise_sd``) and an independent normal
-   prior of SD ``MEAN_SD`` on each named symmetric shape (``MEAN_SD_GROUP`` for the head and
-   the brows); the detail shapes keep a zero mean. The adults, the children and the infants start from
-   anny's default face, so that each age keeps anny's own proportions for that age wherever
-   the data allow; the older adults, whose only targets are those of ANSUR II, start from the
-   adult mean, and so do the race offsets. The prior
-   keeps the mean faces plausible: renders showed that means fitted without it, or around the
-   mean of the ICT fits (whose nose and eye shapes the data contradict), reach the data only
-   through implausible faces. Three rounds correct the targets for the bias of the population
-   (the mean of drawn bodies and faces minus the mean body with the mean face).
+   prior of SD ``MEAN_SD`` on each skull-size shape. The adults, the children and the infants
+   start from anny's default face; the older adults, whose only targets are those of ANSUR II,
+   start from the adult mean, and so do the race offsets. Three rounds correct the targets for
+   the bias of the population (the mean of drawn bodies and faces minus the mean body with the
+   mean face).
 3. **Calibrated spread.** The ICT covariance takes one variance factor per group of face shapes
    (head, forehead, brows, eyes, nose, cheeks, mouth, chin, ears, detail), within
    ``VARIANCE_BOUNDS``, so that the predicted SD of each measurement, from the face and from
-   the rest of the body (height, weight, muscle, proportions), meets the data.
+   the rest of the body (height, weight, muscle, proportions), meets the data. The factors may
+   narrow the spread of the ICT faces but never widen it, and the anchors below
+   ``DETAIL_YEARS`` leave out the detail shapes, which come from the scans of adults.
 4. **Race offsets.** For users of anny's race phenotypes, the adult means of the ANSUR II race
    groups (White, Black and Asian for anny's caucasian, african and asian) give offsets of the
-   mean, relative to their average.
+   skull-size shapes, relative to their average; anny's race phenotypes carry the differences
+   of the facial features.
 5. **Slider ranges.** The range of each face shape in ``data/faces/face_shapes.json`` widens
    from [-1, 1] (or [0, 1]) to hold the central 99 % of the distribution at every anchor, sex and
    race, rounded outward to 0.5.
@@ -106,15 +109,22 @@ ANSUR_RACES = {"caucasian": 1.0, "african": 2.0, "asian": 4.0}
 UNSEEN_SHARE = 0.05
 UNSEEN_SD = 0.35
 # bounds of the variance factor of each group of face shapes on the ICT covariance (SD factors
-# from 0.5 to 1.41): the spread may shrink further than it grows
-VARIANCE_BOUNDS = (0.25, 2.0)
-# SD of the prior of the calibrated means, around anny's default face, on each named symmetric
-# shape: the MakeHuman shapes look plausible within their ranges of 1, and larger prior SDs
-# (tests: 0.5 and 0.8) fit the data only a little better. The skull shapes of the head group
-# carry the head measurements, so they may move further, and the brows much less: without that,
-# the fit lengthened the heads of women (glabella to opisthocranion) by a forward brow ridge
-MEAN_SD = 0.3
-MEAN_SD_GROUP = {"head": 0.5, "brows": 0.1}
+# from 0.5 to 1): the spread of the ICT faces is an upper bound, since the targets of children
+# pool several years of growth and wider factors gave children faces that varied more than adults
+VARIANCE_BOUNDS = (0.25, 1.0)
+# the anchors from this age on draw the detail shapes (the residuals of the ICT scans of adults)
+DETAIL_YEARS = 18.0
+# the shapes whose means the data move: the size of the skull, which carries the head length,
+# breadth and circumference; the prior SD keeps them within their slider ranges
+MEAN_SHAPES = (
+    "head-scale-vert",
+    "head-scale-depth",
+    "head-scale-horiz",
+    "head-back-scale-depth",
+)
+MEAN_SD = 0.5
+# shapes that stay at 0 in the distribution
+FIXED_SHAPES = ("head-age",)
 # the measurement noise of the fits, as a share of the target SD: the tape measurements of
 # ANSUR II (arcs and circumferences) come from plane sections of the mesh, which follow the skin
 # less closely than a tape, so they weigh less than the distances between landmarks; with equal
@@ -336,6 +346,7 @@ def map_mean(sim, mu, prior, centre, phen_mean, names, target, noise_sd, rounds=
 def calibrate_anchor(
     sim,
     prior,
+    years,
     centre,
     phen_mean,
     phen_samples,
@@ -352,8 +363,14 @@ def calibrate_anchor(
     variance factor per group of face shapes on the ICT covariance (``variance_factors``), and
     measures that bias: the mean of the measurements of bodies and faces drawn from the
     Gaussian, minus the measurements of the mean body with the mean face (the rectified shapes
-    and the spread of the bodies make them differ).
+    and the spread of the bodies make them differ). The anchors below DETAIL_YEARS leave out the
+    detail shapes.
     """
+    cov = prior["cov"]
+    if years < DETAIL_YEARS:
+        cov = cov.copy()
+        cov[prior["detail"]] = 0.0
+        cov[:, prior["detail"]] = 0.0
     z = np.random.default_rng(seed).standard_normal((len(phen_samples), len(centre)))
     bias = np.zeros(len(names))
     mu = centre.copy()
@@ -366,11 +383,9 @@ def calibrate_anchor(
         other = sim(
             phen_samples, torch.tensor(np.repeat(mu[None], len(phen_samples), 0)), names
         )
-        factors = variance_factors(
-            J, prior["cov"], other.var(0), target_sd**2, sim.groups
-        )
+        factors = variance_factors(J, cov, other.var(0), target_sd**2, sim.groups)
         d = np.sqrt(factors[sim.group_index])
-        S = prior["cov"] * np.outer(d, d)
+        S = cov * np.outer(d, d)
         faces = mu + z @ np.linalg.cholesky(S + 1e-10 * np.eye(len(mu))).T
         simulated = sim(phen_samples, torch.tensor(faces), names).mean(0)
         bias = simulated - at_mean
@@ -495,21 +510,19 @@ def ict_prior(fits: dict, labels: list[str], unseen: np.ndarray, asymmetric=None
     cov = np.diag(np.full(F, UNSEEN_SD**2))
     mean_face[seen] = mu[3:]
     cov[np.ix_(seen, seen)] = S22 - B @ S12
-    # the prior of the calibrated means: the named symmetric shapes move, around anny's face
-    named = np.array([face_shape_parameter(k).source == "makehuman" for k in labels])
-    asymmetric = np.zeros(F, bool) if asymmetric is None else asymmetric
-    group_sd = np.array(
-        [MEAN_SD_GROUP.get(face_shape_parameter(k).group, MEAN_SD) for k in labels]
-    )
-    mean_sd = np.where(named & ~asymmetric, group_sd, 0.0)
-    # the asymmetric shapes stay at 0 in the distribution
-    cov[asymmetric] = 0.0
-    cov[:, asymmetric] = 0.0
+    # the prior of the calibrated means: the skull-size shapes move, around anny's face
+    mean_sd = np.array([MEAN_SD if k in MEAN_SHAPES else 0.0 for k in labels])
+    # the asymmetric shapes and FIXED_SHAPES stay at 0 in the distribution
+    fixed = np.zeros(F, bool) if asymmetric is None else asymmetric.copy()
+    fixed |= np.array([k in FIXED_SHAPES for k in labels])
+    cov[fixed] = 0.0
+    cov[:, fixed] = 0.0
     return dict(
         mean_phen=mu[:3],
         mean_face=mean_face,
         cov=cov,
         mean_sd=mean_sd,
+        detail=np.array([face_shape_parameter(k).source == "ict" for k in labels]),
     )
 
 
@@ -555,6 +568,7 @@ def run(samples: int = 400, seed: int = 0):
         mu_a, S_a, m_pred = calibrate_anchor(
             sim,
             prior,
+            ADULT_YEARS,
             zero,
             phen_mean,
             phen_rand,
@@ -582,6 +596,7 @@ def run(samples: int = 400, seed: int = 0):
         mu_o, S_o, _ = calibrate_anchor(
             sim,
             prior,
+            OLDER_YEARS,
             mu_a,
             phen_mean,
             phen_rand,
@@ -621,6 +636,7 @@ def run(samples: int = 400, seed: int = 0):
             mu_g, S_g, _ = calibrate_anchor(
                 sim,
                 prior,
+                years,
                 zero,
                 phen_mean,
                 phen_rand,
@@ -648,6 +664,7 @@ def run(samples: int = 400, seed: int = 0):
             mu_i, S_i, _ = calibrate_anchor(
                 sim,
                 prior,
+                years,
                 zero,
                 phen_mean,
                 phen_rand,

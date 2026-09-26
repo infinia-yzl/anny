@@ -13,6 +13,11 @@ For a body of given phenotypes, the face values follow a Gaussian:
 - with anny's race phenotypes (``phenotypes="all"``), the mean adds the race offsets that
   ANSUR II calibrates, weighted by the race values.
 
+``sample`` scales the spread by ``DEFAULT_SPREAD`` unless told otherwise: at the full spread of
+the calibration, a random face often reaches 1.5 to 2 SD along the largest directions of the ICT
+faces (the depth of the face and the position of the mouth), whose extremes look older and
+harsher than people of the body's age.
+
 Example::
 
     model = anny.Anny(face_shapes="all")
@@ -36,6 +41,8 @@ DEFAULT_PATH = (
     get_anny_root_dir() / "data" / "shape_calibration" / "face_prior.safetensors"
 )
 RACES = ("african", "asian", "caucasian")
+# the default scale of the spread of sample() (see the module)
+DEFAULT_SPREAD = 0.6
 
 
 def load_prior(path=DEFAULT_PATH) -> tuple[dict[str, torch.Tensor], dict]:
@@ -130,9 +137,10 @@ class FaceShapeDistribution(torch.nn.Module):
         phenotype_kwargs=None,
         batch_size: int | None = None,
         generator: torch.Generator | None = None,
-        spread: float = 1.0,
+        spread: float = DEFAULT_SPREAD,
     ) -> torch.Tensor:
-        """face values (B, F) for these phenotypes, clipped to the slider ranges"""
+        """face values (B, F) for these phenotypes, clipped to the slider ranges; ``spread``
+        scales the calibrated spread (1 draws from the calibrated distribution itself)"""
         mean, tril = self.parameters_for(phenotype_kwargs, batch_size)
         z = torch.randn(
             tril.shape[0],

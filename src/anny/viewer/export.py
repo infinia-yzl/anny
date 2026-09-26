@@ -257,7 +257,7 @@ def face_offsets(model, vertex_ids: np.ndarray, threshold: float = 1e-6) -> dict
 def face_prior_tables(model, rank: int = 24) -> tuple[dict, np.ndarray]:
     """the face-shape distribution for the page: anchors and means in the manifest, and low-rank
     factors (A, 2, F, rank) that keep the largest directions of each covariance"""
-    from anny.faces.distribution import FaceShapeDistribution
+    from anny.faces.distribution import DEFAULT_SPREAD, FaceShapeDistribution
 
     d = FaceShapeDistribution(model)
     means = d.means.detach().cpu().numpy()
@@ -277,6 +277,7 @@ def face_prior_tables(model, rank: int = 24) -> tuple[dict, np.ndarray]:
         gender_anchors=d.gender_anchors.tolist(),
         means=np.round(means, 5).tolist(),
         rank=rank,
+        spread=DEFAULT_SPREAD,
         variance_kept=min(kept),
     )
     return meta, factors

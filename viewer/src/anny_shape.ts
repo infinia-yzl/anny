@@ -146,6 +146,7 @@ export interface FacePrior {
   gender_anchors: number[];
   means: number[][][];                    // (A, 2, F)
   rank: number;
+  spread?: number;                        // the scale of the spread of random faces (anny.faces.distribution.DEFAULT_SPREAD)
 }
 
 export interface FaceTables {
@@ -257,10 +258,11 @@ export function facePriorParameters(face: FaceData, values: Record<string, numbe
   return { mean, factor };
 }
 
-// a face drawn from the distribution, clipped to the slider ranges (random: uniform numbers in [0, 1))
+// a face drawn from the distribution with its spread scaled by prior.spread, clipped to the slider ranges
+// (random: uniform numbers in [0, 1))
 export function sampleFace(face: FaceData, values: Record<string, number>, random: () => number = Math.random): Float64Array {
   const { mean, factor } = facePriorParameters(face, values);
-  const F = mean.length, R = face.tables.prior.rank;
+  const F = mean.length, R = face.tables.prior.rank, spread = face.tables.prior.spread ?? 1;
   const z = new Float64Array(R);
   for (let k = 0; k < R; k += 2) {
     const u = Math.max(random(), 1e-12), v = random();
@@ -271,7 +273,7 @@ export function sampleFace(face: FaceData, values: Record<string, number>, rando
   const out = new Float64Array(F);
   for (let f = 0; f < F; f++) {
     let s = mean[f];
-    for (let k = 0; k < R; k++) s += factor[f * R + k] * z[k];
+    for (let k = 0; k < R; k++) s += spread * factor[f * R + k] * z[k];
     const [lo, hi] = face.tables.ranges[f];
     out[f] = Math.min(hi, Math.max(lo, s));
   }

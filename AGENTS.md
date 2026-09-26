@@ -107,10 +107,15 @@ stores for the template and every blend shape. The `anny` and `soma` rig caches 
 bit for bit. `anny.faces.distribution.FaceShapeDistribution` samples face values for given phenotypes
 from `data/shape_calibration/face_prior.safetensors`, built by `python -m anny.faces.authoring.calibrate`
 (sources and licences in `data/faces/SOURCES.md`): the covariance of the ICT fits with one variance
-factor per group, and means fitted by MAP around anny's default face (prior SD 0.3 per named shape)
-to the anthropometric targets of each anchor. Check changes to the calibration by rendering random
-faces in the viewer as well as by the measurement check: fits that meet the numbers can still give
-implausible faces.
+factor per group of at most 1 (no detail shapes below 18 years, and `head-age` held at 0), around
+anny's default face for each age. Only the skull-size shapes (`MEAN_SHAPES`) move the mean, by MAP
+fits to the head measurements of each anchor; the facial features stay at anny's default face,
+because means that also moved them met the nose, lip and face-depth targets through big noses,
+forward chins and thin lips, which looked old and harsh. Check changes to the calibration by
+rendering random faces in the viewer as well as by the measurement check: fits that meet the
+numbers can still give implausible faces. Judge each random face by whether it passes as a normal
+person of that age, and show the calibrated mean in the grid, since the default face hides a shift
+of the mean.
 
 ### Pose Parameterization
 
