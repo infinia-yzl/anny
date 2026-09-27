@@ -213,7 +213,7 @@ def body_sdfs(V, N, T=None, with_body=False, cache=True):
     ears, for the relaxation) and, with ``with_body``, ``body`` (neck, shoulders and chest at
     3 mm). Cached under ``ANNY_CACHE_DIR/hair``.
     """
-    from anny.hair.authoring.layout import on_ear
+    from anny.hair.authoring.layout import ear_box
     from anny.paths import get_anny_cache_path
 
     key = hashlib.sha1(np.ascontiguousarray(V, np.float32).tobytes()).hexdigest()[:12]
@@ -231,7 +231,7 @@ def body_sdfs(V, N, T=None, with_body=False, cache=True):
         if name == "full":
             s = SDF(V, N, 0.0015, *HEAD_BOX)
         elif name == "head":
-            keep = ~on_ear(V)
+            keep = ~ear_box(V)
             s = SDF(V[keep], N[keep], 0.0015, *HEAD_BOX)
         else:
             s = SDF(V, N, 0.003, *BODY_BOX, band=0.03)

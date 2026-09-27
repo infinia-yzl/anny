@@ -98,7 +98,7 @@ uniform float uPivotBlend; // m: the turn to the root normal fades out over this
 uniform vec3 uCurlP;   // radius, period (m), ramp
 uniform vec4 uFrizz;   // amplitude range (m), cycles range
 uniform vec3 uFly;     // share, drift range (m)
-uniform float uHLPhi[24]; uniform float uHLEl[24];
+uniform float uHLPhi[HL_N]; uniform float uHLEl[HL_N];   // anny's hairline (HL_N: its knots, set by gpu.ts)
 uniform float uHairline[19]; uniform float uFadeStart[19]; uniform float uFadeLine[19];
 uniform vec4 uFade;   // width, clipper, top, kind (0: none, 1: a taper along the hairline, 2: a fade up to a level guideline)
 #define PI 3.141592653589793
@@ -110,8 +110,8 @@ float int16(uint v) { int x = int(v & 0xFFFFu); return float(x >= 32768 ? x - 65
 float sstep(float a, float b, float x) { float t = clamp((x - a) / (b - a), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }
 // the style fields (anny.hair.chart)
 float hairline(float phi) {
-  float a = abs(phi), el = uHLEl[23];
-  for (int k = 1; k < 24; k++) if (a <= uHLPhi[k]) { el = mix(uHLEl[k - 1], uHLEl[k], (a - uHLPhi[k - 1]) / (uHLPhi[k] - uHLPhi[k - 1])); break; }
+  float a = abs(phi), el = uHLEl[HL_N - 1];
+  for (int k = 1; k < HL_N; k++) if (a <= uHLPhi[k]) { el = mix(uHLEl[k - 1], uHLEl[k], (a - uHLPhi[k - 1]) / (uHLPhi[k] - uHLPhi[k - 1])); break; }
   float f = clamp(a / 10.0, 0.0, 18.0); int k = min(int(f), 17);
   return el + mix(uHairline[k], uHairline[k + 1], f - float(k));
 }

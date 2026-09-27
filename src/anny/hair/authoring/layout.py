@@ -13,8 +13,9 @@ The scalp layout that every hairstyle shares (:class:`anny.hair.layout.Layout`).
 - **Simulation table:** each guide takes its three nearest simulated guides, with weights.
 
 The scalp is the skin above anny's default hairline (``anny.hair.chart``), less 1.5 degrees,
-without the ears. The layout stores positions in the legacy frame of the authoring rig and chart
-coordinates; the viewer build binds the roots to the fine body.
+without the outer ears (``anny.hair.authoring.anatomy.pinna_mask``) and the skin within
+``EAR_CLEARANCE`` of them. The layout stores positions in the legacy frame of the authoring
+rig and chart coordinates; the viewer build binds the roots to the fine body.
 
 Usage::
 
@@ -31,6 +32,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from anny.hair import closest_triangles
+from anny.hair.authoring.anatomy import pinna_mask
 from anny.hair.chart import chart, hairline
 from anny.hair.layout import DEFAULT_PATH
 
@@ -42,10 +44,12 @@ SIMULATED = 384
 # interpolation: inverse square distances, softened (as the legacy groom's)
 ROOT_SOFTENING = 0.0012
 SIM_SOFTENING = 0.002
+# no root closer than this to an outer ear (m)
+EAR_CLEARANCE = 0.002
 
 
-def on_ear(P):
-    """points on the part of the ear that stands out from the head (anny's default body)"""
+def ear_box(P):
+    """points on the part of the ear that stands out from the head (the groom's head without its ears)"""
     return (
         (np.abs(P[:, 0]) > 0.0712)
         & (P[:, 1] < 0.535)
@@ -54,13 +58,20 @@ def on_ear(P):
     )
 
 
-def scalp_weights(V, T, margin=1.5):
+def on_ear(V, T, ear, clearance=EAR_CLEARANCE):
+    """triangles on the outer ears (``ear``: a mask of the vertices) or within ``clearance`` of them"""
+    cen = V[T].mean(1)
+    d, _ = cKDTree(V[ear]).query(cen, distance_upper_bound=clearance)
+    return ear[T].any(1) | np.isfinite(d)
+
+
+def scalp_weights(V, T, ear, margin=1.5):
     """area of each triangle that belongs to the scalp (0 elsewhere)"""
     A, B, C = V[T[:, 0]], V[T[:, 1]], V[T[:, 2]]
     area = 0.5 * np.linalg.norm(np.cross(B - A, C - A), axis=1)
     cen = (A + B + C) / 3
     phi, el, _ = chart(cen)
-    ok = (el > hairline(phi) - margin) & (cen[:, 1] > 0.43) & ~on_ear(cen)
+    ok = (el > hairline(phi) - margin) & (cen[:, 1] > 0.43) & ~on_ear(V, T, ear)
     return area * ok
 
 
@@ -121,9 +132,9 @@ def render_roots(V, T, weights, rng, count=ROOT_COUNT):
     return P[order], bounds, r
 
 
-def build(V, T, seed=5, simulated=SIMULATED, root_count=ROOT_COUNT, verbose=True):
+def build(V, T, ear, seed=5, simulated=SIMULATED, root_count=ROOT_COUNT, verbose=True):
     rng = np.random.default_rng(seed)
-    w = scalp_weights(V, T)
+    w = scalp_weights(V, T, ear)
     G, mirror = guide_roots(V, T, w, rng)
     R, bounds, r_root = render_roots(V, T, w, rng, root_count)
     d, idx = cKDTree(G).query(R, k=4)
@@ -184,7 +195,8 @@ def main():
     ap.add_argument("--seed", type=int, default=5)
     args = ap.parse_args()
     body = fine_body()
-    arrays, meta = build(body.V, body.T, seed=args.seed)
+    ear = pinna_mask(body.subdivision)
+    arrays, meta = build(body.V, body.T, ear, seed=args.seed)
     save(args.out, arrays, meta)
     print(f"wrote {args.out}")
 

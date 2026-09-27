@@ -132,7 +132,7 @@ export class Hair {
       uMat: { value: this.mat.tex }, uMotion: { value: this.motion.tex }, uP: this.uP, uG: { value: L.G }, uMoving: { value: 0 },
       uSimInfo: { value: this.simInfo.tex }, uGuideInfo: { value: this.info.tex },
     });
-    this.B = pass(HAIR_PASS_B, {
+    this.B = pass(HAIR_PASS_B.replace(/HL_N/g, String(hl.phi.length)), {
       uGuides: { value: null }, uGuideInfo: { value: this.info.tex }, uFrames: { value: this.frames.tex }, uMat: { value: this.mat.tex },
       uRootRest: { value: this.rootRest.tex }, uRootData: { value: this.rootData },
       uOcc: { value: this.occ }, uOccLo: { value: new THREE.Vector3() }, uOccSize: { value: new THREE.Vector3(1, 1, 1) }, uHeadInv: headInv,

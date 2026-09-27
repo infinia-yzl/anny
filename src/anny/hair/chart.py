@@ -25,15 +25,22 @@ import numpy as np
 MM = 0.001
 CRANIUM_CENTRE = np.array([0.0, 0.515, 0.035])
 
-# anny's default hairline: minimum elevation (degrees) against |azimuth| (degrees)
+# anny's default hairline: minimum elevation (degrees) against |azimuth| (degrees). It rests on
+# anny's landmarks (anny.hair.authoring.anatomy) and on the hairline benchmark against photos
+# (anny.hair.authoring.photos): the front and the temples (0-47) at the photos' upper quartile of
+# the visible hair edge, about the natural hairline; the sideburn (47-60) in front of the ear,
+# about 12 mm wide and down to the tragion, 5 mm from the ear; the arc over the ear (60-93) 8 to
+# 11 mm above its top; then behind the ear and down to the nape.
 HAIRLINE_PHI = np.array(
-    [0, 20, 32, 45, 56, 62, 65, 67, 70, 73, 76, 79, 84, 90]
-    + [96, 100, 104, 110, 114, 120, 132, 150, 165, 180],
+    [0, 12, 20, 26, 31, 35, 38, 41, 44.5]
+    + [47.5, 49, 50.5, 51.5, 53.5, 55.5, 57, 58.1, 59.2, 60, 61.5, 64, 68.5]
+    + [72, 78, 82.5, 87.5, 93, 97.5, 102, 110, 114, 120, 132, 150, 165, 180],
     dtype=np.float64,
 )
 HAIRLINE_EL = np.array(
-    [33.5, 33, 32, 29, 23, 16, 8, -8, -16, -17, -4, 6, 6.5, 5.5]
-    + [3, 0, -3, -9, -14, -22, -31, -35, -37.5, -38.5]
+    [32.5, 32.2, 31, 28.3, 26, 24.8, 23.5, 20, 12.5]
+    + [3.5, -4, -10.5, -15, -16.8, -17.5, -16.8, -11.8, -5.9, -0.4, 4.9, 7.6, 9]
+    + [10, 10.5, 9.5, 8.3, 5.3, 1.4, -4, -9, -14, -22, -31, -35, -37.5, -38.5]
 )
 # the style curves are sampled at these |azimuth| values (degrees), for the page's uniforms
 CURVE_PHI = np.linspace(0.0, 180.0, 19)

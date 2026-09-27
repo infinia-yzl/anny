@@ -14,6 +14,7 @@ derived from them.
 | [CDC growth charts](https://www.cdc.gov/growthcharts/), head circumference for age | Head size and its spread from birth to 36 months | Public domain. Kuczmarski, R. J., et al. *2000 CDC Growth Charts for the United States*. Vital Health Stat 11(246), 2002. |
 | [FairFace](https://github.com/joojs/fairface) | Photographs for the benchmark of face proportions by age, sex and race | CC BY 4.0. Kärkkäinen, K., and Joo, J. *FairFace: Face Attribute Dataset for Balanced Race, Gender, and Age*. WACV 2021. |
 | [MediaPipe Face Landmarker](https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker) and canonical face model | Landmarks of the photographs and of anny's renders | Apache 2.0 licence, Google. |
+| [MediaPipe Image Segmenter](https://developers.google.com/edge/mediapipe/solutions/vision/image_segmenter), selfie multiclass model | The hair of the photographs and of anny's renders, for the hairline benchmark (`anny.hair.authoring.photos`) | Apache 2.0 licence, Google. |
 
 Deferred because they need a registration: FLAME 2023 Open (CC BY 4.0) and the individual-level
 3D Facial Norms data.

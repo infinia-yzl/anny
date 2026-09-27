@@ -46,6 +46,7 @@ uv run python -m anny.hair.authoring.presets --only lob     # grow some styles
 uv run python -m anny.hair.authoring.presets --specs-only   # rewrite the specs alone (render, physics, controls)
 uv run python -m anny.hair.authoring.benchmark              # load, slider and render times of the built page
 uv run python -m anny.hair.authoring.review                 # review.png in ANNY_CACHE_DIR/hair: every style at three lengths on three bodies
+uv run python -m anny.hair.authoring.photos                 # photos.html in ANNY_CACHE_DIR/hair: the hairline of every style against FairFace photos (needs --extra faces)
 ```
 
 ### Web viewer
@@ -95,7 +96,7 @@ uv run --with playwright python -m anny.viewer.benchmark   # uploads, draws and 
 | Subdivision | `utils/subdivision.py` | Catmull-Clark as sparse linear operators; `MixedSubdivision` adds one level on a region (the head) |
 | Pose library | `poses/` | 50 poses and 7 clips as `local-ref` parameters (`data/poses/`), grounding, stool; `poses/authoring/` builds the library on the authoring rig |
 | Correctives | `correctives/` | `SoftTissueCorrectives` (hinge and cone drivers, shapes scaled with the local size; `data/correctives/`); `correctives/authoring/` holds the simulation, the fit and `evaluate` |
-| Hair | `hair/` | `StrandBinding` ties strands to the skin at roots and tips; `chart.py` holds the scalp chart (hairline, fade) and the 8-bit curve codec; `layout.py` loads the scalp layout (`data/hair/scalp_layout.safetensors`: guide and render roots in progressive order, their weights, the simulated guides); `styles.py` loads the 25 styles (`data/hair/styles/*.json` and `styles.safetensors`) and repeats the page's passes A and B and its density volume in NumPy; `dynamics.py` repeats the page's solver; `hair/authoring/` builds the layout, grows the styles (`groom.py`, `presets.py`), the brows and lashes, benchmarks the page and renders the review grid |
+| Hair | `hair/` | `StrandBinding` ties strands to the skin at roots and tips; `chart.py` holds the scalp chart (hairline, fade) and the 8-bit curve codec; `layout.py` loads the scalp layout (`data/hair/scalp_layout.safetensors`: guide and render roots in progressive order, their weights, the simulated guides); `styles.py` loads the 25 styles (`data/hair/styles/*.json` and `styles.safetensors`) and repeats the page's passes A and B and its density volume in NumPy; `dynamics.py` repeats the page's solver; `hair/authoring/` builds the layout, grows the styles (`groom.py`, `presets.py`), the brows and lashes, benchmarks the page, renders the review grid and compares the hairline with photos (`photos.py`); `anatomy.py` gives the landmarks and the outer ears that place the hairline |
 | Viewer data | `viewer/` | `python -m anny.viewer build` writes the page data to `viewer/build/` and runs the node build of `viewer/` |
 | Face shapes | `models/face_shapes.py`, `faces/` | 103 named, symmetric face-shape parameters and 10 detail shapes from ICT-FaceKit (`Anny(face_shapes=...)`, `face_shape_kwargs`), scaled per group with the size of the head; craniofacial landmarks and the measurements of 3D Facial Norms and ANSUR II (`faces/measurements.py`); a face-shape distribution calibrated against measured faces (`faces/distribution.py`); `faces/authoring/` fetches the sources, fits the ICT-FaceKit identity space, calibrates the distribution and benchmarks against FairFace photos |
 
@@ -132,6 +133,19 @@ of the mean: `python -m anny.faces.authoring.review` renders that grid from the 
 `test.test_faces_calibration.TestPlausibleFaces` guards these choices and the facial spread of the
 approved prior (`APPROVED_FACIAL_SPREAD`); when a change breaks one of its tests, review the grid
 with the user before updating the test.
+
+### Hairline
+
+Every style shares anny's default hairline (`HAIRLINE_PHI` and `HAIRLINE_EL` in `hair/chart.py`: the minimum elevation
+of hair against the azimuth about the cranium centre), and the style fields count degrees above it. The hairline rests
+on anny's landmarks (`hair/authoring/anatomy.py`: the craniofacial landmarks and the outer ears, which MakeHuman's
+ear-translation targets move in full): the sideburn comes down in front of the ear to the tragion, and the hairline
+clears the top of the ear. `test.test_hair_styles.TestHairlineAnatomy` checks both, and the layout leaves out the ears
+(`on_ear`). The front and the temples rest on `python -m anny.hair.authoring.photos`, which measures the hair edge
+(forehead, pupils, temples, sideburns) on FairFace photos and on anny's portraits with MediaPipe; the visible edge lies
+below the natural hairline wherever a fringe falls, so the hairline sits near the photos' upper quartile. A change to
+the table needs `python -m anny.hair.authoring.layout`, then `presets` and the viewer build; check it with the anatomy
+tests, the photo benchmark and the review grid.
 
 ### Pose Parameterization
 

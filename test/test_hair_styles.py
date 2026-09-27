@@ -176,6 +176,56 @@ class TestLayout(unittest.TestCase):
             self.assertLess(radius, 2.5 * spacing * np.sqrt(len(R) / n))
 
 
+class TestHairlineAnatomy(unittest.TestCase):
+    """anny's hairline against the anatomy of anny's default head (anny.hair.authoring.anatomy)"""
+
+    @classmethod
+    def setUpClass(cls):
+        from anny.hair.authoring.anatomy import landmarks, pinna
+
+        cls.L = landmarks()
+        cls.ear = pinna()
+        layout = load_layout()
+        cls.R = layout.root_position.astype(np.float64)
+        cls.on = chart.coverage(layout.root_chart[:, 0], layout.root_chart[:, 1]) > 0.5
+
+    def test_no_hair_grows_on_or_next_to_the_ears(self):
+        from scipy.spatial import cKDTree
+
+        d, _ = cKDTree(self.ear).query(self.R[self.on])
+        self.assertGreater(d.min(), 0.004)
+
+    def test_hairline_clears_the_top_of_the_ear(self):
+        # over the ear, from its front to its back, the hair begins 7 mm above its top at least
+        E = self.ear[self.ear[:, 0] > 0]
+        R = self.R
+        over = (
+            self.on
+            & (R[:, 0] > 0.03)
+            & (R[:, 2] > E[:, 2].min())
+            & (R[:, 2] < E[:, 2].max())
+            & (R[:, 1] > self.L["sba.L"][1])
+        )
+        self.assertGreater(R[over, 1].min(), self.L["sa.L"][1] + 0.007)
+
+    def test_sideburn_comes_down_in_front_of_the_ear(self):
+        t = self.L["t.L"]
+        R = self.R
+        front = (
+            self.on
+            & (R[:, 0] > 0.03)
+            & (R[:, 2] > t[2])
+            & (R[:, 2] < t[2] + 0.03)
+            & (R[:, 1] < self.L["sa.L"][1])
+        )
+        # the sideburn reaches the height of the tragion and stays in front of it
+        self.assertLess(abs(R[front, 1].min() - t[1]), 0.004)
+        low = front & (R[:, 1] < t[1] + 0.01)
+        self.assertGreater(R[low, 2].min(), t[2] + 0.006)
+        # and it is a sideburn: about a centimetre wide
+        self.assertGreater(np.ptp(R[low, 2]), 0.008)
+
+
 class TestLayers(unittest.TestCase):
     def test_buckets_of_one_reproduce_the_sequential_layers(self):
         from anny.hair.authoring import groom

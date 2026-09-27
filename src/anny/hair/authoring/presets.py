@@ -179,45 +179,46 @@ def top_of(a, h):
 
 
 def sides_of(a, h):
-    """the sides and the back below the crown"""
-    return smoothstep(45, 70, a) * smoothstep(55, 30, el_of(a, h))
+    """the temples, the sides and the back below the crown"""
+    return smoothstep(34, 50, a) * smoothstep(55, 30, el_of(a, h))
 
 
 def fade_curve(sides=None, back=None, front=-90.0, sideburn=None):
     """start of a fade band (degrees above the hairline) along |azimuth|: at the front, the
-    sideburns (55-80), the sides above the ears (80-125) and the back"""
+    sideburns (40-55, in front of the ears), the sides over the ears (55-125) and the back"""
     from anny.hair.chart import CURVE_PHI
 
     sb = sides if sideburn is None else sideburn
     a = CURVE_PHI
     x = np.full(len(a), float(front))
-    x = np.where(a >= 55, sb if sb is not None else front, x)
-    x = np.where(a >= 80, sides if sides is not None else front, x)
+    x = np.where(a >= 40, sb if sb is not None else front, x)
+    x = np.where(a >= 55, sides if sides is not None else front, x)
     x = np.where(a >= 125, back if back is not None else front, x)
-    # soften the steps between the regions
+    # soften the steps between the sideburns, the sides and the back; the step at the temple stays
+    # sharp, so that the band of the sideburn runs up the temple and the front keeps its length
     k = np.array([0.25, 0.5, 0.25])
+    side = a >= 40
     for _ in range(2):
-        x = np.convolve(np.pad(x, 1, mode="edge"), k, mode="valid")
+        x[side] = np.convolve(np.pad(x[side], 1, mode="edge"), k, mode="valid")
     return np.round(x, 2).tolist()
 
 
 def level_line(above_ear_mm):
     """
     The guideline of a fade: the elevations (degrees at CURVE_PHI) of one height around the
-    head, ``above_ear_mm`` above the hairline over the ear (azimuth 90), as a barber cuts it
-    level. Each elevation uses the radius of the scalp at that azimuth and height (the render
-    roots of the layout on anny's default body), so the line keeps its height where the head
-    is deeper, at the back.
+    head, ``above_ear_mm`` above the top of the ear (the superaurale of anny's default body), as
+    a barber cuts it level. Each elevation uses the radius of the scalp at that azimuth and
+    height (the render roots of the layout), so the line keeps its height where the head is
+    deeper, at the back.
     """
-    from anny.hair.chart import CRANIUM_CENTRE, MM, hairline
+    from anny.hair.authoring.anatomy import landmarks
+    from anny.hair.chart import CRANIUM_CENTRE, MM
 
     layout = load_layout()
     P = layout.root_position.astype(np.float64)
     a = np.abs(layout.root_chart[:, 0])
-    el = layout.root_chart[:, 1]
     r = np.linalg.norm(P - CRANIUM_CENTRE, axis=1)
-    ear = (np.abs(a - 90) < 4) & (np.abs(el - hairline(np.array([90.0]))[0]) < 3)
-    y = np.median(P[ear, 1]) + above_ear_mm * MM
+    y = landmarks()["sa.L"][1] + above_ear_mm * MM
     out = []
     for c in CURVE_PHI:
         side = np.abs(a - c) < 6
@@ -229,7 +230,7 @@ def level_line(above_ear_mm):
 
 
 def level_fade(above_ear_mm, clipper, top, width=8.0):
-    """a skin fade from the hairline up to a level guideline ``above_ear_mm`` above the ear"""
+    """a skin fade from the hairline up to a level guideline ``above_ear_mm`` above the top of the ear"""
     return dict(
         start=fade_curve(sides=0.0, back=0.0, sideburn=0.0),
         line=level_line(above_ear_mm),
@@ -246,8 +247,9 @@ SHORT_RENDER = dict(
     density=1.0,
 )
 CROWN_FLOW = dict(type="whorl", weight=1.0, spiral=1.9, radius=0.028, twist=0.12)
+# the sides and the temples, combed down and a little back, toward the ear
 SIDES_DOWN = dict(
-    type="direction", vector=[0.0, -1.0, 0.0], weight=0.9, el=[55, 15], phi=[35, 70]
+    type="direction", vector=[0.0, -1.0, -0.35], weight=0.9, el=[55, 15], phi=[30, 50]
 )
 
 
@@ -432,7 +434,7 @@ def low_taper_fade():
 
 def mid_fade():
     """a textured top, and the sides faded to the skin up to a level line at the temples"""
-    render = dict(TEXTURED, fade=level_fade(25.0, clipper=0.0004, top=0.018))
+    render = dict(TEXTURED, fade=level_fade(32.0, clipper=0.0004, top=0.018))
     return spec("mid_fade", "Mid fade", "short", taper_top(32, sides=12.0), render)
 
 
@@ -440,7 +442,7 @@ def textured_crop():
     """a short textured top pushed forward to a short fringe, over a high fade"""
     groom = taper_top(33, top=38.0, sides=14.0, forward=1.6, tousle=0.4, lift=40)
     # a high fade: the line at the corner of the head
-    render = dict(TEXTURED, fade=level_fade(45.0, clipper=0.0005, top=0.014))
+    render = dict(TEXTURED, fade=level_fade(52.0, clipper=0.0005, top=0.014))
     return spec("textured_crop", "Textured crop", "short", groom, render)
 
 
@@ -451,7 +453,7 @@ def french_crop():
         phi=[0, 30, 45, 60, 180], y=[0.568, 0.568, 0.556, 0.40, 0.40]
     )
     groom["cuts"] = cuts(layer=(0.85, 1.05), texture=1.5)
-    render = dict(TEXTURED, fade=level_fade(32.0, clipper=0.0006, top=0.014))
+    render = dict(TEXTURED, fade=level_fade(39.0, clipper=0.0006, top=0.014))
     return spec("french_crop", "French crop", "short", groom, render)
 
 
@@ -546,7 +548,7 @@ def textured_quiff():
         band_mm=[3.0, 6.0, 26.0],
         cuts=cuts(layer=(0.85, 1.05), texture=3.0),
     )
-    render = dict(TEXTURED, points=16, fade=level_fade(25.0, clipper=0.0005, top=0.018))
+    render = dict(TEXTURED, points=16, fade=level_fade(32.0, clipper=0.0005, top=0.018))
     return spec("textured_quiff", "Textured quiff", "short", groom, render)
 
 
