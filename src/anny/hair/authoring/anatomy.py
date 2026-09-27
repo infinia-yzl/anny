@@ -11,8 +11,9 @@ authoring rig (``anny.poses.authoring.rig``):
 - :func:`pinna`: the outer ear, the vertices that MakeHuman's ear-translation targets move in full
   (the targets fade out over the skin around the ear).
 
-The hairline of ``anny.hair.chart`` rests on them: the sideburn stops in front of the ear, and the
-hairline clears the top of the ear. ``test.test_hair_styles.TestHairlineAnatomy`` checks both.
+The hairline of ``anny.hair.chart`` rests on them: the sideburn comes down in front of the ear, and
+the hair meets the ear about 2 mm from its front and its top.
+``test.test_hair_styles.TestHairlineAnatomy`` checks both.
 """
 
 from __future__ import annotations

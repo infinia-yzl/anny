@@ -193,10 +193,10 @@ class TestHairlineAnatomy(unittest.TestCase):
         from scipy.spatial import cKDTree
 
         d, _ = cKDTree(self.ear).query(self.R[self.on])
-        self.assertGreater(d.min(), 0.004)
+        self.assertGreater(d.min(), 0.0015)
 
-    def test_hairline_clears_the_top_of_the_ear(self):
-        # over the ear, from its front to its back, the hair begins 7 mm above its top at least
+    def test_hair_meets_the_top_of_the_ear(self):
+        # over the ear, from its front to its back, the hair comes down to the top of the ear
         E = self.ear[self.ear[:, 0] > 0]
         R = self.R
         over = (
@@ -206,7 +206,9 @@ class TestHairlineAnatomy(unittest.TestCase):
             & (R[:, 2] < E[:, 2].max())
             & (R[:, 1] > self.L["sba.L"][1])
         )
-        self.assertGreater(R[over, 1].min(), self.L["sa.L"][1] + 0.007)
+        top = R[over, 1].min() - self.L["sa.L"][1]
+        self.assertGreater(top, -0.002)
+        self.assertLess(top, 0.004)
 
     def test_sideburn_comes_down_in_front_of_the_ear(self):
         t = self.L["t.L"]

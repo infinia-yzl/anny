@@ -139,13 +139,13 @@ with the user before updating the test.
 Every style shares anny's default hairline (`HAIRLINE_PHI` and `HAIRLINE_EL` in `hair/chart.py`: the minimum elevation
 of hair against the azimuth about the cranium centre), and the style fields count degrees above it. The hairline rests
 on anny's landmarks (`hair/authoring/anatomy.py`: the craniofacial landmarks and the outer ears, which MakeHuman's
-ear-translation targets move in full): the sideburn comes down in front of the ear to the tragion, and the hairline
-clears the top of the ear. `test.test_hair_styles.TestHairlineAnatomy` checks both, and the layout leaves out the ears
-(`on_ear`). The front and the temples rest on `python -m anny.hair.authoring.photos`, which measures the hair edge
-(forehead, pupils, temples, sideburns) on FairFace photos and on anny's portraits with MediaPipe; the visible edge lies
-below the natural hairline wherever a fringe falls, so the hairline sits near the photos' upper quartile. A change to
-the table needs `python -m anny.hair.authoring.layout`, then `presets` and the viewer build; check it with the anatomy
-tests, the photo benchmark and the review grid.
+ear-translation targets move in full): the sideburn comes down in front of the ear to the tragion, and the hair meets
+the ear about 2 mm from its front and its top. `test.test_hair_styles.TestHairlineAnatomy` checks both, and the layout
+leaves out the ears (`on_ear`). The front and the temples rest on `python -m anny.hair.authoring.photos`, which
+measures the hair edge (forehead, pupils, temples, sideburns) on FairFace photos and on anny's portraits with
+MediaPipe; the visible edge lies below the natural hairline wherever a fringe falls, so the hairline sits near the
+photos' upper quartile. A change to the table needs `python -m anny.hair.authoring.layout`, then `presets` and the
+viewer build; check it with the anatomy tests, the photo benchmark and the review grid.
 
 ### Pose Parameterization
 

@@ -29,18 +29,21 @@ CRANIUM_CENTRE = np.array([0.0, 0.515, 0.035])
 # anny's landmarks (anny.hair.authoring.anatomy) and on the hairline benchmark against photos
 # (anny.hair.authoring.photos): the front and the temples (0-47) at the photos' upper quartile of
 # the visible hair edge, about the natural hairline; the sideburn (47-60) in front of the ear,
-# about 12 mm wide and down to the tragion, 5 mm from the ear; the arc over the ear (60-93) 8 to
-# 11 mm above its top; then behind the ear and down to the nape.
+# about 12 mm wide and down to the tragion; then the hair meets the ear, about 2 mm from its front
+# and its top (60-92), and comes down behind it to the nape. The layout keeps every root 2 mm off
+# the outer ear.
 HAIRLINE_PHI = np.array(
     [0, 12, 20, 26, 31, 35, 38, 41, 44.5]
-    + [47.5, 49, 50.5, 51.5, 53.5, 55.5, 57, 58.1, 59.2, 60, 61.5, 64, 68.5]
-    + [72, 78, 82.5, 87.5, 93, 97.5, 102, 110, 114, 120, 132, 150, 165, 180],
+    + [47.5, 49, 50.5, 51.5, 53.5, 55.5, 58, 59.6, 60.3, 60.9, 62.2, 63.4, 66.3]
+    + [71.9, 76.5, 83.7, 87.8, 92.2, 95.7, 99.3, 102, 106, 110]
+    + [114, 120, 132, 150, 165, 180],
     dtype=np.float64,
 )
 HAIRLINE_EL = np.array(
     [32.5, 32.2, 31, 28.3, 26, 24.8, 23.5, 20, 12.5]
-    + [3.5, -4, -10.5, -15, -16.8, -17.5, -16.8, -11.8, -5.9, -0.4, 4.9, 7.6, 9]
-    + [10, 10.5, 9.5, 8.3, 5.3, 1.4, -4, -9, -14, -22, -31, -35, -37.5, -38.5]
+    + [3.5, -4, -10.5, -15, -16.8, -17.5, -17.5, -17.3, -11, -4.4, -1.2, 1.8, 2.6]
+    + [3.3, 4.4, 4.1, 2.9, 1.1, -2.9, -8, -11, -13.5, -15]
+    + [-17, -22, -31, -35, -37.5, -38.5]
 )
 # the style curves are sampled at these |azimuth| values (degrees), for the page's uniforms
 CURVE_PHI = np.linspace(0.0, 180.0, 19)
