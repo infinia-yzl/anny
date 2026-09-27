@@ -7,6 +7,7 @@
 // Ported from the legacy web/encode.mjs and web/build_page.py.
 //
 //     python -m anny.viewer build --data && npm run build
+//     node build.mjs --reuse-data     # the page alone, with the model data of the last build
 
 import { MeshoptEncoder } from 'meshoptimizer';
 import * as esbuild from 'esbuild';
@@ -18,102 +19,117 @@ import { fileURLToPath } from 'url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dir = path.join(here, 'build');
 const out = path.join(here, 'dist', 'anny_viewer.html');
-await MeshoptEncoder.ready;
-const man = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json')));
-const read = (name) => new Uint8Array(fs.readFileSync(path.join(dir, name + '.raw')));
-const META_KEYS = ['eyes', 'eye_mesh', 'lut', 'skin', 'rig', 'motion', 'correctives', 'shape', 'stool', 'authoring', 'hair'];
-const header = { buffers: [], meta: Object.fromEntries(META_KEYS.map((k) => [k, man[k]])) };
-const parts = [];
-let offset = 0;
-function push(entry, bytes) {
-  const pad = (4 - (bytes.length % 4)) % 4;
-  entry.byteOffset = offset; entry.byteLength = bytes.length;
-  parts.push(Buffer.from(bytes)); if (pad) parts.push(Buffer.alloc(pad));
-  offset += bytes.length + pad;
-  header.buffers.push(entry);
-}
-const bufs = Object.fromEntries(man.buffers.map((b) => [b.name, b]));
-const COMPANIONS = ['_row', '_detail', '_skin'];
-const REMAP = {};
-// the vertices that the page moves on every frame of a clip: the records of these sparse buffers (the corrective
-// shapes). They go first in the vertex order, so the upload of a frame is one small range.
-const HOT = { head: ['corr'] };
+// the model data: gzip of the container of every buffer
+async function encodeData() {
+  await MeshoptEncoder.ready;
+  const man = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json')));
+  const read = (name) => new Uint8Array(fs.readFileSync(path.join(dir, name + '.raw')));
+  const META_KEYS = ['eyes', 'eye_mesh', 'lut', 'skin', 'rig', 'motion', 'correctives', 'shape', 'stool', 'authoring', 'hair'];
+  const header = { buffers: [], meta: Object.fromEntries(META_KEYS.map((k) => [k, man[k]])) };
+  const parts = [];
+  let offset = 0;
+  function push(entry, bytes) {
+    const pad = (4 - (bytes.length % 4)) % 4;
+    entry.byteOffset = offset; entry.byteLength = bytes.length;
+    parts.push(Buffer.from(bytes)); if (pad) parts.push(Buffer.alloc(pad));
+    offset += bytes.length + pad;
+    header.buffers.push(entry);
+  }
+  const bufs = Object.fromEntries(man.buffers.map((b) => [b.name, b]));
+  const COMPANIONS = ['_row', '_detail', '_skin'];
+  const REMAP = {};
+  // the vertices that the page moves on every frame of a clip: the records of these sparse buffers (the corrective
+  // shapes). They go first in the vertex order, so the upload of a frame is one small range.
+  const HOT = { head: ['corr'] };
 
-// meshes: '<name>_v' with '<name>_i' are reordered for the vertex cache; the companion streams follow
-function encodeMesh(prefix) {
-  const hv = bufs[prefix + '_v'];
-  const vdata = read(prefix + '_v');
-  const idx = new Uint32Array(read(prefix + '_i').buffer.slice(0));
-  const [remap, unique] = MeshoptEncoder.reorderMesh(idx, true, false);
-  // a stable partition of the optimised order: the hot vertices, then the others
-  const hot = new Uint8Array(unique);
-  for (const name of HOT[prefix] || []) {
-    const b = bufs[name];
-    if (!b) continue;
-    const dv = new DataView(read(name).buffer.slice(0));
-    for (let i = 0; i < b.count; i++) hot[remap[dv.getUint32(i * b.stride, true)]] = 1;
-  }
-  const perm = new Uint32Array(unique);
-  let nHot = 0;
-  for (let v = 0; v < unique; v++) if (hot[v]) perm[v] = nHot++;
-  for (let v = 0, k = nHot; v < unique; v++) if (!hot[v]) perm[v] = k++;
-  for (let i = 0; i < remap.length; i++) if (remap[i] !== 0xffffffff) remap[i] = perm[remap[i]];
-  for (let i = 0; i < idx.length; i++) idx[i] = perm[idx[i]];
-  const nv = new Uint8Array(unique * hv.stride);
-  for (let i = 0; i < hv.count; i++) { const r = remap[i]; if (r !== 0xffffffff) nv.set(vdata.subarray(i * hv.stride, (i + 1) * hv.stride), r * hv.stride); }
-  push({ name: prefix + '_v', enc: 'mv', count: unique, stride: hv.stride, lo: hv.lo, hi: hv.hi }, MeshoptEncoder.encodeVertexBufferLevel(nv, unique, hv.stride, 3, 1));
-  push({ name: prefix + '_i', enc: 'mi', count: idx.length, stride: 4 }, MeshoptEncoder.encodeIndexBuffer(new Uint8Array(idx.buffer), idx.length, 4));
-  header.meta[prefix + '_count'] = unique;
-  REMAP[prefix] = remap;
-  for (const suffix of COMPANIONS) {
-    const mb = bufs[prefix + suffix];
-    if (!mb) continue;
-    const md = read(prefix + suffix);
-    const nm = new Uint8Array(unique * mb.stride);
-    for (let i = 0; i < mb.count; i++) { const r = remap[i]; if (r !== 0xffffffff) nm.set(md.subarray(i * mb.stride, (i + 1) * mb.stride), r * mb.stride); }
-    const entry = Object.assign({}, mb, { name: prefix + suffix, enc: 'mv', count: unique });
-    delete entry.kind;
-    push(entry, MeshoptEncoder.encodeVertexBufferLevel(nm, unique, mb.stride, 3, 1));
-  }
-  console.log(prefix, unique, 'vertices,', idx.length / 3, 'triangles,', nHot, 'moved on every frame');
-}
-const meshes = man.buffers.filter((b) => b.name.endsWith('_v') && bufs[b.name.slice(0, -2) + '_i']).map((b) => b.name.slice(0, -2));
-meshes.forEach(encodeMesh);
-
-// records that name vertices of a mesh: the vertex fields follow the new vertex order; the records of each
-// corrective shape are sorted by vertex again (sort: 'shapes'), the strand bindings keep their order
-function encodeSparse(b) {
-  const br = REMAP[b.body];
-  const data = read(b.name);
-  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  for (let i = 0; i < b.count; i++) for (let f = 0; f < (b.fields || 1); f++) {
-    const r = br[dv.getUint32(i * b.stride + f * 4, true)];
-    if (r === 0xffffffff) throw new Error('record on an unused vertex: ' + b.name);
-    dv.setUint32(i * b.stride + f * 4, r, true);
-  }
-  let outb = data.subarray(0, b.count * b.stride);
-  if (b.sort === 'shapes') {
-    outb = new Uint8Array(b.count * b.stride);
-    for (const s of man.correctives.shapes) {
-      const order = Array.from({ length: s.count }, (_, k) => s.start + k).sort((x, y) => dv.getUint32(x * b.stride, true) - dv.getUint32(y * b.stride, true));
-      order.forEach((src, k) => outb.set(data.subarray(src * b.stride, (src + 1) * b.stride), (s.start + k) * b.stride));
+  // meshes: '<name>_v' with '<name>_i' are reordered for the vertex cache; the companion streams follow
+  function encodeMesh(prefix) {
+    const hv = bufs[prefix + '_v'];
+    const vdata = read(prefix + '_v');
+    const idx = new Uint32Array(read(prefix + '_i').buffer.slice(0));
+    const [remap, unique] = MeshoptEncoder.reorderMesh(idx, true, false);
+    // a stable partition of the optimised order: the hot vertices, then the others
+    const hot = new Uint8Array(unique);
+    for (const name of HOT[prefix] || []) {
+      const b = bufs[name];
+      if (!b) continue;
+      const dv = new DataView(read(name).buffer.slice(0));
+      for (let i = 0; i < b.count; i++) hot[remap[dv.getUint32(i * b.stride, true)]] = 1;
     }
+    const perm = new Uint32Array(unique);
+    let nHot = 0;
+    for (let v = 0; v < unique; v++) if (hot[v]) perm[v] = nHot++;
+    for (let v = 0, k = nHot; v < unique; v++) if (!hot[v]) perm[v] = k++;
+    for (let i = 0; i < remap.length; i++) if (remap[i] !== 0xffffffff) remap[i] = perm[remap[i]];
+    for (let i = 0; i < idx.length; i++) idx[i] = perm[idx[i]];
+    const nv = new Uint8Array(unique * hv.stride);
+    for (let i = 0; i < hv.count; i++) { const r = remap[i]; if (r !== 0xffffffff) nv.set(vdata.subarray(i * hv.stride, (i + 1) * hv.stride), r * hv.stride); }
+    push({ name: prefix + '_v', enc: 'mv', count: unique, stride: hv.stride, lo: hv.lo, hi: hv.hi }, MeshoptEncoder.encodeVertexBufferLevel(nv, unique, hv.stride, 3, 1));
+    push({ name: prefix + '_i', enc: 'mi', count: idx.length, stride: 4 }, MeshoptEncoder.encodeIndexBuffer(new Uint8Array(idx.buffer), idx.length, 4));
+    header.meta[prefix + '_count'] = unique;
+    REMAP[prefix] = remap;
+    for (const suffix of COMPANIONS) {
+      const mb = bufs[prefix + suffix];
+      if (!mb) continue;
+      const md = read(prefix + suffix);
+      const nm = new Uint8Array(unique * mb.stride);
+      for (let i = 0; i < mb.count; i++) { const r = remap[i]; if (r !== 0xffffffff) nm.set(md.subarray(i * mb.stride, (i + 1) * mb.stride), r * mb.stride); }
+      const entry = Object.assign({}, mb, { name: prefix + suffix, enc: 'mv', count: unique });
+      delete entry.kind;
+      push(entry, MeshoptEncoder.encodeVertexBufferLevel(nm, unique, mb.stride, 3, 1));
+    }
+    console.log(prefix, unique, 'vertices,', idx.length / 3, 'triangles,', nHot, 'moved on every frame');
   }
-  const entry = Object.assign({ enc: 'mv' }, b); delete entry.kind;
-  push(entry, MeshoptEncoder.encodeVertexBufferLevel(outb, b.count, b.stride, 3, 1));
+  const meshes = man.buffers.filter((b) => b.name.endsWith('_v') && bufs[b.name.slice(0, -2) + '_i']).map((b) => b.name.slice(0, -2));
+  meshes.forEach(encodeMesh);
+
+  // records that name vertices of a mesh: the vertex fields follow the new vertex order; the records of each
+  // corrective shape are sorted by vertex again (sort: 'shapes'), the strand bindings keep their order
+  function encodeSparse(b) {
+    const br = REMAP[b.body];
+    const data = read(b.name);
+    const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    for (let i = 0; i < b.count; i++) for (let f = 0; f < (b.fields || 1); f++) {
+      const r = br[dv.getUint32(i * b.stride + f * 4, true)];
+      if (r === 0xffffffff) throw new Error('record on an unused vertex: ' + b.name);
+      dv.setUint32(i * b.stride + f * 4, r, true);
+    }
+    let outb = data.subarray(0, b.count * b.stride);
+    if (b.sort === 'shapes') {
+      outb = new Uint8Array(b.count * b.stride);
+      for (const s of man.correctives.shapes) {
+        const order = Array.from({ length: s.count }, (_, k) => s.start + k).sort((x, y) => dv.getUint32(x * b.stride, true) - dv.getUint32(y * b.stride, true));
+        order.forEach((src, k) => outb.set(data.subarray(src * b.stride, (src + 1) * b.stride), (s.start + k) * b.stride));
+      }
+    }
+    const entry = Object.assign({ enc: 'mv' }, b); delete entry.kind;
+    push(entry, MeshoptEncoder.encodeVertexBufferLevel(outb, b.count, b.stride, 3, 1));
+  }
+  for (const b of man.buffers) {
+    if (b.kind === 'sparse') { encodeSparse(b); continue; }
+    if (meshes.some((p) => b.name === p + '_v' || b.name === p + '_i' || COMPANIONS.some((s) => b.name === p + s))) continue;
+    const data = read(b.name);
+    if (b.kind === 'vertex') push(Object.assign({ enc: 'mv' }, b), MeshoptEncoder.encodeVertexBufferLevel(data, b.count, b.stride, 3, 1));
+    else push(Object.assign({ enc: 'raw' }, b), data);
+  }
+  const hjson = Buffer.from(JSON.stringify(header));
+  const hl = Buffer.alloc(8); hl.write('HDB1', 0); hl.writeUInt32LE(hjson.length, 4);
+  const blob = Buffer.concat([hl, hjson, Buffer.alloc((4 - (hjson.length % 4)) % 4), ...parts]);
+  const gz = zlib.gzipSync(blob, { level: 9 });
+  console.log('data', (blob.length / 1e6).toFixed(1), 'MB, gzip', (gz.length / 1e6).toFixed(1), 'MB');
+  return gz;
 }
-for (const b of man.buffers) {
-  if (b.kind === 'sparse') { encodeSparse(b); continue; }
-  if (meshes.some((p) => b.name === p + '_v' || b.name === p + '_i' || COMPANIONS.some((s) => b.name === p + s))) continue;
-  const data = read(b.name);
-  if (b.kind === 'vertex') push(Object.assign({ enc: 'mv' }, b), MeshoptEncoder.encodeVertexBufferLevel(data, b.count, b.stride, 3, 1));
-  else push(Object.assign({ enc: 'raw' }, b), data);
+
+// --reuse-data: the model data of the page built before (dist/anny_viewer.html), for changes to the page alone when
+// the data stage has not run here
+function reusedData() {
+  const old = fs.readFileSync(out, 'utf8');
+  const m = old.match(/window\.MODEL_B64 = "([A-Za-z0-9+/=]+)"/);
+  if (!m) throw new Error('no model data in ' + out);
+  console.log('data reused from', out);
+  return Buffer.from(m[1], 'base64');
 }
-const hjson = Buffer.from(JSON.stringify(header));
-const hl = Buffer.alloc(8); hl.write('HDB1', 0); hl.writeUInt32LE(hjson.length, 4);
-const blob = Buffer.concat([hl, hjson, Buffer.alloc((4 - (hjson.length % 4)) % 4), ...parts]);
-const gz = zlib.gzipSync(blob, { level: 9 });
-console.log('data', (blob.length / 1e6).toFixed(1), 'MB, gzip', (gz.length / 1e6).toFixed(1), 'MB');
+const gz = process.argv.includes('--reuse-data') ? reusedData() : await encodeData();
 
 // the script: the TypeScript with three.js in one bundle
 const bundle = await esbuild.build({
