@@ -99,7 +99,8 @@ uniform vec3 uCurlP;   // radius, period (m), ramp
 uniform vec4 uFrizz;   // amplitude range (m), cycles range
 uniform vec3 uFly;     // share, drift range (m)
 uniform float uHLPhi[24]; uniform float uHLEl[24];
-uniform float uHairline[19]; uniform float uFadeStart[19]; uniform vec4 uFade;   // width, clipper, top, on
+uniform float uHairline[19]; uniform float uFadeStart[19]; uniform float uFadeLine[19];
+uniform vec4 uFade;   // width, clipper, top, kind (0: none, 1: a taper along the hairline, 2: a fade up to a level guideline)
 #define PI 3.141592653589793
 
 // random values (anny.hair.styles.rnd)
@@ -117,8 +118,11 @@ float hairline(float phi) {
 float fadeLength(float phi, float el) {
   if (uFade.w < 0.5) return 1e9;
   float a = abs(phi), f = clamp(a / 10.0, 0.0, 18.0); int k = min(int(f), 17);
-  float lo = mix(uFadeStart[k], uFadeStart[k + 1], f - float(k)) + uFadeShift;
-  float u = clamp((el - hairline(phi) - lo) / uFade.x, 0.0, 30.0);
+  float hl = hairline(phi), h = el - hl;
+  bool line = uFade.w > 1.5;
+  float lo = mix(uFadeStart[k], uFadeStart[k + 1], f - float(k)) + (line ? 0.0 : uFadeShift);
+  float band = line ? max(mix(uFadeLine[k], uFadeLine[k + 1], f - float(k)) + uFadeShift - hl - lo, uFade.x) : uFade.x;
+  float u = clamp((h - lo) / band, 0.0, 30.0);
   return uFade.y * pow(uFade.z / uFade.y, u);
 }
 vec3 rotBetween(vec3 u, vec3 v, vec3 x) {

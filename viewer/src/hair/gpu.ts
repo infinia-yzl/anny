@@ -143,7 +143,8 @@ export class Hair {
       uSectorR: { value: meta.sector_radius }, uSimilarity: { value: meta.similarity },
       uPivotBlend: { value: 0.02 }, uCurlP: { value: new THREE.Vector3(0, 1, 0.15) }, uFrizz: { value: new THREE.Vector4() }, uFly: { value: new THREE.Vector3() },
       uHLPhi: { value: hl.phi.slice() }, uHLEl: { value: hl.el.slice() },
-      uHairline: { value: new Array(19).fill(0) }, uFadeStart: { value: new Array(19).fill(0) }, uFade: { value: new THREE.Vector4(1, 1, 1, 0) },
+      uHairline: { value: new Array(19).fill(0) }, uFadeStart: { value: new Array(19).fill(0) }, uFadeLine: { value: new Array(19).fill(0) },
+      uFade: { value: new THREE.Vector4(1, 1, 1, 0) },
     });
   }
 
@@ -234,7 +235,9 @@ export class Hair {
     u.uHairline.value = r.hairline ? r.hairline.slice() : new Array(19).fill(0);
     const fd = r.fade;
     u.uFadeStart.value = fd ? fd.start.slice() : new Array(19).fill(0);
-    u.uFade.value.set(fd ? fd.width : 1, fd ? fd.clipper : 1, fd ? fd.top : 1, fd ? 1 : 0);
+    u.uFadeLine.value = fd && fd.line ? fd.line.slice() : new Array(19).fill(0);
+    // the kind: 1 a taper along the hairline, 2 a fade up to a level guideline
+    u.uFade.value.set(fd ? fd.width : 1, fd ? fd.clipper : 1, fd ? fd.top : 1, fd ? (fd.line ? 2 : 1) : 0);
     this.paramUniforms();
   }
 

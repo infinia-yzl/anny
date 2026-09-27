@@ -65,6 +65,43 @@ class TestChart(unittest.TestCase):
         self.assertAlmostEqual(L[0], 0.0005)
         self.assertTrue(np.isinf(chart.fade_length(phi, el, None)).all())
 
+    def test_fade_reaches_its_top_at_the_guideline(self):
+        # a skin fade from the hairline up to a guideline at 20 degrees of elevation
+        n = len(chart.CURVE_PHI)
+        fade = dict(
+            start=[0.0] * n, line=[20.0] * n, width=4.0, clipper=0.0005, top=0.02
+        )
+        phi = np.linspace(80.0, 180.0, 11)
+        top = chart.fade_length(phi, np.full(11, 20.0), fade)
+        self.assertTrue(np.allclose(top, 0.02))
+        # the bottom of the band stays at the hairline, and the shift moves the guideline
+        self.assertTrue(
+            np.allclose(chart.fade_length(phi, chart.hairline(phi), fade), 0.0005)
+        )
+        up = chart.fade_length(phi, np.full(11, 25.0), fade, shift=5.0)
+        self.assertTrue(np.allclose(up, 0.02))
+        self.assertTrue(
+            np.allclose(
+                chart.fade_length(phi, chart.hairline(phi), fade, shift=5.0), 0.0005
+            )
+        )
+
+    def test_mid_fade_guideline_is_level(self):
+        from anny.hair.styles import load_spec
+
+        fade = load_spec("mid_fade")["render"]["fade"]
+        layout = load_layout()
+        a = np.abs(layout.root_chart[:, 0])
+        el = layout.root_chart[:, 1]
+        heights = []
+        for c in range(70, 181, 10):
+            on = (np.abs(a - c) < 4) & (
+                np.abs(el - np.interp(c, chart.CURVE_PHI, fade["line"])) < 1.5
+            )
+            heights.append(np.median(layout.root_position[on, 1]))
+        # one height around the sides and the back of the head, as a barber cuts the line
+        self.assertLess(np.ptp(heights), 0.005)
+
 
 class TestSampling(unittest.TestCase):
     def test_maximal_independent_set(self):

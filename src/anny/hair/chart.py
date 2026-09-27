@@ -73,13 +73,28 @@ def fade_length(phi, el, fade, shift=0.0, offset=None):
     the band it grows geometrically, as the guard numbers of a clipper do, and reaches ``top`` at
     the top of the band. Above the band it keeps growing, so the guides soon decide the length.
     ``fade`` holds ``start`` (degrees above the hairline, at CURVE_PHI; a large negative value
-    means no fade), ``width`` (degrees), ``clipper`` and ``top`` (m); ``shift`` moves the band.
+    means no fade), ``width`` (degrees), ``clipper`` and ``top`` (m).
+
+    A taper follows the hairline: its band runs from ``start`` to ``start + width`` above it, and
+    ``shift`` moves the band. A fade holds ``line`` as well: the elevation (degrees at CURVE_PHI)
+    of its guideline, which runs level around the head as a barber cuts it. The band then runs
+    from ``start`` above the hairline up to the guideline (``width`` at least), and ``shift``
+    moves the guideline.
     """
     if not fade:
         return np.full(np.shape(phi), np.inf)
-    h = el - hairline(phi, offset)
-    lo = np.interp(np.abs(phi), CURVE_PHI, fade["start"]) + shift
-    u = np.clip((h - lo) / fade["width"], 0.0, 30.0)
+    a = np.abs(phi)
+    hl = hairline(phi, offset)
+    h = el - hl
+    line = fade.get("line")
+    lo = np.interp(a, CURVE_PHI, fade["start"]) + (0.0 if line else shift)
+    if line:
+        band = np.maximum(
+            np.interp(a, CURVE_PHI, line) + shift - hl - lo, fade["width"]
+        )
+    else:
+        band = fade["width"]
+    u = np.clip((h - lo) / band, 0.0, 30.0)
     return fade["clipper"] * (fade["top"] / fade["clipper"]) ** u
 
 

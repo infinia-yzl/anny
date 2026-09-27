@@ -96,6 +96,12 @@ class TestHairPage(unittest.TestCase):
                 "() => window.setHairParams({length: 0.8, curl: 1.3, volume: 1.2})"
             )
             cls.rest2 = tab.evaluate(f"() => window.hairRest({N})")
+            # a fade up to a level guideline, which the fade height moves
+            tab.evaluate(
+                "() => { window.setHairStyle('mid_fade');"
+                " window.setHairParams({length: 1, curl: 0, volume: 1, fade: 4}); }"
+            )
+            cls.rest_fade = tab.evaluate(f"() => window.hairRest({N})")
             # the physics on long hair: the head nods for 0.8 s, then rests
             tab.evaluate(
                 "() => { window.setHairStyle('long_straight'); window.setHairPhysics(true); }"
@@ -127,6 +133,7 @@ class TestHairPage(unittest.TestCase):
             browser.close()
         cls.layout = load_layout()
         cls.style = H.load_style(cls.style_name, cls.layout)
+        cls.fade_style = H.load_style("mid_fade", cls.layout)
 
     def guides(self, rest):
         G, P = rest["G"], rest["P"]
@@ -142,14 +149,14 @@ class TestHairPage(unittest.TestCase):
         self.assertLess(np.abs(guides - self.style.points).max(), 5e-5)
         self.assertLess(np.abs(np.linalg.norm(normals, axis=1) - 1).max(), 1e-5)
 
-    def check_pass_b(self, rest):
+    def check_pass_b(self, rest, style=None):
         guides, normals = self.guides(rest)
         P = rest["P"]
         R = np.array(rest["roots"], np.float64).reshape(N, 4)
         roots = H.Roots(R[:, :3], unpack_normals(R[:, 3]))
         prm = rest["params"]
         ref, ell = H.strands(
-            self.style,
+            style or self.style,
             self.layout,
             guides,
             normals,
@@ -173,6 +180,9 @@ class TestHairPage(unittest.TestCase):
 
     def test_pass_b_with_parameters(self):
         self.check_pass_b(self.rest2)
+
+    def test_pass_b_with_a_level_fade(self):
+        self.check_pass_b(self.rest_fade, self.fade_style)
 
     def test_physics_motion_in_pass_a(self):
         m = self.moving

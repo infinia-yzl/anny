@@ -221,10 +221,14 @@ export function hairline(meta: HairMeta, phi: number, offset?: number[] | null):
 export function coverage(meta: HairMeta, phi: number, el: number, offset?: number[] | null): number {
   return smooth(-0.8, 3.0, el - hairline(meta, phi, offset));
 }
+// a taper's band follows the hairline and the shift moves it; a fade's band runs up to its level guideline (line), which
+// the shift moves (anny.hair.chart.fade_length)
 export function fadeLength(meta: HairMeta, phi: number, el: number, fade: any, shift: number, offset?: number[] | null): number {
   if (!fade) return Infinity;
-  const h = el - hairline(meta, phi, offset), lo = interp(Math.abs(phi), meta.curve_phi, fade.start) + shift;
-  const u = Math.min(30, Math.max(0, (h - lo) / fade.width));
+  const a = Math.abs(phi), hl = hairline(meta, phi, offset), h = el - hl;
+  const lo = interp(a, meta.curve_phi, fade.start) + (fade.line ? 0 : shift);
+  const band = fade.line ? Math.max(interp(a, meta.curve_phi, fade.line) + shift - hl - lo, fade.width) : fade.width;
+  const u = Math.min(30, Math.max(0, (h - lo) / band));
   return fade.clipper * Math.pow(fade.top / fade.clipper, u);
 }
 
