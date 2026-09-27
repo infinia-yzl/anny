@@ -957,6 +957,90 @@ function rigForBody() {
   setRigRest();
   evalMotion();
 }
+// ------------------------------------------------------------------ skeleton overlay
+// The bones over the picture, as the Gradio demo (anny.examples.interactive_demo) showed them: a tapered bone from
+// each joint to the joint of each child, wide at the parent (the bone that the segment draws), and a ball at every
+// joint. The overlay draws on the canvas after the display pass, in front of the body, so the tone mapping and the
+// accumulation leave it alone. Bones of the figure's left side are teal, of its right side orange.
+const SKEL: any = { on: false, scene: null, bones: null, joints: null, segs: [] as number[][] };
+const SKEL_COLOURS = { L: '#3cc9bd', R: '#f39a4a', C: '#c9d6ea' };
+function boneSide(name: string) { return name.endsWith('.L') ? 'L' : name.endsWith('.R') ? 'R' : 'C'; }
+function buildSkeleton() {
+  // a bone along +Y from 0 to 1, widest at 0.1 (Blender's octahedral bone); the instance matrix scales its width
+  const P = [0, 0, 0, 1, 0.1, 0, 0, 0.1, 1, -1, 0.1, 0, 0, 0.1, -1, 0, 1, 0];
+  const I = [0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 1, 5, 2, 1, 5, 3, 2, 5, 4, 3, 5, 1, 4];
+  const boneGeo = new THREE.BufferGeometry();
+  boneGeo.setAttribute('position', new THREE.Float32BufferAttribute(I.flatMap(k => [P[k * 3], P[k * 3 + 1], P[k * 3 + 2]]), 3));
+  boneGeo.computeVertexNormals();
+  const mat = (flat: boolean) => new THREE.MeshMatcapMaterial({ color: 0xffffff, flatShading: flat, toneMapped: false });
+  SKEL.segs = [];
+  RIG.parents.forEach((p: number, i: number) => { if (p >= 0) SKEL.segs.push([p, i]); });
+  SKEL.bones = new THREE.InstancedMesh(boneGeo, mat(true), SKEL.segs.length);
+  SKEL.joints = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 2), mat(false), RIG.bones.length);
+  const c = new THREE.Color();
+  SKEL.segs.forEach(([p]: number[], k: number) => SKEL.bones.setColorAt(k, c.setStyle(SKEL_COLOURS[boneSide(RIG.bones[p].name)])));
+  RIG.bones.forEach((b: any, i: number) => SKEL.joints.setColorAt(i, c.setStyle(SKEL_COLOURS[boneSide(b.name)]).lerp(new THREE.Color(1, 1, 1), 0.35)));
+  for (const m of [SKEL.bones, SKEL.joints]) m.frustumCulled = false;
+  SKEL.scene = new THREE.Scene();
+  SKEL.scene.add(SKEL.bones, SKEL.joints);
+}
+const _sa = new THREE.Vector3(), _sb = new THREE.Vector3(), _sd = new THREE.Vector3(), _sx = new THREE.Vector3(), _sz = new THREE.Vector3(), _sm = new THREE.Matrix4();
+// the instances follow the posed bones (poseChanged)
+function updateSkeleton() {
+  if (!SKEL.on || !RIG.ready) return;
+  if (!SKEL.scene) buildSkeleton();
+  const inLen = new Float32Array(RIG.bones.length);
+  SKEL.segs.forEach(([p, i]: number[], k: number) => {
+    _sa.setFromMatrixPosition(RIG.bones[p].matrixWorld); _sb.setFromMatrixPosition(RIG.bones[i].matrixWorld);
+    _sd.subVectors(_sb, _sa);
+    const len = _sd.length();
+    inLen[i] = len;
+    if (len < 1e-4) { SKEL.bones.setMatrixAt(k, _sm.makeScale(0, 0, 0)); return; }
+    // the width axes turn with the parent bone, so the facets hold still while the figure moves
+    _sx.setFromMatrixColumn(RIG.bones[p].matrixWorld, 0);
+    _sx.addScaledVector(_sd, -_sx.dot(_sd) / (len * len));
+    if (_sx.lengthSq() < 1e-8) _sx.set(0, 0, 1).cross(_sd);
+    const w = Math.min(0.1 * len, 0.014);
+    _sx.normalize().multiplyScalar(w);
+    _sz.crossVectors(_sx, _sd).normalize().multiplyScalar(w);
+    SKEL.bones.setMatrixAt(k, _sm.makeBasis(_sx, _sd, _sz).setPosition(_sa));
+  });
+  RIG.bones.forEach((b: any, i: number) => {
+    const r = RIG.parents[i] < 0 ? 0.009 : Math.max(0.0022, Math.min(0.008, 0.09 * inLen[i]));
+    _sa.setFromMatrixPosition(b.matrixWorld);
+    SKEL.joints.setMatrixAt(i, _sm.makeScale(r, r, r).setPosition(_sa));
+  });
+  SKEL.bones.instanceMatrix.needsUpdate = true; SKEL.joints.instanceMatrix.needsUpdate = true;
+  SKEL.bones.boundingSphere = null; SKEL.joints.boundingSphere = null;
+}
+// the overlay on the canvas: in front of the picture, with the depth of the bones among themselves
+function drawSkeleton() {
+  if (!SKEL.on || !SKEL.scene) return;
+  renderer.autoClear = false;
+  renderer.clearDepth();
+  renderer.render(SKEL.scene, camera);
+  renderer.autoClear = true;
+}
+function setSkeleton(on: boolean) {
+  SKEL.on = !!on;
+  updateSkeleton();
+  redisplay();
+  HOOKS.motion();
+}
+// the name of the bone under a point of the canvas (client pixels): a segment names its parent bone (the bone whose
+// body it draws), a ball the bone whose head it marks
+const _ray = new THREE.Raycaster(), _ndc = new THREE.Vector2();
+function pickBone(x: number, y: number) {
+  if (!SKEL.on || !SKEL.scene) return null;
+  const r = canvas.getBoundingClientRect();
+  _ndc.set((x - r.left) / r.width * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
+  _ray.setFromCamera(_ndc, camera);
+  const hit = _ray.intersectObjects([SKEL.joints, SKEL.bones], false)[0];
+  if (!hit || hit.instanceId === undefined) return null;
+  const i = hit.object === SKEL.joints ? hit.instanceId : SKEL.segs[hit.instanceId][0];
+  return RIG.bones[i].name as string;
+}
+
 // the colliders of the hair's physics on the current body at rest (hair/colliders.ts): the head sphere sits at the
 // cranium's centre of anny's default body, carried to the current head
 function fitHairColliders() {
@@ -1408,6 +1492,7 @@ function poseChanged() {
     U[key].value.set(0.5 * (pa.x + pt.x), 0.5 * (pa.z + pt.z), 0.4 * len + 0.02, on);
   }
   updateShadowCamera();
+  updateSkeleton();
   shadowsDirty = true; resetAccum();
 }
 
@@ -1820,7 +1905,8 @@ function allocRTs() {
 }
 // dynamic resolution: while the figure or the camera moves, the scene, subsurface and accumulation passes draw into
 // a corner of their targets at the scale s, which a controller lowers when frames come slower than 48 per second
-// and raises after two seconds at the display's rate; once everything rests, the page refines at full resolution
+// (or 80 % of the frame rate limit) and raises after two seconds at the target rate; once everything rests, the page
+// refines at full resolution
 const DYN = { steps: [1, 0.85, 0.7, 0.6, 0.5], k: 0, last: 0, ema: 1 / 60, slow: 0, fast: 0, lastReset: -1e9, resetFrame: -10,
   frame: 0, rendered: false, on: !SHOT && qs.get('dyn') !== 'off' };
 // moving: the accumulation started again in this frame or one of the two before it (or within 100 ms, for short gaps
@@ -1829,7 +1915,8 @@ function moving() { return DYN.frame - DYN.resetFrame <= 2 || performance.now() 
 function tuneScale(dt: number) {
   if (!DYN.on || !moving() || !DYN.rendered) { DYN.slow = DYN.fast = 0; return; }
   DYN.ema += (dt - DYN.ema) * 0.15;
-  if (DYN.ema > 1 / 48) { DYN.slow += dt; DYN.fast = 0; } else if (DYN.ema < 1 / 55) { DYN.fast += dt; DYN.slow = 0; } else { DYN.slow = DYN.fast = 0; }
+  const target = 1 / Math.min(60, FPS.cap || 60);
+  if (DYN.ema > target * 1.25) { DYN.slow += dt; DYN.fast = 0; } else if (DYN.ema < target * 1.09) { DYN.fast += dt; DYN.slow = 0; } else { DYN.slow = DYN.fast = 0; }
   if (DYN.slow > 0.4 && DYN.k < DYN.steps.length - 1) { DYN.k++; DYN.slow = 0; }
   if (DYN.fast > 2.0 && DYN.k > 0) { DYN.k--; DYN.fast = 0; }
 }
@@ -1960,20 +2047,46 @@ function renderPass() {
   dispMat.uniforms.tAcc.value = dst.texture; dispMat.uniforms.uSeed.value = (accCount * 0.618) % 1;
   quadMesh.material = dispMat;
   renderer.setRenderTarget(null); renderer.render(quadScene, quadCam);
+  drawSkeleton();
   HOOKS.passEnd();
   accCount++;
   DYN.rendered = true;
   PERF.passes++; PERF.passMs += performance.now() - t0; PERF.w = w; PERF.h = h;
 }
 function resetAccum() { accCount = 0; DYN.lastReset = performance.now(); DYN.resetFrame = DYN.frame; }
+// the display pass alone, from the accumulated picture: an overlay can change without starting the refinement again
+function redisplay() {
+  if (!accCount) return;
+  quadMesh.material = dispMat;
+  renderer.setRenderTarget(null); renderer.render(quadScene, quadCam);
+  drawSkeleton();
+}
 controls.addEventListener('change', resetAccum);
 controls.addEventListener('start', () => { document.body.classList.add('interacted'); HOOKS.interacted(); });
 let lastFrameT = performance.now();
 let hairClock = false;   // a test steps the hair's physics itself (window.stepHair)
 const _hc = new THREE.Vector3();
+// the frame rate limit (0: the display's rate): the loop skips the display's frames that come before the next due
+// time, which advances by whole intervals, so a limit that does not divide the display's rate still holds on average
+const FPS_CAPS = [0, 60, 30, 20];
+const FPS = { cap: 0, due: 0 };
+function setFpsCap(cap: number) {
+  if (!FPS_CAPS.includes(cap)) return;
+  FPS.cap = cap; FPS.due = 0;
+  HOOKS.motion();
+}
 function animate() {
   requestAnimationFrame(animate);
-  const now = performance.now(), rawDt = (now - lastFrameT) / 1000, dt = Math.min(0.1, rawDt); lastFrameT = now;
+  const now = performance.now();
+  if (FPS.cap) {
+    const iv = 1000 / FPS.cap;
+    // slack for the jitter of the display's frames: a limit at the display's rate skips none of them
+    if (now < FPS.due - Math.min(4, iv / 4)) return;
+    FPS.due += iv;
+    // after a pause (a hidden tab, a slow frame) the schedule starts again from this frame
+    if (FPS.due < now - iv) FPS.due = now + iv;
+  }
+  const rawDt = (now - lastFrameT) / 1000, dt = Math.min(0.1, rawDt); lastFrameT = now;
   DYN.frame++;
   tuneScale(dt);
   DYN.rendered = false;
@@ -1992,7 +2105,8 @@ function animate() {
     if (k >= 1) tween = null;
   }
   UI?.nav.before();
-  const moved = controls.update();
+  // the time step turns the turntable at the same speed at any frame rate
+  const moved = controls.update(dt);
   UI?.nav.after(dt);
   if (controls.autoRotate) resetAccum();
   if (HAIR && HAIR.due()) resetAccum();
@@ -2028,7 +2142,7 @@ function showError(msg) {
 const PERF = { frames: 0, passes: 0, jsMs: 0, passMs: 0, t0: performance.now(), w: 0, h: 0, fps: 0, js: 0, idle: true };
 function frameStats() {
   const st = HAIR ? HAIR.stats() : null;
-  return Object.assign({ fps: +PERF.fps.toFixed(1), js_ms: +PERF.js.toFixed(2), idle: PERF.idle, scale: DYN.last || 1, width: PERF.w, height: PERF.h,
+  return Object.assign({ fps: +PERF.fps.toFixed(1), fps_cap: FPS.cap, js_ms: +PERF.js.toFixed(2), idle: PERF.idle, scale: DYN.last || 1, width: PERF.w, height: PERF.h,
     hair: st ? { strands: st.strands, vertices: st.vertices, lod: st.lod, physics: st.physics ? (st.asleep ? 'asleep' : +st.sim.ms.toFixed(2)) : 'off' } : null },
   UI ? UI.stats.snapshot() : {});
 }
@@ -2180,6 +2294,12 @@ const APP: any = {
   setQuality,
   turntable: () => !!controls.autoRotate,
   setTurntable: (on: boolean) => { controls.autoRotate = !!on; resetAccum(); HOOKS.motion(); },
+  skeleton: () => SKEL.on,
+  setSkeleton,
+  pickBone,
+  fpsCaps: FPS_CAPS,
+  fpsCap: () => FPS.cap,
+  setFpsCap,
   groundY: () => GROUND_Y,
   figure: () => FIG,
   flyTo: (name: string) => flyTo(name),
@@ -2239,6 +2359,8 @@ window.stepHair = (dt = 1 / 60) => { hairClock = true; if (HAIR.stepPhysics(dt))
 window.setHairPhysics = (on) => { HAIR.setPhysics(!!on); HOOKS.hair(); return HAIR.physics; };
 window.setPreset = (n) => { applyPreset(n); return true; };
 window.setCorrectives = (on) => { setCorrectivesOn(on); return CORR.ready; };
+window.setSkeleton = (on) => { setSkeleton(on); return SKEL.on; };
+window.setFpsCap = (cap) => { setFpsCap(cap); return FPS.cap; };
 window.__CORR = CORR;
 window.__U = U;
 window.setLook = (look) => { applyLook(look, false); return true; };

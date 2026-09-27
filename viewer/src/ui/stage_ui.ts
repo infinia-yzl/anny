@@ -3,7 +3,8 @@
 // Apache License, Version 2.0
 //
 // The sections of the Stage segment: Pose (the clips with a timeline, the poses, the soft tissue) and Scene (the
-// lights, their rotation, the exposure, the quality of the picture and the display toggles).
+// lights, their rotation, the exposure, the quality of the picture, the frame rate limit and the display toggles,
+// the skeleton among them).
 
 import type { App } from './app.ts';
 import { chip, foldGroup, searchField, sectionHead, segmented, slider, toggle } from './controls.ts';
@@ -122,24 +123,33 @@ export function stageSections(app: App) {
       onInput: (v) => app.setExposureEV(v) });
     const qNote = h('p.note');
     const qual = segmented('Quality', [{ value: 'auto', label: 'Auto' }, { value: 'sharp', label: 'Sharp' }, { value: 'fast', label: 'Fast' }], (v) => { app.setQuality(v); saveUi({ quality: v }); sync(); }, 'seg-fill');
+    const fps = segmented('Frame rate limit', app.fpsCaps.map((c) => ({ value: String(c), label: c ? `${c} fps` : 'Display', tip: c ? `At most ${c} frames per second` : 'As fast as the display refreshes' })),
+      (v) => { app.setFpsCap(+v); saveUi({ fpsCap: +v }); sync(); }, 'seg-fill');
     const hairT = toggle('Hair', (on) => app.setHairVisible(on));
     const physT = toggle('Hair physics', (on) => app.setHairPhysics(on));
     const turnT = toggle('Turntable', (on) => app.setTurntable(on));
+    const skelT = toggle('Skeleton', (on) => app.setSkeleton(on), 'Shift+B');
     scene.append(head.el, h('h3.sub', { text: 'Lighting' }), cards, h('div.sliders', {}, rot.el, exp.el),
       h('h3.sub', { text: 'Quality' }), qual.el, qNote,
-      h('h3.sub', { text: 'Display' }), h('div.switches', {}, hairT.el, physT.el, turnT.el));
+      h('h3.sub', { text: 'Frame rate limit' }), fps.el,
+      h('p.note', { text: 'A lower limit saves energy while the figure, the hair or the camera moves. A still picture refines and then stops drawing at any limit.' }),
+      h('h3.sub', { text: 'Display' }), h('div.switches', {}, hairT.el, physT.el, turnT.el, skelT.el),
+      h('p.note', { text: 'The skeleton shows the bones of the rig in front of the body: the figure’s left side in teal, its right side in orange. Point at a bone to read its name.' }));
     const sync = () => {
       lightEls.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.preset === app.preset())));
       head.note.textContent = app.presets[app.preset()]?.label || '';
       rot.set(app.lightRotation()); exp.set(app.exposureEV());
       qual.set(app.quality()); qNote.textContent = QUALITY[app.quality()] || '';
-      hairT.set(app.hairVisible()); physT.set(app.hairPhysics()); turnT.set(app.turntable());
+      fps.set(String(app.fpsCap()));
+      hairT.set(app.hairVisible()); physT.set(app.hairPhysics()); turnT.set(app.turntable()); skelT.set(app.skeleton());
     };
     syncs.push(sync);
   }
 
-  // the saved quality applies once at start
+  // the saved quality and frame rate limit apply once at start
   const q = uiState().quality;
   if (q && q !== app.quality() && !app.shot) app.setQuality(q);
+  const cap = uiState().fpsCap;
+  if (typeof cap === 'number' && cap !== app.fpsCap() && !app.shot) app.setFpsCap(cap);
   return { pose, scene, sync: () => { for (const s of syncs) s(); }, frame: () => { for (const f of frames) f(); } };
 }

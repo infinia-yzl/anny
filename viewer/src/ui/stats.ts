@@ -73,7 +73,7 @@ export function makeStats(app: App): Stats {
   const rows = (pairs: [string, HTMLElement][]) => h('dl.st-grid', {}, ...pairs.flatMap(([k, v]) => [h('dt', { text: k }), h('dd', {}, v)]));
   const v = () => h('span');
   const R: Record<string, HTMLElement> = {};
-  for (const k of ['scale', 'res', 'samples', 'draws', 'tris', 'hair', 'lod', 'hverts', 'phys', 'bodyms', 'geo', 'heap', 'gpu', 'pr', 'shadow', 'sss', 'quality', 'canvas']) R[k] = v();
+  for (const k of ['scale', 'res', 'samples', 'draws', 'tris', 'hair', 'lod', 'hverts', 'phys', 'bodyms', 'geo', 'heap', 'gpu', 'pr', 'shadow', 'sss', 'quality', 'cap', 'canvas']) R[k] = v();
   const load = h('dl.st-grid');
   const benchOut = h('div.st-bench', { hidden: true });
   const benchBtn = h('button.tb', { type: 'button', text: 'Run benchmark (10 s)' });
@@ -86,7 +86,7 @@ export function makeStats(app: App): Stats {
     svg, legend,
     h('h4', { text: 'Picture' }), rows([['Render scale', R.scale], ['Resolution', R.res], ['Refinement', R.samples], ['Draw calls', R.draws], ['Triangles', R.tris]]),
     h('h4', { text: 'Scene' }), rows([['Hair strands', R.hair], ['Hair detail', R.lod], ['Hair vertices', R.hverts], ['Hair physics', R.phys], ['Body update', R.bodyms], ['GPU memory', R.geo], ['JS heap', R.heap]]),
-    h('h4', { text: 'Device' }), rows([['GPU', R.gpu], ['Pixel ratio', R.pr], ['Canvas', R.canvas], ['Shadow map', R.shadow], ['Skin diffusion', R.sss], ['Quality', R.quality]]),
+    h('h4', { text: 'Device' }), rows([['GPU', R.gpu], ['Pixel ratio', R.pr], ['Canvas', R.canvas], ['Shadow map', R.shadow], ['Skin diffusion', R.sss], ['Quality', R.quality], ['Frame limit', R.cap]]),
     h('h4', { text: 'Load' }), load,
     h('div.btn-row', {}, benchBtn, copyBtn), benchOut);
   const hudFps = h('span.hud-fps'), hudMs = h('span.hud-ms');
@@ -127,7 +127,7 @@ export function makeStats(app: App): Stats {
     const mean = recent.length ? recent.reduce((a, b) => a + b, 0) / recent.length : 0;
     const f = idle || !mean ? 0 : 1000 / mean;
     fps.textContent = idle ? '–' : f.toFixed(0);
-    state.textContent = idle ? 'Idle · picture refined' : bench ? `Benchmark · ${Math.ceil(10 - (now - bench.t0) / 1000)} s` : 'Drawing';
+    state.textContent = idle ? 'Idle · picture refined' : bench ? `Benchmark · ${Math.ceil(10 - (now - bench.t0) / 1000)} s` : app.fpsCap() ? `Drawing · limit ${app.fpsCap()} fps` : 'Drawing';
     state.dataset.kind = idle ? 'idle' : 'on';
     const c = cpu.slice(-60), cm = c.length ? c.reduce((a, b) => a + b, 0) / c.length : 0;
     ms.textContent = `${mean.toFixed(1)} ms · CPU ${cm.toFixed(1)} ms`;
@@ -160,6 +160,7 @@ export function makeStats(app: App): Stats {
     R.shadow.textContent = `${app.shadowSize()} px`;
     R.sss.textContent = app.sssMode();
     R.quality.textContent = app.quality();
+    R.cap.textContent = app.fpsCap() ? `${app.fpsCap()} fps` : 'display rate';
     if (!load.childElementCount) {
       const L = app.loadTimes();
       for (let i = 0; i + 1 < L.length; i++) load.append(h('dt', { text: L[i][0] || 'Other' }), h('dd', { text: `${Math.round(L[i + 1][1] - L[i][1])} ms` }));
@@ -224,7 +225,7 @@ export function makeStats(app: App): Stats {
     const n = b.dts.length, mean = n ? b.dts.reduce((a, c) => a + c, 0) / n : 0;
     const res = {
       frames: n, fps: mean ? +(1000 / mean).toFixed(1) : 0, p50_ms: +quantile(b.dts, 0.5).toFixed(2), p95_ms: +quantile(b.dts, 0.95).toFixed(2),
-      p99_ms: +quantile(b.dts, 0.99).toFixed(2), gpu_ms: b.gpu.length ? +quantile(b.gpu, 0.5).toFixed(2) : null,
+      p99_ms: +quantile(b.dts, 0.99).toFixed(2), gpu_ms: b.gpu.length ? +quantile(b.gpu, 0.5).toFixed(2) : null, fps_cap: app.fpsCap(),
       scale: b.scale.length ? +(b.scale.reduce((a, c) => a + c, 0) / b.scale.length).toFixed(2) : 1, quality: app.quality(), gpu: gpuName,
     };
     benchOut.hidden = false;

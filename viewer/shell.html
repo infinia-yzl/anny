@@ -65,6 +65,14 @@
   [data-tip-pos="left"]:hover::after, [data-tip-pos="left"]:focus-visible::after { right: calc(100% + 10px); top: 50%; translate: 0 -50%; }
   @keyframes tip-in { from { opacity: 0; } to { opacity: 1; } }
   @media (hover: none) { [data-tip]::after { display: none !important; } }
+  /* the name of the bone under the pointer, while the skeleton shows */
+  .bone-tip {
+    position: fixed; z-index: 55; pointer-events: none; translate: 12px -150%; white-space: nowrap;
+    font: 500 11.5px/1 var(--mono); color: var(--text);
+    background: #0a0a0c; border: 1px solid var(--line-2); border-radius: 7px; padding: 6px 8px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  }
+  body.shot .bone-tip { display: none !important; }
 
   /* ------------------------------------------------------------ buttons */
   .ib {

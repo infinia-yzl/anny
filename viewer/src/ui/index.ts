@@ -3,7 +3,8 @@
 // Apache License, Version 2.0
 //
 // The interface of the viewer: the top bar (identity and quick actions), the Character and Stage segments, the view
-// bar, the height rail, the performance card, the help sheet, the first-run hint and the keyboard shortcuts.
+// bar, the height rail, the performance card, the help sheet, the first-run hint, the name of the bone under the
+// pointer while the skeleton shows, and the keyboard shortcuts.
 // main.ts calls initUI once the model is ready, and calls the returned hooks when the look, the motion or a frame
 // changes.
 
@@ -184,6 +185,7 @@ export function initUI(app: App): UI {
     { value: 'front', label: 'Front', short: 'Front', icon: 'angle_front', tip: 'Front  ·  4' }, { value: 'three', label: 'Three-quarter', short: '¾', icon: 'angle_three', tip: 'Three-quarter  ·  5' },
     { value: 'side', label: 'Side', short: 'Side', icon: 'angle_side', tip: 'Side  ·  6' }, { value: 'back', label: 'Back', short: 'Back', icon: 'angle_back', tip: 'Back  ·  7' }], (v) => nav.angle(v), 'seg-icons');
   const turnB = iconButton('turntable', 'Turntable', { key: 'T', tip: 'up', on: () => app.setTurntable(!app.turntable()) });
+  const bonesB = iconButton('bones', 'Skeleton', { key: 'Shift+B', tip: 'up', on: () => app.setSkeleton(!app.skeleton()) });
   const resetB = iconButton('reset', 'Reset view', { key: '0', tip: 'up', on: () => nav.reset() });
   const ns = 'http://www.w3.org/2000/svg';
   const ring = document.createElementNS(ns, 'svg'); ring.setAttribute('viewBox', '0 0 24 24'); ring.setAttribute('class', 'ring'); ring.setAttribute('aria-hidden', 'true');
@@ -191,7 +193,7 @@ export function initUI(app: App): UI {
   const ringLabel = h('span.ring-label');
   const ringB = h('button.ringb', { type: 'button', 'data-tip': 'Refinement · open Performance', 'data-tip-pos': 'up', 'aria-live': 'polite' }, ring, ringLabel);
   ringB.addEventListener('click', () => stats.toggle());
-  const vbItems = h('div.vb-items', {}, framing.el, h('span.sep'), angles.el, h('span.sep'), turnB, resetB, ringB);
+  const vbItems = h('div.vb-items', {}, framing.el, h('span.sep'), angles.el, h('span.sep'), turnB, bonesB, resetB, ringB);
   const vbToggle = iconButton('camera', 'View', { cls: 'vb-toggle', tip: 'up' });
   const viewbar = h('div.viewbar', { role: 'toolbar', 'aria-label': 'View' }, vbToggle, vbItems);
   vbToggle.addEventListener('click', () => { viewbar.classList.toggle('open'); document.body.classList.toggle('vb-open', viewbar.classList.contains('open')); vbToggle.setAttribute('aria-expanded', String(viewbar.classList.contains('open'))); });
@@ -201,6 +203,7 @@ export function initUI(app: App): UI {
     const a = Object.entries({ front: 0, three: 24, side: 90, back: 180 }).find(([, y]) => y === app.view.yaw);
     angles.set(a ? a[0] : '');
     turnB.setAttribute('aria-pressed', String(app.turntable()));
+    bonesB.setAttribute('aria-pressed', String(app.skeleton()));
   };
   nav.onView = paintView;
   let lastRing = '';
@@ -228,7 +231,26 @@ export function initUI(app: App): UI {
   }
   function dismissCoach() { if (!coach) return; coach.classList.add('out'); const c = coach; coach = null; setTimeout(() => c.remove(), 300); saveUi({ coach: 1 }); }
 
-  document.body.append(top, left.rail, left.panel, right.rail, right.panel, nav.rail, viewbar, stats.el, help, shotDlg);
+  // ---------------------------------------------------------------- the name of the bone under the pointer
+  const boneTip = h('div.bone-tip', { 'aria-hidden': 'true', hidden: true });
+  let tipAt: { x: number; y: number } | null = null, tipQueued = false;
+  const paintBoneTip = () => {
+    tipQueued = false;
+    const name = tipAt && app.skeleton() ? app.pickBone(tipAt.x, tipAt.y) : null;
+    boneTip.hidden = !name;
+    if (!name || !tipAt) return;
+    boneTip.textContent = name;
+    boneTip.style.left = tipAt.x + 'px'; boneTip.style.top = tipAt.y + 'px';
+  };
+  app.canvas.addEventListener('pointermove', (e) => {
+    // a drag orbits the camera: the name waits until the pointer rests on a bone again
+    if (e.buttons || e.pointerType === 'touch') { tipAt = null; boneTip.hidden = true; return; }
+    tipAt = { x: e.clientX, y: e.clientY };
+    if (!tipQueued && app.skeleton()) { tipQueued = true; requestAnimationFrame(paintBoneTip); }
+  });
+  app.canvas.addEventListener('pointerleave', () => { tipAt = null; boneTip.hidden = true; });
+
+  document.body.append(top, left.rail, left.panel, right.rail, right.panel, nav.rail, viewbar, stats.el, help, shotDlg, boneTip);
   if (coach) document.body.append(coach);
 
   // ---------------------------------------------------------------- the keyboard
@@ -258,6 +280,7 @@ export function initUI(app: App): UI {
       c: () => left.toggle('characters'), b: () => left.toggle('body'), f: () => left.toggle('face'), h: () => left.toggle('hair'), e: () => left.toggle('skin'),
       p: () => right.toggle('pose'), l: () => right.toggle('scene'),
       H: () => app.setHairVisible(!app.hairVisible()), t: () => app.setTurntable(!app.turntable()),
+      B: () => app.setSkeleton(!app.skeleton()),
       '`': () => stats.toggle(), '?': () => help.showModal(),
       ' ': () => { const m = app.motion(); if (m.cur && m.cur.kind === 'loop') app.togglePlay(); },
       Escape: () => {
@@ -301,7 +324,7 @@ export function initUI(app: App): UI {
   let tFrame = 0;
   const hooks: Hooks = {
     look: syncLook,
-    motion: () => ss.sync(),
+    motion: () => { ss.sync(); if (!app.skeleton()) boneTip.hidden = true; },
     hair: () => { cs.sync(app.look()); ss.sync(); },
     frame(now, dt, drew, jsMs) {
       stats.frame(now, dt, drew, jsMs);

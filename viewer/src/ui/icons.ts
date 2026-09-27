@@ -22,6 +22,7 @@ const PATHS: Record<string, string> = {
   help: '<circle cx="12" cy="12" r="8.6"/><path d="M9.6 9.4a2.5 2.5 0 014.8.9c0 1.7-2.4 2.2-2.4 3.8M12 16.8h.01"/>',
   more: '<path d="M6 12h.01M12 12h.01M18 12h.01" stroke-width="2.8"/>',
   turntable: '<path d="M4.5 12a7.5 7.5 0 0113-5.1M19.5 12a7.5 7.5 0 01-13 5.1"/><path d="M17.8 3.8v3.4h-3.4M6.2 20.2v-3.4h3.4"/>',
+  bones: '<circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="1.5"/><path d="M7.56 16.44L11.2 16.48 16.94 7.06 7.52 12.8zM7.52 12.8l3.68 3.68"/>',
   reset: '<circle cx="12" cy="12" r="6.5"/><path d="M12 2.8v4M12 17.2v4M2.8 12h4M17.2 12h4"/><circle cx="12" cy="12" r="1" fill="currentColor"/>',
   camera: '<path d="M4 8.5c0-1 .8-1.8 1.8-1.8h2.4L9.8 4.5h4.4l1.6 2.2h2.4c1 0 1.8.8 1.8 1.8v9.2c0 1-.8 1.8-1.8 1.8H5.8c-1 0-1.8-.8-1.8-1.8z"/><circle cx="12" cy="12.8" r="3.4"/>',
   close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',

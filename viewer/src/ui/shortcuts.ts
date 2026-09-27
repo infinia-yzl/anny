@@ -23,6 +23,7 @@ export const SHORTCUTS: [string, [string, string][]][] = [
     ['4 5 6 7', 'Front, three-quarter, side, back'],
     ['T', 'Turntable'],
     ['Shift+H', 'Show or hide the hair'],
+    ['Shift+B', 'Show or hide the skeleton'],
     ['Alt+1 to 4', 'Lighting presets'],
     ['Space', 'Play or pause the animation'],
   ]],

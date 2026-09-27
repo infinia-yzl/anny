@@ -90,6 +90,14 @@ export interface App {
   setQuality(q: string): void;
   turntable(): boolean;
   setTurntable(on: boolean): void;
+  // the bones drawn over the picture, and the name of the bone under a point of the canvas (client pixels)
+  skeleton(): boolean;
+  setSkeleton(on: boolean): void;
+  pickBone(x: number, y: number): string | null;
+  // the frame rate limit (0: the display's rate)
+  fpsCaps: number[];
+  fpsCap(): number;
+  setFpsCap(cap: number): void;
 
   // the camera
   groundY(): number;
