@@ -53,6 +53,7 @@ uv run python -m anny.hair.authoring.photos                 # photos.html in ANN
 ```bash
 uv sync --extra viewer                # scipy, tetgen, embreex for the build
 uv run python -m anny.viewer build    # data (cached under ANNY_CACHE_DIR/viewer) and the page viewer/dist/anny_viewer.html
+cd viewer && node build.mjs --reuse-data   # the page alone, with the model data of the last build (for changes to src/ or shell.html)
 cd viewer && npx tsc --noEmit         # type-check the page
 uv run --with playwright python -m anny.viewer.benchmark   # uploads, draws and vertices of a moving frame
 ```
@@ -157,11 +158,11 @@ The pose, corrective and hair authoring code (`*/authoring/`) works on the autho
 
 ### Web Viewer
 
-`viewer/` is a node project (TypeScript, three.js, esbuild). `src/anny_shape.ts` and `src/subdivision.ts` repeat anny's coefficient maths and the subdivision, and `test/test_viewer_parity.py` checks them against Python. `src/body.ts` rebuilds the fine body for any slider setting, `src/shading.ts` holds the shaders, and `src/main.ts` holds the renderer and the panels. `npm run build` writes the single-file page `viewer/dist/anny_viewer.html`; `npx tsc --noEmit` type-checks.
+`viewer/` is a node project (TypeScript, three.js, esbuild). `src/anny_shape.ts` and `src/subdivision.ts` repeat anny's coefficient maths and the subdivision, and `test/test_viewer_parity.py` checks them against Python. `src/body.ts` rebuilds the fine body for any slider setting, `src/shading.ts` holds the shaders, and `src/main.ts` holds the renderer. `main.ts` hands the interface an `App` object (`src/ui/app.ts`) and calls back through `HOOKS`; the typed modules of `src/ui/` build the interface: `index.ts` (the top bar, the view bar, undo, the shortcuts), `segments.ts` (the Character segment on the left and the Stage segment on the right, each an icon rail and an inspector, bottom sheets on a phone), `character_ui.ts` (Characters, Body, Face, Hair, Skin & eyes), `stage_ui.ts` (Pose, Scene), `controls.ts` (the slider with its typed value and reset), `camera_nav.ts` (pan within a box around the figure, the floor limit, the height rail, the double-click focus, the angles, the film offset that centres the figure between the inspectors), `stats.ts` (the performance card) and `icons.ts`. `npm run build` writes the single-file page `viewer/dist/anny_viewer.html`; `npx tsc --noEmit` type-checks. The page keeps one `<canvas>` (the screenshot tools select it), so the graphs of the interface are SVG, and `?shot` hides the whole interface.
 The Body section holds the sliders of `anny.viewer.build.SLIDERS`: anny's six default phenotypes and the three race
 phenotypes, whose values mix by their shares (the build uses `phenotypes="all"`, and 136 components reproduce the
-blend shapes exactly). The Characters row of the Character panel holds presets (`CHARACTERS` in `src/main.ts`) that
-set the phenotype sliders, the face and the colours, as a character creator's presets do; the Looks row sets the
+blend shapes exactly). The Characters section of the Character segment holds presets (`CHARACTERS` in `src/main.ts`) that
+set the phenotype sliders, the face and the colours, as a character creator's presets do; the colour looks set the
 colours only. Random face draws with `sampleFace` (`src/anny_shape.ts`) at the spread of the exported prior, and
 `test/test_viewer_parity.py` checks it against Python.
 The hair lives in `src/hair/`: `data.ts` decodes the scalp layout and the styles and builds the density volume,
@@ -172,7 +173,7 @@ a uniform or an instance count. `Hair.setLod` draws a prefix of the render roots
 head on screen (`updateHairLod`). Moving frames render at the scale of `DYN` in `main.ts` (the dynamic resolution),
 and the build puts the vertices of the corrective shapes first (`HOT` in `build.mjs`), so a frame of a clip uploads one
 small range. `python -m anny.viewer.benchmark` counts the uploads, draw calls and vertices of a moving frame, and the
-status label opens a readout of the frame rate (`window.frameStats`). `test/test_hair_parity.py`, `test/test_hair_page.py` and `test/test_hair_dynamics.py`
+Performance card (the chart button of the top bar, the `` ` `` key or `?stats=1`) shows the frame rate, the CPU and GPU time of a frame, the draw calls, the memory and the load times, and runs a 10-second benchmark (`window.frameStats`, `window.__benchmark`). `test/test_hair_parity.py`, `test/test_hair_page.py` and `test/test_hair_dynamics.py`
 check the page's hair against `anny.hair.styles` and `anny.hair.dynamics`.
 
 ### Optional Dependencies

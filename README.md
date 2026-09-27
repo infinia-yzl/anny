@@ -21,6 +21,7 @@ Anny models a large variety of human body shapes, from infants to elders, using 
 - Anny is based on the tremendous work of the [MakeHuman](https://static.makehumancommunity.org/) community, which offers plenty of opportunities for extensions.
 - We provide both full body and part-specific models for hands and faces.
 - Anny is open-source and free.
+- A web viewer renders anny live in the browser, with face shapes, hairstyles, poses and a character editor.
 
 ### News
  - **2026-08-06**: v0.6: New "anny" rig, facial actions, improved SOMA compatibility, API refactoring, and better torch.compile support. See [CHANGELOG.md](CHANGELOG.md) for more details.
@@ -119,18 +120,26 @@ The distribution takes the spread of faces from fits of anny to the ICT-FaceKit 
 
 ### Web viewer
 
-`viewer/dist/anny_viewer.html` renders anny in a browser with WebGL2, from one file. It carries skin shading with subsurface scattering, eyes with a refractive cornea and hair of up to 64,000 strands. Its Character panel holds character presets (Asian and Eurasian women and men) that set the body, the face and the colours; colour looks; anny's phenotype sliders, which run from 0 to 1 with anny's default at 0.5, with the three race phenotypes, whose values mix by their shares (Eurasian is Asian and Caucasian at equal values); and the face shapes, with a Random face button that draws from the calibrated distribution. Its Pose panel plays the poses and clips of `anny.poses` with the corrective shapes. To rebuild the page (node 22 or later is needed):
+`viewer/dist/anny_viewer.html` renders anny in a browser with WebGL2, from one file. It carries skin shading with subsurface scattering, eyes with a refractive cornea and hair of up to 64,000 strands. To rebuild the page (node 22 or later is needed):
 
 ```bash
 uv sync --extra viewer
 uv run python -m anny.viewer build
 ```
 
-The Hair section of the Character panel holds the 25 styles of `anny.hair.styles` and their sliders: length, curl, volume, density and, on the fades, the height of the fade. The styles with a side part can take it on either side. The GPU builds the strands from the guides of the style, so a slider moves the hair at once and a still picture costs no hair work. The Physics button next to the Hair button turns the hair's physics on and off. The solver moves 384 guides with the dynamic follow-the-leader method of Müller et al. (2012) and the shape constraints of Han and Harada (2012), against capsules on the head, the neck, the chest and the shoulders. The groom keeps its shape while the head rests, since only the change of gravity in the head's frame acts on it, and the solver sleeps once the hair comes to rest.
+The page has two segments, and each has an icon rail and an inspector:
+- The **Character** segment on the left edits who the figure is. *Characters* holds presets (Asian and Eurasian women and men) that set the body, the face, the hair and the colours, colour looks, and the preset text (copy, paste, download or open a JSON file). *Body* holds anny's phenotype sliders, which run from 0 to 1 with anny's default at 0.5, with the age in years and the height of the body; the three race phenotypes mix by their shares (Eurasian is Asian and Caucasian at equal values). *Face* holds the 103 face shapes in groups, with a search field and a Random face button that draws from the calibrated distribution. *Hair* holds the 25 styles of `anny.hair.styles` by length, with their sliders (length, curl, volume, density and, on the fades, the height of the fade), the side of the part and the colour. *Skin & eyes* holds the tone, the undertone and the eye colour.
+- The **Stage** segment on the right controls how the figure is shown. *Pose* plays the poses and clips of `anny.poses` with a timeline and the soft-tissue correctives. *Scene* holds the four lighting presets, a rotation of the lights, the exposure, and three quality presets: Auto, Sharp and Fast.
 
-While the figure or the camera moves, the page draws at a lower resolution when frames come slower than 48 per second, and it draws fewer, wider strands when the head is small on screen. It refines the still picture at full resolution. The status label at the corner opens a readout of the frame rate, the render scale and the work of the hair.
+Every slider shows its value in a field that takes a typed value, a mark at its default and a reset button. Undo and redo cover every edit of the look (Ctrl+Z and Ctrl+Shift+Z). The top bar also randomises the character, its body, face, hair or colours, and it saves the picture as a PNG file.
 
-The build caches its slow stages, such as the bakes and the hair groom, under the cache directory (see [Caching](#caching)). For hosts that limit the size of a file, `node viewer/build.mjs --parts <dir>` also writes the page with its model data in separate text files that the page fetches next to itself. The viewer grew from an earlier stand-alone experiment, the `3D Model` folder, which git history keeps at commit `b10538d`.
+The camera orbits with a drag, moves with a right-drag, Shift+drag or two fingers, and zooms toward the pointer. A double-click focuses on the nearest joint, such as a hand or a foot. The height rail at the side of the view moves the camera up and down the body and flies to the head, the chest, the hips, the knees or the feet. The view bar holds the framings (full body, upper body and face), the angles (front, three-quarter, side and back), the turntable and the refinement of the picture. The figure stays centred in the space between the inspectors, and the camera stays above the floor. The `?` key opens a sheet of every keyboard shortcut.
+
+The GPU builds the hair strands from the guides of the style, so a slider moves the hair at once and a still picture costs no hair work. The hair's physics moves 384 guides with the dynamic follow-the-leader method of Müller et al. (2012) and the shape constraints of Han and Harada (2012), against capsules on the head, the neck, the chest and the shoulders. The groom keeps its shape while the head rests, since only the change of gravity in the head's frame acts on it, and the solver sleeps once the hair comes to rest.
+
+While the figure or the camera moves, the page draws at a lower resolution when frames come slower than 48 per second, and it draws fewer, wider strands when the head is small on screen. It refines the still picture at full resolution. The **Performance** card (the chart button, the `` ` `` key or `?stats=1`) shows the frame rate with a graph of the frame times, the CPU and GPU time of a frame (the GPU time where the browser supports timer queries), the render scale, the refinement, the draw calls and triangles, the GPU memory, the work of the hair, the device and the load times. It runs a 10-second benchmark, and it collapses to a small HUD.
+
+The build caches its slow stages, such as the bakes and the hair groom, under the cache directory (see [Caching](#caching)). After a change to the page alone, `node viewer/build.mjs --reuse-data` rebuilds it in seconds with the model data of the last build. For hosts that limit the size of a file, `node viewer/build.mjs --parts <dir>` also writes the page with its model data in separate text files that the page fetches next to itself. The viewer grew from an earlier stand-alone experiment, the `3D Model` folder, which git history keeps at commit `b10538d`.
 
 ## Technical details
 

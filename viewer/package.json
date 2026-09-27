@@ -2,7 +2,7 @@
   "name": "anny-viewer",
   "version": "1.0.0",
   "private": true,
-  "description": "The web viewer of anny: skin, eyes and hair shading, poses and anny's phenotype sliders.",
+  "description": "The web viewer of anny: a character editor with anny's phenotype sliders, face shapes and hairstyles, a stage with poses and lights, camera navigation, and a performance card, rendered with skin, eye and hair shading.",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",

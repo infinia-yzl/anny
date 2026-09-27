@@ -12,7 +12,7 @@ dynamic = ["version"]
 authors = [
     { name = "Romain Brégier", email = "romain.bregier@naverlabs.com" }
 ]
-description="A parametric body model based on MakeHuman for PyTorch."
+description="A differentiable human body model for all ages in PyTorch, based on MakeHuman, with face shapes, poses, soft-tissue correctives, procedural hair and a WebGL viewer."
 readme = "README.md"
 license-files = ["LICENSE", "LICENSE_THINGS"]
 requires-python = ">=3.10"
