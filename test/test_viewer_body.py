@@ -40,7 +40,8 @@ class TestViewerBody(unittest.TestCase):
         self.assertLess(self.result["rest_max"], 5e-4)
 
     def test_default_hair(self):
-        # the strands bind to the default body as the updates rebuild it: the groom comes back exactly
+        # the guides bind to the default body as the updates rebuild it: the groom comes back exactly
+        # (the tips blend with the weight of a byte, as the legacy shader read it)
         self.assertLess(self.result["hair_max"], 1e-5)
 
     def test_ends_of_the_sliders(self):

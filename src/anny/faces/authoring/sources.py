@@ -43,6 +43,10 @@ SOURCES = {
         "https://raw.githubusercontent.com/google-ai-edge/mediapipe/master/mediapipe/modules/"
         "face_geometry/data/canonical_face_model.obj"
     ),
+    "mediapipe_hair_segmenter": (
+        "https://storage.googleapis.com/mediapipe-models/image_segmenter/"
+        "selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite"
+    ),
 }
 FILENAMES = {
     "ansur_male": "ANSUR_II_MALE_Public.csv",
@@ -51,6 +55,7 @@ FILENAMES = {
     "cdc_head_circumference": "hcageinf.csv",
     "mediapipe_face_landmarker": "face_landmarker.task",
     "mediapipe_canonical_face": "canonical_face_model.obj",
+    "mediapipe_hair_segmenter": "selfie_multiclass_256x256.tflite",
 }
 ICT_FACEKIT = "https://github.com/USC-ICT/ICT-FaceKit"
 FAIRFACE = "HuggingFaceM4/FairFace"

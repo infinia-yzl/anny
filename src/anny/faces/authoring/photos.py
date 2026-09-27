@@ -228,12 +228,14 @@ def render_anny(
     margin: float = 1.25,
     out_dir: pathlib.Path | None = None,
     on_image=None,
+    hair: bool = False,
 ):
     """
     Portraits (n, size, size, 3) of anny from the viewer page, one per look (the page's preset
-    format: phenotype, face, skin, hair and eyes). The page renders with its own shading and
-    hair; ``margin`` widens the face framing like FairFace's crops. With ``on_image``, each
-    portrait goes to ``on_image(index, image)`` instead of the returned list.
+    format: phenotype, face, skin, hair and eyes). The page renders with its own shading;
+    ``margin`` widens the face framing like FairFace's crops. The head has no hair unless ``hair``
+    is set (the brows and the lashes stay). With ``on_image``, each portrait goes to
+    ``on_image(index, image)`` instead of the returned list.
     """
     from PIL import Image
     from playwright.sync_api import sync_playwright
@@ -258,16 +260,16 @@ def render_anny(
             "window.__READY && window.__BODY.ready && window.__RIG && window.__RIG.ready",
             timeout=600000,
         )
-        # the canvas alone, and the head without its hair (the brows and the lashes stay)
+        # the canvas alone, and the head with or without its hair
         tab.add_style_tag(
             content="body * { visibility: hidden !important; } "
             "canvas { visibility: visible !important; }"
         )
-        tab.evaluate("() => window.setHair(false)")
+        tab.evaluate(f"() => window.setHair({'true' if hair else 'false'})")
         for i, look in enumerate(looks):
             tab.evaluate("(l) => window.setLook(l)", look)
             tab.evaluate(f"() => window.setPortrait(24, {margin})")
-            png = tab.screenshot()
+            png = tab.screenshot(timeout=300000)
             image = np.asarray(Image.open(io.BytesIO(png)).convert("RGB"))
             if out_dir is not None and i < 64:
                 Image.fromarray(image).save(out_dir / f"anny_{i:03d}.png")

@@ -24,6 +24,9 @@ import {
   BG_GLSL, COVER_GLSL, EYE_FS, EYE_VS, GLSL_COMMON, HAIR_FS, HAIR_VS, HEAD_OUT_GLSL, NOISE_GLSL, PROP_FS, PROP_VS, SKIN_FS, SKIN_GLSL,
   SKIN_VS, SSS_GLSL,
 } from './shading.ts';
+import { Hair } from './hair/gpu.ts';
+import { COLLIDERS, fitColliders } from './hair/colliders.ts';
+import { STRAND_VS } from './hair/glsl.ts';
 
 const qs = new URLSearchParams(location.search);
 const DEG = Math.PI / 180;
@@ -256,6 +259,8 @@ const U = {
   uFootL: { value: new THREE.Vector4(0.168, 0.07, 0.08, 1) }, uFootR: { value: new THREE.Vector4(-0.168, 0.07, 0.08, 1) },
   // the head's pose: from world space back to the rest pose of the head, and the head's rotation
   uHeadInv: { value: new THREE.Matrix4() }, uHeadRot: { value: new THREE.Matrix3() },
+  // the density volume of the hair (anny.hair.styles.density_volume): occlusion and scalp tint of the skin under it
+  uHairOcc: { value: null }, uHairOccLo: { value: new THREE.Vector3() }, uHairOccSize: { value: new THREE.Vector3(1, 1, 1) }, uHairOn: { value: 0 },
 };
 Object.assign(U, BG);
 const FLOAT_RT = renderer.extensions.has('EXT_color_buffer_float');
@@ -610,64 +615,6 @@ function decodeStrands(B, name) {
   const sk = B[name + '_skin'];
   return { P, counts, nS, total, skin: sk ? sk.data.subarray(0, nS * 8) : null };
 }
-// density-based self occlusion for hair points (how much hair lies outward of a point)
-function hairOcclusion(P, total, center, k = 0.1) {
-  let mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
-  for (let i = 0; i < total; i++) for (let a = 0; a < 3; a++) { const v = P[i * 3 + a]; if (v < mn[a]) mn[a] = v; if (v > mx[a]) mx[a] = v; }
-  const h = 0.0015; mn = mn.map(v => v - 0.01);
-  const dims = mx.map((v, a) => Math.ceil((v + 0.01 - mn[a]) / h) + 1);
-  const [dx, dy, dz] = dims;
-  let grid = new Float32Array(dx * dy * dz);
-  for (let i = 0; i < total; i++) {
-    const gx = Math.floor((P[i * 3] - mn[0]) / h), gy = Math.floor((P[i * 3 + 1] - mn[1]) / h), gz = Math.floor((P[i * 3 + 2] - mn[2]) / h);
-    grid[(gx * dy + gy) * dz + gz] += 1;
-  }
-  // separable [1,2,1]/4 blur x2 (approx gaussian)
-  const tmp = new Float32Array(grid.length);
-  const blur = (src, dst, stride, len, outer) => {
-    for (let o = 0; o < src.length; o++) {
-      const c = Math.floor(o / stride) % len;
-      const a = c > 0 ? src[o - stride] : 0, b = c < len - 1 ? src[o + stride] : 0;
-      dst[o] = 0.25 * a + 0.5 * src[o] + 0.25 * b;
-    }
-  };
-  for (let pass = 0; pass < 2; pass++) { blur(grid, tmp, dy * dz, dx); blur(tmp, grid, dz, dy); blur(grid, tmp, 1, dz); grid.set(tmp); }
-  const ao = new Float32Array(total);
-  for (let i = 0; i < total; i++) {
-    let x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
-    let vx = x - center[0], vy = y - center[1], vz = z - center[2];
-    const l = Math.hypot(vx, vy, vz) || 1; vx /= l; vy /= l; vz /= l;
-    let acc = 0;
-    for (let s = 1; s < 14; s++) {
-      const gx = Math.floor((x + vx * s * h - mn[0]) / h), gy = Math.floor((y + vy * s * h - mn[1]) / h), gz = Math.floor((z + vz * s * h - mn[2]) / h);
-      if (gx < 0 || gy < 0 || gz < 0 || gx >= dx || gy >= dy || gz >= dz) continue;
-      acc += grid[(gx * dy + gy) * dz + gz];
-    }
-    ao[i] = Math.exp(-k * acc);
-  }
-  return ao;
-}
-// lighter hair for phones: keep every k-th strand (the caller widens the strands to keep the same coverage)
-function subsetStrands(S, ao, k) {
-  const { P, counts, nS } = S;
-  const starts = new Uint32Array(nS); let p = 0;
-  for (let i = 0; i < nS; i++) { starts[i] = p; p += counts[i]; }
-  let n = 0, total = 0;
-  for (let i = 0; i < nS; i += k) { n++; total += counts[i]; }
-  const P2 = new Float32Array(total * 3), Q2 = S.Q ? new Float32Array(total * 3) : null, ao2 = new Float32Array(total), c2 = new Uint8Array(n);
-  const sk2 = S.skin ? new Uint8Array(n * 8) : null;
-  let q = 0, j = 0;
-  for (let i = 0; i < nS; i += k, j++) {
-    const c = counts[i]; c2[j] = c;
-    P2.set(P.subarray(starts[i] * 3, (starts[i] + c) * 3), q * 3);
-    if (Q2) Q2.set(S.Q.subarray(starts[i] * 3, (starts[i] + c) * 3), q * 3);
-    ao2.set(ao.subarray(starts[i], starts[i] + c), q);
-    if (sk2) sk2.set(S.skin.subarray(i * 8, i * 8 + 8), j * 8);
-    q += c;
-  }
-  const keep = Uint32Array.from({ length: n }, (_, q) => q * k);
-  return { S: { P: P2, Q: Q2, counts: c2, nS: n, total, skin: sk2 }, ao: ao2, keep };
-}
 // S.P: the points in the frames of their root triangles; ids: the strand of each (for a subset of the strands)
 function buildRibbons(S, ao, seed, ids = null) {
   const { P, counts, nS, total } = S;
@@ -757,6 +704,58 @@ function makeHairMesh(geo, p, defines, strands) {
   const mesh = skinned(geo, m);
   mesh.frustumCulled = false; mesh.userData.depthMat = dm; mesh.userData.hu = hu;
   mesh.userData.center = new THREE.Vector3(...(p.center || [0, 0.515, 0.035]));
+  scene.add(mesh); hairObjs.push(mesh);
+  return mesh;
+}
+// the strands of anny's hair (hair/gpu.ts): instanced ribbons that read the points of pass B
+let HAIR: Hair | null = null;
+let HAIR_MESH: any = null;
+// the level of detail of the hair: the share of the strands drawn follows the area of the head on screen (all of
+// them once the head is 600 rendered pixels tall), in steps of 1/sqrt(2) that change beyond a 10% margin; phones draw
+// half. Fewer strands are wider by the root of the inverse share, so the hair keeps its coverage.
+const LOD = { full: 600, steps: [1, 0.71, 0.5, 0.35, 0.25], i: 0, base: isSmall ? 0.5 : 1 };
+const HAIR_SHADOW_SHARE = 0.5;
+function applyHairWidth() {
+  if (!HAIR || !HAIR_MESH) return;
+  const u = HAIR_MESH.userData, k = 1 / Math.sqrt(HAIR.lod), kd = k / Math.sqrt(HAIR_SHADOW_SHARE);
+  u.hu.uWidth.value = u.width * k; u.hu.uTipWidth.value = u.width * u.tip * k;
+  const du = u.depthMat.uniforms;
+  du.uWidth.value = u.width * kd; du.uTipWidth.value = u.width * u.tip * kd;
+}
+function updateHairLod(h: number) {
+  if (!HAIR || !RIG.ready) return;
+  const d = Math.max(1e-3, camera.position.distanceTo(HAIR.uHeadC.value));
+  const px = 0.24 * HEADMAP.k / (2 * d * Math.tan(camera.fov * DEG / 2)) * h;
+  const want = Math.min(1, (px / LOD.full) ** 2), S = LOD.steps;
+  const up = LOD.i > 0 ? S[LOD.i - 1] : Infinity;
+  if (want >= up * 1.1 || want < S[LOD.i] / 1.1) {
+    LOD.i = S.findIndex((v) => v <= want);
+    if (LOD.i < 0) LOD.i = S.length - 1;
+  }
+  const lod = LOD.base * S[LOD.i];
+  if (lod === HAIR.lod) return;
+  HAIR.setLod(lod);
+  applyHairWidth();
+  shadowsDirty = true;
+}
+function makeStrandMesh(hair: Hair, p, defines) {
+  const hu = Object.assign({}, U, {
+    uPoints: hair.uPoints, uP: hair.uP,
+    uWidth: { value: p.width }, uTipWidth: { value: p.width * p.tip }, uViewportH: { value: innerHeight * PR }, uMinPix: { value: p.minPix ?? 0.7 },
+    uHairColor: { value: new THREE.Vector3(...p.color) }, uHairRough: { value: p.rough }, uSpecScale: { value: p.spec ?? 1.0 }, uDiffScale: { value: p.diff ?? 1.3 },
+    uHeadC: hair.uHeadC,
+  });
+  const opts = { vertexShader: STRAND_VS, fragmentShader: toMRT(HAIR_FS), side: THREE.DoubleSide, glslVersion: THREE.GLSL3, blending: THREE.NoBlending };
+  const m = new THREE.ShaderMaterial(Object.assign({ uniforms: hu, defines }, opts));
+  // the shadow of the hair draws a share of the strands (HAIR_SHADOW_SHARE), wider by the root of its inverse
+  const dm = new THREE.ShaderMaterial(Object.assign({ uniforms: Object.assign({}, hu, { uViewportH: { value: SHADOW_SIZE / 2 }, uMinPix: { value: 1.2 },
+    uWidth: { value: p.width }, uTipWidth: { value: p.width * p.tip } }),
+    defines: Object.assign({ HAIR_DEPTH: '' }, defines) }, opts));
+  const mesh = new THREE.Mesh(hair.geometry, m);
+  mesh.frustumCulled = false; mesh.userData.depthMat = dm; mesh.userData.hu = hu;
+  mesh.userData.width = p.width; mesh.userData.tip = p.tip;
+  mesh.userData.center = new THREE.Vector3().copy(hair.uHeadC.value);
+  hair.onGeometry = (g) => { mesh.geometry = g; };
   scene.add(mesh); hairObjs.push(mesh);
   return mesh;
 }
@@ -936,9 +935,18 @@ function rigForBody() {
   for (let i = 0; i < RIG.heads.length; i++) { RIG.heads[i][0] = J[i * 3]; RIG.heads[i][1] = J[i * 3 + 1]; RIG.heads[i][2] = J[i * 3 + 2]; }
   updateHeadMap();
   updateCorrectiveScales();
+  fitHairColliders();
   groundMotion();
   setRigRest();
   evalMotion();
+}
+// the colliders of the hair's physics on the current body at rest (hair/colliders.ts): the head sphere sits at the
+// cranium's centre of anny's default body, carried to the current head
+function fitHairColliders() {
+  if (!HAIR || !RIG.ready) return;
+  const c = new THREE.Vector3().fromArray(MANIFEST.hair.centre).applyMatrix4(HEADMAP.m);
+  const names = RIG.bones.map((b: any) => b.name), b = BODY.anny;
+  HAIR.setColliders(fitColliders(COLLIDERS, names, b.joints, { cranium: [c.x, c.y, c.z] }, b.coarse, b.nBody, HEADMAP.k));
 }
 // the height of the root above the floor: the library scales root offsets, stools and bounds by it
 function hipHeight() { return RIG.heads[RIG.root][1] - BODY.anny.floor; }
@@ -1333,6 +1341,7 @@ function poseChanged() {
   if (!RIG.ready) return;
   RIG.holder.updateMatrixWorld(true);
   applyCorrectives();
+  if (HAIR) { RIG.skel.update(); HAIR.setPose(RIG.skel.boneMatrices, RIG.head); }
   const hb = RIG.bones[RIG.head];
   _headSkin.multiplyMatrices(hb.matrixWorld, RIG.skel.boneInverses[RIG.head]);
   // the head of anny's default body, carried to the current body and then posed
@@ -1413,7 +1422,7 @@ function showStool(info) {
 // A preset is plain JSON: sRGB hex colours for the skin, the hair and the eyes, and the values of anny's phenotype
 // sliders, so the same file can set up anny in Python (phenotype_kwargs) and this viewer.
 // look@2 adds the face-shape values (face: {name: value}); a look@1 preset reads as a face of anny's defaults
-const LOOK_FORMAT = 'anny-viewer/look@2';
+const LOOK_FORMAT = 'anny-viewer/look@3';   // @3 adds the hair style and its parameters; @2 looks still load
 const srgb2lin = (c: number) => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 const hexToRgb = (h: string) => { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
 const hexToLin = (h: string) => hexToRgb(h).map(srgb2lin);
@@ -1438,7 +1447,7 @@ const PALETTES: any = {
 };
 const PHENOTYPE_DEFAULT = 0.5;
 function baselinePhenotype() { return Object.fromEntries((MANIFEST?.shape?.sliders || []).map((k: string) => [k, PHENOTYPE_DEFAULT])); }
-const BASELINE_LOOK: any = { format: LOOK_FORMAT, name: 'Baseline', skin: { tone: 0.35, undertone: 0 }, hair: { color: '#271f16' }, eyes: { color: '#875f3d' }, phenotype: {}, face: {} };
+const BASELINE_LOOK: any = { format: LOOK_FORMAT, name: 'Baseline', skin: { tone: 0.35, undertone: 0 }, hair: { color: '#271f16', style: 'medium_tousled' }, eyes: { color: '#875f3d' }, phenotype: {}, face: {} };
 const EXAMPLE_LOOKS: any[] = [
   BASELINE_LOOK,
   { format: LOOK_FORMAT, name: 'Fair', skin: { tone: 0.12, undertone: -0.3 }, hair: { color: '#6b4a30' }, eyes: { color: '#5f84a8' } },
@@ -1449,16 +1458,16 @@ const EXAMPLE_LOOKS: any[] = [
 // presets of a character creator do; the example looks set the colours only. The faces are random faces of the
 // calibrated distribution for each body, chosen on the review renders.
 const CHARACTERS: any[] = [
-  { format: LOOK_FORMAT, name: 'Asian woman', skin: { tone: 0.28, undertone: 0.4 }, hair: { color: '#141110' }, eyes: { color: '#4a3020' },
+  { format: LOOK_FORMAT, name: 'Asian woman', skin: { tone: 0.28, undertone: 0.4 }, hair: { color: '#141110', style: 'lob' }, eyes: { color: '#4a3020' },
     phenotype: { gender: 1, age: 0.78, muscle: 0.45, weight: 0.45, height: 0.5, proportions: 0.5, african: 0, asian: 1, caucasian: 0 },
     face: { 'head-scale-vert': 0.51, 'head-fat': -0.02, 'head-invertedtriangular': 0.03, 'head-back-scale-depth': -0.96, 'head-round': 0.02, 'head-scale-depth': 1.76, 'head-scale-horiz': 0.43, 'forehead-temple': -0.01, 'forehead-trans': 0.25, 'forehead-scale-vert': 0.06, 'forehead-nubian': -0.01, 'eyebrows-angle': -0.01, 'eyebrows-trans-backward-forward': 0.04, 'eye-corner1': 0.34, 'eye-height1': 0.1, 'eye-scale': 0.04, 'eye-push1': -0.01, 'eye-eyefold-down-up': 0.03, 'eye-height3': 0.16, 'eye-height2': 0.13, 'eye-bag-decr-incr': -0.01, 'eye-push2': -0.06, 'eye-trans-down-up': 0.18, 'eye-bag-height': 0.03, 'eye-epicanthus': 0.02, 'eye-eyefold-angle': -0.1, 'eye-bag-in-out': -0.03, 'eye-corner2': -0.26, 'eye-trans-in-out': -0.22, 'eye-eyefold-concave-convex': 0.02, 'nose-nostrils-angle': 0.04, 'nose-flaring': -0.11, 'nose-curve': -0.02, 'nose-scale-depth': 0.01, 'nose-scale-vert': 0.04, 'nose-point-width': -0.11, 'nose-scale-horiz': 0.07, 'nose-width1': -0.01, 'nose-trans-backward-forward': 0.08, 'nose-trans-down-up': -0.06, 'nose-hump': -0.01, 'nose-nostrils-width': 0.05, 'nose-greek': 0.03, 'nose-point': -0.04, 'nose-width2': -0.05, 'nose-width3': 0.03, 'nose-septumangle': 0.06, 'nose-base': -0.04, 'nose-compression': -0.03, 'nose-volume': 0.01, 'cheek-trans': 0.08, 'cheek-inner': -0.04, 'cheek-bones': -0.17, 'mouth-lowerlip-height': -0.01, 'mouth-scale-horiz': -0.08, 'mouth-cupidsbow': -0.01, 'mouth-laugh-lines': 0.01, 'mouth-scale-depth': -0.17, 'mouth-lowerlip-volume': -0.18, 'mouth-angles': 0.1, 'mouth-upperlip-ext': 0.01, 'mouth-lowerlip-width': -0.01, 'mouth-trans-backward-forward': 0.06, 'mouth-scale-vert': 0.04, 'mouth-dimples': 0.05, 'mouth-upperlip-height': 0.03, 'mouth-upperlip-volume': 0.03, 'mouth-cupidsbow-width': 0.03, 'mouth-lowerlip-ext': -0.06, 'mouth-upperlip-middle': -0.1, 'mouth-trans-down-up': -0.04, 'mouth-lowerlip-middle': -0.06, 'mouth-philtrum-volume': 0.04, 'chin-jaw-drop': 0.01, 'chin-height': 0.09, 'chin-prominent': 0.01, 'chin-bones': -0.01, 'chin-width': 0.02, 'chin-triangle': 0.02, 'chin-prognathism': 0.09, 'ear-lobe': 0.11, 'ear-shape-square-round': -0.04, 'ear-trans-backward-forward': -0.18, 'ear-rot': 0.01, 'ear-trans-down-up': 0.03, 'ear-scale-vert': 0.04, 'ear-flap': 0.02, 'ear-shape-pointed-triangle': 0.11, 'ear-scale': 0.14, 'ear-scale-depth': -0.06, 'ear-wing': 0.03, 'detail-1': 0.08, 'detail-2': -0.17, 'detail-3': -0.11, 'detail-4': 0.12, 'detail-5': 0.03, 'detail-6': -0.2, 'detail-7': 0.01, 'detail-8': -0.21, 'detail-9': -0.33, 'detail-10': 0.09 } },
-  { format: LOOK_FORMAT, name: 'Asian man', skin: { tone: 0.32, undertone: 0.4 }, hair: { color: '#141110' }, eyes: { color: '#4a3020' },
+  { format: LOOK_FORMAT, name: 'Asian man', skin: { tone: 0.32, undertone: 0.4 }, hair: { color: '#141110', style: 'low_taper_fade' }, eyes: { color: '#4a3020' },
     phenotype: { gender: 0, age: 0.79, muscle: 0.55, weight: 0.5, height: 0.5, proportions: 0.5, african: 0, asian: 1, caucasian: 0 },
     face: { 'head-scale-vert': 0.11, 'head-fat': -0.09, 'head-invertedtriangular': 0.07, 'head-back-scale-depth': -1.43, 'head-scale-depth': 0.81, 'head-scale-horiz': 0.11, 'forehead-temple': 0.08, 'forehead-trans': 0.07, 'forehead-scale-vert': -0.01, 'forehead-nubian': 0.01, 'eyebrows-angle': -0.03, 'eyebrows-trans-down-up': 0.02, 'eyebrows-trans-backward-forward': -0.03, 'eye-corner1': 0.02, 'eye-height1': 0.02, 'eye-scale': 0.14, 'eye-push1': -0.12, 'eye-eyefold-down-up': 0.02, 'eye-height3': -0.06, 'eye-height2': -0.06, 'eye-bag-decr-incr': 0.05, 'eye-push2': -0.26, 'eye-bag-height': 0.05, 'eye-epicanthus': 0.05, 'eye-eyefold-angle': 0.03, 'eye-bag-in-out': 0.04, 'eye-corner2': -0.04, 'eye-trans-in-out': 0.01, 'eye-eyefold-concave-convex': -0.13, 'nose-nostrils-angle': 0.01, 'nose-flaring': 0.04, 'nose-curve': -0.01, 'nose-scale-depth': -0.05, 'nose-scale-vert': 0.02, 'nose-point-width': -0.02, 'nose-scale-horiz': -0.02, 'nose-width1': -0.04, 'nose-trans-backward-forward': -0.08, 'nose-trans-down-up': -0.04, 'nose-hump': 0.02, 'nose-nostrils-width': -0.01, 'nose-greek': 0.04, 'nose-point': -0.04, 'nose-width2': 0.01, 'nose-width3': 0.06, 'nose-septumangle': -0.01, 'nose-base': 0.01, 'nose-compression': 0.01, 'cheek-trans': 0.02, 'cheek-volume': 0.01, 'cheek-inner': 0.07, 'cheek-bones': -0.04, 'mouth-lowerlip-height': 0.04, 'mouth-scale-horiz': -0.21, 'mouth-cupidsbow': 0.01, 'mouth-laugh-lines': 0.01, 'mouth-scale-depth': -0.13, 'mouth-lowerlip-volume': -0.07, 'mouth-angles': -0.04, 'mouth-upperlip-ext': -0.01, 'mouth-trans-backward-forward': 0.2, 'mouth-upperlip-width': -0.04, 'mouth-scale-vert': 0.06, 'mouth-dimples': 0.02, 'mouth-upperlip-height': -0.02, 'mouth-upperlip-volume': 0.02, 'mouth-cupidsbow-width': 0.03, 'mouth-upperlip-middle': 0.08, 'mouth-trans-down-up': 0.02, 'mouth-lowerlip-middle': 0.02, 'mouth-philtrum-volume': 0.03, 'chin-jaw-drop': 0.01, 'chin-prominent': 0.05, 'chin-bones': 0.18, 'chin-width': 0.04, 'chin-triangle': 0.04, 'chin-prognathism': 0.07, 'ear-lobe': 0.12, 'ear-shape-square-round': -0.13, 'ear-trans-backward-forward': 0.1, 'ear-rot': 0.03, 'ear-trans-down-up': 0.1, 'ear-scale-vert': 0.07, 'ear-flap': 0.05, 'ear-shape-pointed-triangle': -0.16, 'ear-scale': -0.09, 'ear-scale-depth': -0.18, 'ear-wing': 0.14, 'detail-1': 0.24, 'detail-2': -0.19, 'detail-3': -0.05, 'detail-4': -0.04, 'detail-5': -0.01, 'detail-6': 0.09, 'detail-7': -0.11, 'detail-8': -0.02, 'detail-9': -0.28, 'detail-10': 0.09 } },
-  { format: LOOK_FORMAT, name: 'Eurasian woman', skin: { tone: 0.22, undertone: 0.25 }, hair: { color: '#271f16' }, eyes: { color: '#875f3d' },
+  { format: LOOK_FORMAT, name: 'Eurasian woman', skin: { tone: 0.22, undertone: 0.25 }, hair: { color: '#271f16', style: 'long_layers' }, eyes: { color: '#875f3d' },
     phenotype: { gender: 1, age: 0.78, muscle: 0.45, weight: 0.45, height: 0.5, proportions: 0.5, african: 0, asian: 1, caucasian: 1 },
     face: { 'head-scale-vert': 0.34, 'head-fat': 0.07, 'head-invertedtriangular': 0.12, 'head-back-scale-depth': -0.82, 'head-round': 0.03, 'head-scale-depth': 1.48, 'head-scale-horiz': 0.21, 'forehead-temple': -0.23, 'forehead-trans': 0.05, 'forehead-scale-vert': 0.05, 'forehead-nubian': 0.01, 'eyebrows-angle': 0.01, 'eyebrows-trans-down-up': -0.02, 'eyebrows-trans-backward-forward': 0.07, 'eye-corner1': 0.12, 'eye-height1': -0.1, 'eye-scale': 0.24, 'eye-push1': 0.03, 'eye-eyefold-down-up': -0.04, 'eye-height3': -0.18, 'eye-height2': -0.14, 'eye-bag-decr-incr': -0.02, 'eye-push2': -0.04, 'eye-trans-down-up': 0.15, 'eye-bag-height': -0.04, 'eye-epicanthus': -0.01, 'eye-eyefold-angle': -0.06, 'eye-bag-in-out': -0.06, 'eye-corner2': -0.22, 'eye-trans-in-out': 0.01, 'eye-eyefold-concave-convex': 0.26, 'nose-nostrils-angle': -0.04, 'nose-flaring': -0.01, 'nose-curve': -0.07, 'nose-scale-depth': -0.03, 'nose-scale-vert': -0.1, 'nose-point-width': -0.06, 'nose-scale-horiz': -0.02, 'nose-width1': -0.04, 'nose-trans-backward-forward': 0.06, 'nose-trans-down-up': 0.02, 'nose-hump': -0.03, 'nose-nostrils-width': 0.09, 'nose-greek': -0.13, 'nose-point': -0.07, 'nose-width2': -0.03, 'nose-width3': -0.03, 'nose-septumangle': -0.11, 'nose-base': 0.16, 'nose-compression': 0.01, 'nose-volume': -0.14, 'cheek-trans': 0.04, 'cheek-volume': -0.08, 'cheek-inner': 0.07, 'cheek-bones': -0.12, 'mouth-lowerlip-height': -0.02, 'mouth-scale-horiz': -0.04, 'mouth-scale-depth': -0.01, 'mouth-lowerlip-volume': 0.12, 'mouth-angles': 0.1, 'mouth-lowerlip-width': 0.02, 'mouth-trans-backward-forward': -0.14, 'mouth-upperlip-width': 0.06, 'mouth-scale-vert': 0.01, 'mouth-dimples': -0.05, 'mouth-upperlip-height': 0.04, 'mouth-upperlip-volume': -0.08, 'mouth-lowerlip-ext': 0.02, 'mouth-upperlip-middle': 0.03, 'mouth-trans-down-up': 0.06, 'mouth-philtrum-volume': 0.03, 'chin-jaw-drop': -0.05, 'chin-height': -0.05, 'chin-prominent': -0.1, 'chin-width': -0.03, 'chin-prognathism': -0.17, 'ear-lobe': 0.02, 'ear-shape-square-round': 0.01, 'ear-trans-backward-forward': 0.12, 'ear-rot': -0.25, 'ear-trans-down-up': -0.11, 'ear-scale-vert': -0.01, 'ear-flap': 0.03, 'ear-shape-pointed-triangle': -0.1, 'ear-scale': 0.03, 'ear-scale-depth': -0.09, 'ear-wing': 0.16, 'detail-1': 0.06, 'detail-2': -0.16, 'detail-3': 0.12, 'detail-4': -0.04, 'detail-5': -0.22, 'detail-6': -0.38, 'detail-7': -0.03, 'detail-8': -0.21, 'detail-9': 0.14, 'detail-10': -0.2 } },
-  { format: LOOK_FORMAT, name: 'Eurasian man', skin: { tone: 0.26, undertone: 0.25 }, hair: { color: '#271f16' }, eyes: { color: '#4a3020' },
+  { format: LOOK_FORMAT, name: 'Eurasian man', skin: { tone: 0.26, undertone: 0.25 }, hair: { color: '#271f16', style: 'textured_quiff' }, eyes: { color: '#4a3020' },
     phenotype: { gender: 0, age: 0.79, muscle: 0.55, weight: 0.5, height: 0.5, proportions: 0.5, african: 0, asian: 1, caucasian: 1 },
     face: { 'head-scale-vert': 0.41, 'head-fat': -0.04, 'head-rectangular': 0.02, 'head-back-scale-depth': -1.21, 'head-scale-depth': 1.42, 'head-scale-horiz': 0.21, 'head-triangular': 0.06, 'forehead-temple': 0.01, 'forehead-trans': -0.2, 'forehead-scale-vert': 0.02, 'eyebrows-trans-down-up': -0.05, 'eyebrows-trans-backward-forward': 0.01, 'eye-corner1': 0.05, 'eye-height1': -0.05, 'eye-scale': 0.08, 'eye-push1': -0.09, 'eye-eyefold-down-up': -0.09, 'eye-height3': -0.16, 'eye-height2': -0.06, 'eye-bag-decr-incr': -0.05, 'eye-push2': -0.11, 'eye-trans-down-up': 0.19, 'eye-bag-height': -0.14, 'eye-epicanthus': 0.07, 'eye-eyefold-angle': 0.07, 'eye-bag-in-out': 0.04, 'eye-corner2': -0.05, 'eye-trans-in-out': 0.11, 'eye-eyefold-concave-convex': 0.27, 'nose-nostrils-angle': -0.09, 'nose-flaring': 0.03, 'nose-curve': -0.07, 'nose-scale-depth': -0.07, 'nose-scale-vert': -0.03, 'nose-point-width': -0.09, 'nose-scale-horiz': 0.07, 'nose-width1': 0.01, 'nose-trans-backward-forward': -0.25, 'nose-trans-down-up': 0.06, 'nose-hump': -0.03, 'nose-nostrils-width': 0.01, 'nose-greek': -0.13, 'nose-point': 0.06, 'nose-width2': 0.07, 'nose-width3': -0.1, 'nose-septumangle': 0.1, 'nose-base': 0.12, 'nose-compression': -0.01, 'nose-volume': -0.09, 'cheek-trans': -0.01, 'cheek-volume': 0.01, 'cheek-inner': 0.12, 'cheek-bones': 0.21, 'mouth-lowerlip-height': 0.22, 'mouth-scale-horiz': -0.07, 'mouth-scale-depth': -0.04, 'mouth-lowerlip-volume': 0.04, 'mouth-angles': -0.08, 'mouth-upperlip-ext': 0.02, 'mouth-lowerlip-width': 0.01, 'mouth-trans-backward-forward': 0.33, 'mouth-upperlip-width': 0.01, 'mouth-scale-vert': 0.2, 'mouth-dimples': 0.02, 'mouth-upperlip-height': 0.09, 'mouth-upperlip-volume': 0.03, 'mouth-cupidsbow-width': 0.02, 'mouth-lowerlip-ext': 0.1, 'mouth-upperlip-middle': 0.27, 'mouth-trans-down-up': -0.01, 'mouth-lowerlip-middle': 0.07, 'mouth-philtrum-volume': -0.03, 'chin-jaw-drop': 0.01, 'chin-prominent': -0.05, 'chin-bones': 0.14, 'chin-width': -0.06, 'chin-cleft': 0.01, 'chin-triangle': 0.04, 'chin-prognathism': -0.02, 'ear-lobe': 0.21, 'ear-shape-square-round': -0.02, 'ear-trans-backward-forward': -0.12, 'ear-rot': -0.01, 'ear-trans-down-up': -0.16, 'ear-scale-vert': -0.13, 'ear-flap': 0.21, 'ear-shape-pointed-triangle': 0.17, 'ear-scale': -0.14, 'ear-scale-depth': 0.11, 'ear-wing': 0.19, 'detail-1': 0.12, 'detail-2': 0.04, 'detail-3': -0.14, 'detail-4': -0.14, 'detail-5': -0.16, 'detail-6': -0.03, 'detail-7': 0.52, 'detail-8': 0.05, 'detail-9': 0.15, 'detail-10': 0.18 } },
 ];
@@ -1467,6 +1476,7 @@ let currentLook: any = JSON.parse(JSON.stringify(BASELINE_LOOK));
 let hairWanted = true;
 function updateHairVisibility() {
   LOOK_PARTS.hairMeshes.forEach((m: any, i: number) => { m.visible = i > 0 || hairWanted; });
+  U.uHairOn.value = hairWanted && HAIR ? 1 : 0;
   shadowsDirty = true; resetAccum();
 }
 // read a preset: unknown fields are ignored, missing ones fall back to the baseline and to anny's defaults
@@ -1478,12 +1488,28 @@ function normaliseLook(o: any) {
   return {
     format: LOOK_FORMAT, name: typeof o.name === 'string' && o.name.trim() ? o.name.trim().slice(0, 60) : 'Custom',
     skin: { tone: num(o.skin && o.skin.tone, 0, 1, b.skin.tone), undertone: num(o.skin && o.skin.undertone, -1, 1, b.skin.undertone) },
-    hair: { color: col(o.hair && o.hair.color, b.hair.color) },
+    hair: normaliseHair(o.hair, col(o.hair && o.hair.color, b.hair.color)),
     eyes: { color: col(o.eyes && o.eyes.color, b.eyes.color) },
     phenotype: Object.fromEntries(Object.keys(baselinePhenotype()).map((k) => [k, Math.round(num(ph[k], 0, 1, PHENOTYPE_DEFAULT) * 1000) / 1000])),
     face: normaliseFace(o.face),
   };
 }
+// the hair of a preset: a known style (the baseline's otherwise), its parameters within the style's ranges (the
+// style's defaults when missing), and the side of the part for the styles that have one
+function hairSpecs(): any[] { return MANIFEST?.hair?.styles || []; }
+function normaliseHair(h: any, color: string) {
+  const specs = hairSpecs(), o = h && typeof h === 'object' ? h : {};
+  const spec = specs.find((x) => x.name === o.style) || specs.find((x) => x.name === BASELINE_LOOK.hair.style) || specs[0];
+  if (!spec) return { color, style: BASELINE_LOOK.hair.style };
+  const d = HAIR ? HAIR.defaults(spec.name) : { length: 1, curl: 0, volume: 1, density: 1, fade: 0 };
+  const c = spec.controls, num = (v: any, r: number[], def: number) => (typeof v === 'number' && isFinite(v)) ? Math.round(Math.min(r[1], Math.max(r[0], v)) * 1000) / 1000 : def;
+  const out: any = { color, style: spec.name, length: num(o.length, c.length, d.length), curl: num(o.curl, c.curl, d.curl),
+    volume: num(o.volume, c.volume, d.volume), density: num(o.density, c.density, d.density) };
+  if (spec.render.fade) out.fade = num(o.fade, FADE_RANGE, 0);
+  if (spec.mirror) out.part = o.part === 'right' ? 'right' : 'left';
+  return out;
+}
+const FADE_RANGE = [-8, 12];   // degrees: the fade band moves down or up
 // the face-shape values of a preset: known names within their ranges, zeros left out
 function normaliseFace(face: any) {
   const out: any = {};
@@ -1512,6 +1538,12 @@ function applyLook(look: any, remember = true) {
   if (LOOK_PARTS.hair) LOOK_PARTS.hair.uHairColor.value.set(...h);
   if (LOOK_PARTS.brows) LOOK_PARTS.brows.uHairColor.value.set(h[0] * 0.8, h[1] * 0.72, h[2] * 0.73);
   if (LOOK_PARTS.lashes) LOOK_PARTS.lashes.uHairColor.value.set(h[0] * 0.3 + 0.001, h[1] * 0.32 + 0.001, h[2] * 0.37 + 0.001);
+  // the hairstyle and its parameters (hair/gpu.ts): a new style binds its guides, the parameters are uniforms
+  if (HAIR) {
+    const hh = L.hair, mirror = hh.part === 'right';
+    if (!HAIR.style || HAIR.style.spec.name !== hh.style || HAIR.style.mirrored !== mirror) HAIR.setStyle(hh.style, mirror);
+    HAIR.setParams({ length: hh.length, curl: hh.curl, volume: hh.volume, density: hh.density, fade: hh.fade ?? 0 });
+  }
   const lum = 0.2126 * h[0] + 0.7152 * h[1] + 0.0722 * h[2];
   U.uHairShadowK.value = 1.0 - 0.45 * smooth(0.02, 0.25, lum);   // light hair lets more light through
   // scalp under the hair: between the skin and the hair colour
@@ -1556,7 +1588,7 @@ function strandTexture(nS: number, texels: number) {
   tex.colorSpace = THREE.NoColorSpace; tex.needsUpdate = true;
   return tex;
 }
-function updateHairShape() { for (const h of HAIRSETS) h.tex.needsUpdate = true; }
+function updateHairShape() { for (const h of HAIRSETS) h.tex.needsUpdate = true; HAIR?.bodyChanged(); }
 // triangles and barycentric coordinates of a binding record (3 corners, 2 coordinates)
 function bindingRecords(buf: any, n: number) {
   const dv = new DataView(buf.data.buffer, buf.data.byteOffset, buf.data.byteLength);
@@ -1665,19 +1697,26 @@ async function init() {
   }
   setProgress(0.5, 'Growing hair');
   await nextFrame();
-  const center = meta.authoring.hair_center;
-  const hairS = decodeStrands(B, 'hair');
-  const hairAO = hairOcclusion(hairS.P, hairS.total, center);
-  const hairB = strandBinding(B, 'hair', hairS);
+  // the hair: the scalp layout and its styles (hair/gpu.ts); it binds first, since its guide roots set the scalp size
+  HAIR = new Hair(meta.hair, (name) => B[name].data, BODY.anny, U.uHeadInv);
+  HAIR.lod = LOD.base;
+  HAIR.setStyle(meta.hair.styles.some((x) => x.name === 'medium_tousled') ? 'medium_tousled' : meta.hair.styles[0].name);
+  // the physics runs unless the page takes still pictures (tests and reviews) or the address turns it off
+  HAIR.setPhysics(qs.has('physics') ? qs.get('physics') !== 'off' : !SHOT);
+  $('toggle-physics')?.setAttribute('aria-pressed', String(HAIR.physics));
+  fitHairColliders();
+  buildHairUI();
+  Object.assign(U, HAIR.volumeUniforms());
+  U.uHairOn.value = 1;
   setProgress(0.75, 'Placing strands');
   await nextFrame();
-  const lite = isSmall ? subsetStrands(hairB.local, hairAO, 2) : { S: hairB.local, ao: hairAO, keep: null };
-  const hairMesh = makeHairMesh(buildRibbons(lite.S, lite.ao, 17, lite.keep), { width: isSmall ? 0.00017 : 0.00012, tip: 0.45, color: [0.020, 0.0125, 0.0082], rough: 0.38, diff: 1.3, spec: 0.38, center }, hairB.tips ? Object.assign({ HAIR_TIPS: '' }, ENV_DEFINES) : ENV_DEFINES, hairB.tex);
+  const hairMesh = HAIR_MESH = makeStrandMesh(HAIR, { width: 0.00012, tip: 0.45, color: [0.020, 0.0125, 0.0082], rough: 0.38, diff: 1.3, spec: 0.38 }, ENV_DEFINES);
+  applyHairWidth();
   const browB = strandBinding(B, 'brows', decodeStrands(B, 'brows'));
   const browMesh = makeHairMesh(buildRibbons(browB.local, null, 5), { width: 0.00010, tip: 0.3, color: [0.016, 0.009, 0.006], rough: 0.62, spec: 0.15, diff: 1.3, center: [0, 0.515, 0.06] }, ENV_DEFINES, browB.tex);
   const lashB = strandBinding(B, 'lashes', decodeStrands(B, 'lashes'));
   const lashMesh = makeHairMesh(buildRibbons(lashB.local, null, 9), { width: 0.00012, tip: 0.25, color: [0.006, 0.004, 0.003], rough: 0.55, spec: 0.3, diff: 1.3, center: [0, 0.51, 0.10] }, ENV_DEFINES, lashB.tex);
-  (window as any).__hair = hairMesh;
+  (window as any).__hair = hairMesh; (window as any).__BUFFERS = B; (window as any).__HAIR = HAIR;
   LOOK_PARTS.hair = hairMesh.userData.hu; LOOK_PARTS.brows = browMesh.userData.hu; LOOK_PARTS.lashes = lashMesh.userData.hu;
   LOOK_PARTS.hairMeshes = [hairMesh, browMesh, lashMesh];
   const q = new URLSearchParams(location.search);
@@ -1715,7 +1754,10 @@ function renderShadows() {
   renderer.setRenderTarget(bodyShadowRT); renderer.clear(); renderer.render(scene, bodyShadowCam);
   opaque.forEach((o, i) => { o.material = saved[i]; o.visible = false; });
   hairObjs.forEach((o, i) => { o.visible = hv[i]; o.userData.mainMat = o.material; o.material = o.userData.depthMat; });
+  const hg = HAIR ? HAIR.geometry : null, drawn = hg ? hg.instanceCount : 0;
+  if (hg) hg.instanceCount = Math.ceil(drawn * HAIR_SHADOW_SHARE);
   renderer.setRenderTarget(hairShadowRT); renderer.clear(); renderer.render(scene, shadowCam);
+  if (hg) hg.instanceCount = drawn;
   hairObjs.forEach(o => { o.material = o.userData.mainMat; });
   opaque.forEach((o, i) => { o.visible = ov[i]; });
   renderer.setRenderTarget(null);
@@ -1738,9 +1780,30 @@ function allocRTs() {
     sceneRT.textures[1].minFilter = sceneRT.textures[1].magFilter = THREE.LinearFilter;
     sssRT = new THREE.WebGLRenderTarget(w, h, Object.assign({}, rtOpts, { depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter }));
   }
-  accRT = [0, 1].map(() => new THREE.WebGLRenderTarget(w, h, Object.assign({}, rtOpts, { depthBuffer: false })));
+  // linear filtering: the display pass scales up the smaller frames of the dynamic resolution
+  accRT = [0, 1].map(() => new THREE.WebGLRenderTarget(w, h, Object.assign({}, rtOpts, { depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter })));
   BG.uRes.value.set(w, h);
   for (const o of hairObjs) o.userData.hu.uViewportH.value = h;
+  DYN.last = 0;
+}
+// dynamic resolution: while the figure or the camera moves, the scene, subsurface and accumulation passes draw into
+// a corner of their targets at the scale s, which a controller lowers when frames come slower than 48 per second
+// and raises after two seconds at the display's rate; once everything rests, the page refines at full resolution
+const DYN = { steps: [1, 0.85, 0.7, 0.6, 0.5], k: 0, last: 0, ema: 1 / 60, slow: 0, fast: 0, lastReset: -1e9, resetFrame: -10,
+  frame: 0, rendered: false, on: !SHOT && qs.get('dyn') !== 'off' };
+// moving: the accumulation started again in this frame or one of the two before it (or within 100 ms, for short gaps
+// in a drag)
+function moving() { return DYN.frame - DYN.resetFrame <= 2 || performance.now() - DYN.lastReset < 100; }
+function tuneScale(dt: number) {
+  if (!DYN.on || !moving() || !DYN.rendered) { DYN.slow = DYN.fast = 0; return; }
+  DYN.ema += (dt - DYN.ema) * 0.15;
+  if (DYN.ema > 1 / 48) { DYN.slow += dt; DYN.fast = 0; } else if (DYN.ema < 1 / 55) { DYN.fast += dt; DYN.slow = 0; } else { DYN.slow = DYN.fast = 0; }
+  if (DYN.slow > 0.4 && DYN.k < DYN.steps.length - 1) { DYN.k++; DYN.slow = 0; }
+  if (DYN.fast > 2.0 && DYN.k > 0) { DYN.k--; DYN.fast = 0; }
+}
+function renderScale() { return DYN.on && moving() ? DYN.steps[DYN.k] : 1; }
+function setRegion(rt: any, w: number, h: number) {
+  rt.viewport.set(0, 0, w, h); rt.scissor.set(0, 0, w, h); rt.scissorTest = w < rt.width || h < rt.height;
 }
 const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const FSQ_VS = 'varying vec2 vUv; void main(){ vUv = position.xy*0.5+0.5; gl_Position = vec4(position.xy, 0.0, 1.0); }';
@@ -1775,10 +1838,11 @@ const sssU = {
   uWidth: { value: 0.001 / 1.124 * parseFloat(qs.get('sssw') || '1.15') },
   uNear: { value: camera.near }, uFar: { value: camera.far }, uFrameS: { value: 0 },
   uSSSRaw: { value: qs.get('dbg') === 'raw' ? 1 : 0 },
+  uUvScale: { value: new THREE.Vector2(1, 1) },   // the corner of the targets that the dynamic resolution draws
 };
 const sssMat = new THREE.ShaderMaterial({
   uniforms: sssU, vertexShader: FSQ_VS,
-  fragmentShader: SSS_GLSL(SSS_N) + '\nuniform sampler2D tSSS; varying vec2 vUv; void main(){ gl_FragColor = sssBlur(tSSS, vUv, vec2(1.0, 0.0)); }',
+  fragmentShader: SSS_GLSL(SSS_N) + '\nuniform sampler2D tSSS; uniform vec2 uUvScale; varying vec2 vUv; void main(){ gl_FragColor = sssBlur(tSSS, vUv * uUvScale, vec2(1.0, 0.0)); }',
   depthTest: false, depthWrite: false, toneMapped: false, blending: THREE.NoBlending,
 });
 allocRTs();
@@ -1787,23 +1851,27 @@ const accMat = new THREE.ShaderMaterial({
   defines: SSS_ON ? { SSS: '' } : {},
   vertexShader: FSQ_VS,
   fragmentShader: SSS_GLSL(SSS_N) + `
-uniform sampler2D tNew; uniform sampler2D tAcc; uniform float uW; uniform sampler2D tSSSH; varying vec2 vUv;
+uniform sampler2D tNew; uniform sampler2D tAcc; uniform float uW; uniform sampler2D tSSSH; uniform vec2 uUvScale; varying vec2 vUv;
 void main(){
-  vec4 c = texture2D(tNew, vUv);
+  vec2 uv = vUv * uUvScale;
+  vec4 c = texture2D(tNew, uv);
 #ifdef SSS
-  c.rgb += sssBlur(tSSSH, vUv, vec2(0.0, 1.0)).rgb;
+  c.rgb += sssBlur(tSSSH, uv, vec2(0.0, 1.0)).rgb;
 #endif
-  gl_FragColor = mix(texture2D(tAcc, vUv), c, uW);
+  gl_FragColor = mix(texture2D(tAcc, uv), c, uW);
 }`,
   depthTest: false, depthWrite: false, toneMapped: false, blending: THREE.NoBlending,
 });
 const dispMat = new THREE.ShaderMaterial({
-  uniforms: { tAcc: { value: null }, uSeed: { value: 0 }, uSat: { value: parseFloat(qs.get('sat') || '1.15') }, uContrast: { value: parseFloat(qs.get('con') || '1.05') }, uVignette: { value: 0.22 } },
+  uniforms: { tAcc: { value: null }, uSeed: { value: 0 }, uSat: { value: parseFloat(qs.get('sat') || '1.15') }, uContrast: { value: parseFloat(qs.get('con') || '1.05') }, uVignette: { value: 0.22 },
+    uUvScale: sssU.uUvScale, uUvMax: { value: new THREE.Vector2(1, 1) } },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = position.xy*0.5+0.5; gl_Position = vec4(position.xy, 0.0, 1.0); }',
-  fragmentShader: `uniform sampler2D tAcc; uniform float uSeed; uniform float uSat; uniform float uContrast; uniform float uVignette; varying vec2 vUv;
+  fragmentShader: `uniform sampler2D tAcc; uniform float uSeed; uniform float uSat; uniform float uContrast; uniform float uVignette; uniform vec2 uUvScale;
+    uniform vec2 uUvMax; varying vec2 vUv;
     float h12(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233)) + uSeed) * 43758.5453); }
     void main(){
-      vec3 rgb = texture2D(tAcc, vUv).rgb;
+      // the corner that the frame fills, up to the centre of its last texel (beyond it lies an older frame)
+      vec3 rgb = texture2D(tAcc, min(vUv * uUvScale, uUvMax)).rgb;
       vec2 q = vUv - 0.5; rgb *= 1.0 - uVignette * dot(q, q) * 1.6;
       rgb = toneMapping(rgb);
       float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
@@ -1819,8 +1887,22 @@ const quadMesh = new THREE.Mesh(triGeo, accMat); quadMesh.frustumCulled = false;
 const quadScene = new THREE.Scene(); quadScene.add(quadMesh);
 function halton(i, b) { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; }
 function renderPass() {
+  const t0 = performance.now();
+  // a change of scale starts the accumulation again (without counting as a move)
+  const sc = renderScale();
+  if (sc !== DYN.last) { accCount = 0; DYN.last = sc; }
+  const W = sceneRT.width, H = sceneRT.height;
+  const w = Math.max(1, Math.round(W * sc)), h = Math.max(1, Math.round(H * sc));
+  sssU.uUvScale.value.set(w / W, h / H);
+  dispMat.uniforms.uUvMax.value.set((w - 0.5) / W, (h - 0.5) / H);
+  BG.uRes.value.set(w, h);
+  for (const o of hairObjs) o.userData.hu.uViewportH.value = h;
+  if (accCount === 0) updateHairLod(h);
+  if (HAIR && HAIR.update(renderer)) shadowsDirty = true;
   if (shadowsDirty) renderShadows();
-  const w = sceneRT.width, h = sceneRT.height;
+  setRegion(sceneRT, w, h);
+  if (SSS_ON) setRegion(sssRT, w, h);
+  accRT.forEach((r) => setRegion(r, w, h));
   const jx = accCount === 0 ? 0 : halton(accCount, 2) - 0.5;
   const jy = accCount === 0 ? 0 : halton(accCount, 3) - 0.5;
   camera.setViewOffset(w, h, jx, jy, w, h);
@@ -1831,7 +1913,7 @@ function renderPass() {
   if (SSS_ON) {
     sssU.tSSS.value = sceneRT.textures[1]; sssU.tDepth.value = sceneRT.depthTexture;
     sssU.uProj.value = h / (2 * Math.tan(camera.fov * DEG / 2));
-    sssU.uTexel.value.set(1 / w, 1 / h);
+    sssU.uTexel.value.set(1 / W, 1 / H);
     sssU.uFrameS.value = accCount;
     quadMesh.material = sssMat;
     renderer.setRenderTarget(sssRT); renderer.render(quadScene, quadCam);
@@ -1846,16 +1928,22 @@ function renderPass() {
   quadMesh.material = dispMat;
   renderer.setRenderTarget(null); renderer.render(quadScene, quadCam);
   accCount++;
+  DYN.rendered = true;
+  PERF.passes++; PERF.passMs += performance.now() - t0; PERF.w = w; PERF.h = h;
   updateStatus();
 }
-function resetAccum() { accCount = 0; }
+function resetAccum() { accCount = 0; DYN.lastReset = performance.now(); DYN.resetFrame = DYN.frame; }
 controls.addEventListener('change', resetAccum);
 controls.addEventListener('start', () => { document.body.classList.add('interacted'); });
 let lastFrameT = performance.now();
+let hairClock = false;   // a test steps the hair's physics itself (window.stepHair)
 const _hc = new THREE.Vector3();
 function animate() {
   requestAnimationFrame(animate);
   const now = performance.now(), dt = Math.min(0.1, (now - lastFrameT) / 1000); lastFrameT = now;
+  DYN.frame++;
+  tuneScale(dt);
+  DYN.rendered = false;
   if (tickMotion(dt) && currentFrame === 'face' && !tween) {
     // the close view of the face keeps the head in frame while the figure moves
     _hc.set(0, 0.495, 0.035).applyMatrix4(_headFull);
@@ -1872,7 +1960,12 @@ function animate() {
   }
   const moved = controls.update();
   if (controls.autoRotate) resetAccum();
+  if (HAIR && HAIR.due()) resetAccum();
+  // the hair's physics: it sleeps once the hair rests, so the picture can refine
+  if (HAIR && hairWanted && !hairClock && HAIR.stepPhysics(dt)) { shadowsDirty = true; resetAccum(); }
   if (accCount < MAX_ACC) renderPass();
+  if (DYN.rendered) { PERF.frames++; PERF.jsMs += performance.now() - now; }
+  updatePerf(now);
 }
 window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
@@ -1892,6 +1985,28 @@ function showError(msg) {
   const l = $('loadlabel'); if (l) l.textContent = msg;
   document.body.classList.add('failed');
 }
+// the frame readout (the status button, or ?stats=1): frames per second while the page draws, the JavaScript time of
+// a frame, the render scale and the work of the hair
+const PERF = { frames: 0, passes: 0, jsMs: 0, passMs: 0, t0: performance.now(), w: 0, h: 0, fps: 0, js: 0, idle: true };
+function frameStats() {
+  const st = HAIR ? HAIR.stats() : null;
+  return { fps: +PERF.fps.toFixed(1), js_ms: +PERF.js.toFixed(2), idle: PERF.idle, scale: DYN.last || 1, width: PERF.w, height: PERF.h,
+    hair: st ? { strands: st.strands, vertices: st.vertices, lod: st.lod, physics: st.physics ? (st.asleep ? 'asleep' : +st.sim.ms.toFixed(2)) : 'off' } : null };
+}
+function updatePerf(now: number) {
+  if (now - PERF.t0 < 500) return;
+  const sec = (now - PERF.t0) / 1000;
+  PERF.idle = PERF.frames === 0;
+  PERF.fps = PERF.frames / sec; PERF.js = PERF.frames ? PERF.jsMs / PERF.frames : 0;
+  PERF.frames = 0; PERF.passes = 0; PERF.jsMs = 0; PERF.passMs = 0; PERF.t0 = now;
+  const el = $('perf');
+  if (!el || el.hidden) return;
+  const f = frameStats(), h = f.hair;
+  el.textContent = (f.idle ? 'idle (refined)' : `${f.fps.toFixed(0)} fps   ${f.js_ms.toFixed(1)} ms JS`)
+    + `\nscale ${Math.round(f.scale * 100)}%   ${f.width} x ${f.height}`
+    + (h ? `\nhair ${h.strands.toLocaleString()} strands, lod ${Math.round(h.lod * 100)}%\n${(h.vertices / 1e6).toFixed(2)} M vertices per draw`
+      + `\nphysics ${typeof h.physics === 'number' ? h.physics.toFixed(2) + ' ms' : h.physics}` : '');
+}
 let lastStatus = '';
 function updateStatus() {
   const el = $('status'); if (!el) return;
@@ -1909,11 +2024,27 @@ function wireUI() {
     document.querySelectorAll('[data-preset]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
     applyPreset(b.dataset.preset);
   }));
+  const statusBtn = $('status'), perfEl = $('perf');
+  const showPerf = (on: boolean) => {
+    if (!statusBtn || !perfEl) return;
+    perfEl.hidden = !on; statusBtn.setAttribute('aria-expanded', String(on));
+    statusBtn.title = on ? 'Hide the frame rate' : 'Show the frame rate';
+    if (on) { perfEl.textContent = 'measuring'; PERF.t0 = performance.now() - 500; }
+  };
+  statusBtn?.addEventListener('click', () => showPerf(perfEl ? perfEl.hidden : false));
+  if (qs.get('stats') === '1') showPerf(true);
   const hairBtn = $('toggle-hair');
   hairBtn?.addEventListener('click', () => {
     const on = hairBtn.getAttribute('aria-pressed') !== 'true';
     hairBtn.setAttribute('aria-pressed', String(on));
     hairWanted = on; updateHairVisibility();
+    shadowsDirty = true; resetAccum();
+  });
+  const phys = $('toggle-physics');
+  phys?.addEventListener('click', () => {
+    const on = phys.getAttribute('aria-pressed') !== 'true';
+    phys.setAttribute('aria-pressed', String(on));
+    HAIR?.setPhysics(on);
     shadowsDirty = true; resetAccum();
   });
   const turn = $('toggle-turn');
@@ -1972,7 +2103,7 @@ function sameLook(a, b) {
 function sameCharacter(a, b) {
   const A = normaliseLook(a), B = normaliseLook(b);
   const close = (x, y) => Object.keys(Object.assign({}, x, y)).every(k => Math.abs((x[k] ?? 0) - (y[k] ?? 0)) < 1e-3);
-  return sameLook(A, B) && close(A.phenotype, B.phenotype) && close(A.face, B.face);
+  return sameLook(A, B) && close(A.phenotype, B.phenotype) && close(A.face, B.face) && A.hair.style === B.hair.style;
 }
 function toneTrack() {
   const stops = [];
@@ -2001,6 +2132,7 @@ function syncEditor() {
     if (custom && document.activeElement !== custom) custom.value = hex;
   }
   $('ed-hair-v').textContent = lookName('hair', L.hair.color);
+  syncHair(L);
   $('ed-eyes-v').textContent = lookName('eyes', L.eyes.color);
   $('ed-looks').querySelectorAll('.ed-chip').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.name === L.name && sameLook(EXAMPLE_LOOKS.find(l => l.name === b.dataset.name), L))));
   $('ed-chars').querySelectorAll('.ed-chip').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.name === L.name && sameCharacter(CHARACTERS.find(l => l.name === b.dataset.name), L))));
@@ -2073,6 +2205,97 @@ function buildBodySliders() {
   }
   $('ed-shape-sec').hidden = false;
   syncEditor();
+}
+// ------------------------------------------------------------------ hair styles and their sliders
+const HAIR_FAMILIES: [string, string][] = [['short', 'Short'], ['medium', 'Medium'], ['long', 'Long'], ['tied', 'Tied']];
+const HAIR_SLIDERS: any[] = [
+  { key: 'length', label: 'Length', ends: ['Shorter', 'Longer'] },
+  { key: 'curl', label: 'Curl', ends: ['Straight', 'Curly'] },
+  { key: 'volume', label: 'Volume', ends: ['Flat', 'Full'] },
+  { key: 'density', label: 'Density', ends: ['Thin', 'Thick'] },
+  { key: 'fade', label: 'Fade height', ends: ['Low', 'High'], fade: true },
+];
+function buildHairUI() {
+  const box = $('ed-hair-styles'), params = $('ed-hair-params');
+  if (!box || !HAIR) return;
+  box.textContent = ''; params.textContent = '';
+  for (const [family, title] of HAIR_FAMILIES) {
+    const specs = hairSpecs().filter((s) => s.family === family);
+    if (!specs.length) continue;
+    const g = document.createElement('div');
+    const h = document.createElement('div'); h.className = 'ed-sub'; h.textContent = title;
+    const chips = document.createElement('div'); chips.className = 'ed-chips';
+    for (const s of specs) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'ed-chip'; b.dataset.style = s.name; b.setAttribute('aria-pressed', 'false');
+      b.textContent = s.label;
+      b.addEventListener('click', () => editLook((n) => { n.hair = { color: n.hair.color, style: s.name, part: n.hair.part }; }));
+      chips.appendChild(b);
+    }
+    g.append(h, chips);
+    box.appendChild(g);
+  }
+  for (const s of HAIR_SLIDERS) {
+    const wrap = document.createElement('div'); wrap.className = 'ed-slider'; wrap.id = 'ed-h-' + s.key + '-w';
+    const row = document.createElement('div'); row.className = 'ed-row';
+    const lab = document.createElement('label'); lab.htmlFor = 'ed-h-' + s.key; lab.textContent = s.label;
+    const out = document.createElement('output'); out.id = 'ed-h-' + s.key + '-v'; out.setAttribute('for', 'ed-h-' + s.key);
+    row.append(lab, out);
+    const inp = document.createElement('input');
+    Object.assign(inp, { type: 'range', id: 'ed-h-' + s.key, step: '0.01' });
+    inp.title = 'Double-click to return to the style\'s default';
+    inp.addEventListener('input', () => queueHair(s.key, parseFloat(inp.value)));
+    inp.addEventListener('dblclick', () => { const d = s.key === 'fade' ? 0 : (HAIR.defaults(currentLook.hair.style) as any)[s.key]; queueHair(s.key, d); });
+    const ends = document.createElement('div'); ends.className = 'ed-ends'; ends.setAttribute('aria-hidden', 'true');
+    for (const t of s.ends) { const sp = document.createElement('span'); sp.textContent = t; ends.appendChild(sp); }
+    wrap.append(row, inp, ends);
+    params.appendChild(wrap);
+  }
+  // the side of the part, for the styles that have one
+  const part = document.createElement('div'); part.className = 'ed-row'; part.id = 'ed-h-part-w';
+  const pl = document.createElement('span'); pl.className = 'ed-sub'; pl.textContent = 'Part';
+  const pc = document.createElement('div'); pc.className = 'ed-chips';
+  for (const side of ['left', 'right']) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'ed-chip'; b.dataset.part = side; b.textContent = side === 'left' ? 'Left' : 'Right';
+    b.addEventListener('click', () => editLook((n) => { n.hair.part = side; }));
+    pc.appendChild(b);
+  }
+  part.append(pl, pc);
+  params.appendChild(part);
+  syncEditor();
+}
+// the hair sliders apply at most once a frame
+let hairPending: any = null;
+function queueHair(key: string, v: number) {
+  if (!hairPending) {
+    hairPending = {};
+    requestAnimationFrame(() => { const p = hairPending; hairPending = null; editLook((n) => { Object.assign(n.hair, p); }); });
+  }
+  hairPending[key] = v;
+}
+function syncHair(L: any) {
+  const spec = hairSpecs().find((s) => s.name === L.hair.style);
+  if (!spec || !$('ed-hair-styles')) return;
+  $('ed-hair-style-v').textContent = spec.label;
+  $('ed-hair-styles').querySelectorAll('.ed-chip').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.style === spec.name)));
+  for (const s of HAIR_SLIDERS) {
+    const w = $('ed-h-' + s.key + '-w'), inp = $('ed-h-' + s.key), out = $('ed-h-' + s.key + '-v');
+    if (!w) continue;
+    const range = s.fade ? FADE_RANGE : spec.controls[s.key];
+    const show = s.fade ? !!spec.render.fade : range[1] > range[0];
+    w.hidden = !show;
+    if (!show) continue;
+    inp.min = String(range[0]); inp.max = String(range[1]);
+    const v = L.hair[s.key] ?? 0;
+    if (document.activeElement !== inp) inp.value = String(v);
+    out.textContent = s.fade ? (v > 0 ? '+' : '') + v.toFixed(0) + '°' : v.toFixed(2);
+  }
+  const part = $('ed-h-part-w');
+  if (part) {
+    part.hidden = !spec.mirror;
+    part.querySelectorAll('.ed-chip').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.part === (L.hair.part || 'left'))));
+  }
 }
 // face sliders: one group per part of the face, closed at first; the face updates at most once a frame
 let facePending = null;
@@ -2319,6 +2542,16 @@ window.setPortrait = (fov = 24, margin = 1.0) => {
   return true;
 };
 window.setHair = (on) => { hairWanted = !!on; updateHairVisibility(); return true; };
+// the hair's style and its parameters (length, curl, volume, density, fade), and the points of pass B for tests
+window.setHairStyle = (name, mirror = false) => { HAIR.setStyle(name, mirror); shadowsDirty = true; resetAccum(); return HAIR.stats(); };
+window.setHairParams = (p) => { HAIR.setParams(p); shadowsDirty = true; resetAccum(); return HAIR.params; };
+window.hairStats = () => HAIR ? HAIR.stats() : null;
+window.hairPoints = (n) => { HAIR.update(renderer); return Array.from(HAIR.readPoints(renderer, n)); };
+window.hairRest = (n) => HAIR.readRest(renderer, n);
+window.hairGuides = () => HAIR.readGuides(renderer);
+window.frameStats = frameStats;
+window.stepHair = (dt = 1 / 60) => { hairClock = true; if (HAIR.stepPhysics(dt)) { shadowsDirty = true; resetAccum(); } return HAIR.stats(); };
+window.setHairPhysics = (on) => { HAIR.setPhysics(!!on); const b = $('toggle-physics'); if (b) b.setAttribute('aria-pressed', String(!!on)); return HAIR.physics; };
 window.setPreset = (n) => { applyPreset(n); return true; };
 window.setCorrectives = (on) => { setCorrectivesOn(on); return CORR.ready; };
 window.__CORR = CORR;
