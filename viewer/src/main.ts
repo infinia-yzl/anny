@@ -27,6 +27,7 @@ import {
 import { Hair } from './hair/gpu.ts';
 import { COLLIDERS, fitColliders } from './hair/colliders.ts';
 import { STRAND_VS } from './hair/glsl.ts';
+import { initUI } from './ui/index.ts';
 
 const qs = new URLSearchParams(location.search);
 const DEG = Math.PI / 180;
@@ -35,6 +36,14 @@ const isSmall = Math.min(screen.width, screen.height) < 700 || /Mobi|Android|iPh
 const SHOT = qs.has('shot');
 // skin diffusion: screen-space pass by default, '?sss=lut' switches to the pre-integrated curvature LUT
 const SSS_ON = qs.get('sss') !== 'lut';
+// the interface (ui/index.ts) hooks into the renderer once the model is ready; until then these do nothing
+const HOOKS: any = { look() {}, motion() {}, hair() {}, frame() {}, passBegin() {}, passEnd() {}, interacted() {} };
+let UI: any = null;
+// the view that the navigation (ui/camera_nav.ts) shares: the yaw of the framings, the width of the free space
+// between the inspectors (0: the whole window), and whether the user moved the pivot away from a framing
+const VIEW = { yaw: 24, freeW: 0, userMoved: false };
+// the times of the stages of the load, for the performance card
+const LOADT: [string, number][] = [];
 
 // ------------------------------------------------------------------ renderer
 const canvas = $('c');
@@ -45,24 +54,28 @@ try {
   showError('WebGL 2 is not available in this browser, so the 3D portrait cannot be shown.');
   throw e;
 }
-const PR = Math.min(window.devicePixelRatio || 1, isSmall ? 1.5 : 2);
+const PR0 = Math.min(window.devicePixelRatio || 1, isSmall ? 1.5 : 2);
+let PR = PR0;
 renderer.setPixelRatio(PR);
 renderer.setSize(innerWidth, innerHeight, false);
 const TONEMAP = { agx: THREE.AgXToneMapping, aces: THREE.ACESFilmicToneMapping, neutral: THREE.NeutralToneMapping };
 renderer.toneMapping = TONEMAP[qs.get('tm') || 'agx'];
 renderer.toneMappingExposure = 1.0;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+// the performance card counts the draw calls of a whole frame, so the counters reset once per frame (renderPass)
+renderer.info.autoReset = false;
 
 const camera = new THREE.PerspectiveCamera(24, innerWidth / innerHeight, 0.02, 20);
 const TARGET = new THREE.Vector3(0, 0.495, 0.035);
 // framings: 'body' shows the whole figure, 'face' the head and hair (half extents in metres)
 const FRAMES = {
   body: { target: [0, -0.19, 0.03], yaw: 24, pitch: 4, halfH: 0.95, halfW: 0.58 },
+  upper: { target: [0, 0.18, 0.03], yaw: 24, pitch: 4, halfH: 0.5, halfW: 0.4 },
   face: { target: [0, 0.495, 0.035], yaw: 24, pitch: 4, halfH: 0.17, halfW: 0.15 },
 };
 let currentFrame = 'body';
 function frameDistance(f) {
-  const aspect = innerWidth / innerHeight;
+  const aspect = (VIEW.freeW || innerWidth) / innerHeight;
   const vfov = 24 * DEG;
   const dv = f.halfH / Math.tan(vfov / 2);
   const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
@@ -90,10 +103,14 @@ function frameCamera(name) {
 }
 // smooth move between framings
 let tween = null;
+// the damping of the controls carries a drag on for a few frames; a camera move clears it, so it lands where it aims
+function stopInertia() { controls._sphericalDelta?.set(0, 0, 0); controls._panOffset?.set(0, 0, 0); if ('_scale' in controls) controls._scale = 1; }
 function flyTo(name) {
-  const f = name === 'body' && typeof MOTION !== 'undefined' && MOTION.cur ? bodyFrameFor(MOTION.cur) : FRAMES[name]; currentFrame = name;
+  if (!FRAMES[name]) name = 'body';
+  stopInertia();
+  const f = name === 'body' && typeof MOTION !== 'undefined' && MOTION.cur ? bodyFrameFor(MOTION.cur) : name === 'upper' ? upperFrame() : FRAMES[name]; currentFrame = name;
   if (name === 'body' && typeof MOTION !== 'undefined') MOTION.lastFramed = MOTION.cur;
-  const d = frameDistance(f) * (name === 'face' && RIG.ready ? HEADMAP.k : 1), y = f.yaw * DEG, p = f.pitch * DEG;
+  const d = frameDistance(f) * (name === 'face' && RIG.ready ? HEADMAP.k : 1), y = VIEW.yaw * DEG, p = f.pitch * DEG;
   const t1 = new THREE.Vector3(...f.target);
   if (name === 'face' && RIG.ready) t1.applyMatrix4(_headFull);
   const p1 = new THREE.Vector3(t1.x + d * Math.sin(y) * Math.cos(p), t1.y + d * Math.sin(p), t1.z + d * Math.cos(y) * Math.cos(p));
@@ -673,7 +690,7 @@ const opaque = []; const hairObjs = [];
 let shadowsDirty = true;
 let currentPreset = 'studio';
 function applyPreset(name) {
-  const p = PRESETS[name]; currentPreset = name;
+  const p = rotatedPreset(PRESETS[name]); currentPreset = name;
   const env = buildEnvironment(p);
   if (U.uEnv.value) U.uEnv.value.dispose();
   U.uEnv.value = env.pmrem;
@@ -687,7 +704,7 @@ function applyPreset(name) {
   U.uRimDir.value.copy(dirAE(p.rim.az, p.rim.el));
   U.uRimColor.value.set(...p.rim.c);
   BG.uBgA.value.set(...p.bg[0]); BG.uBgB.value.set(...p.bg[1]);
-  renderer.toneMappingExposure = qs.get('exp') ? parseFloat(qs.get('exp')) : p.exposure;
+  renderer.toneMappingExposure = (qs.get('exp') ? parseFloat(qs.get('exp')) : p.exposure) * Math.pow(2, LIGHT.ev);
   updateShadowCamera();
   shadowsDirty = true; resetAccum();
 }
@@ -1192,7 +1209,7 @@ function setCorrectivesOn(on: boolean) {
   CORR.on = !!on;
   applyCorrectives(true);
   shadowsDirty = true; resetAccum();
-  syncPoser();
+  HOOKS.motion();
 }
 
 // ------------------------------------------------------------------ motion: anny's pose library
@@ -1299,7 +1316,7 @@ function setMotion(name: string, opts: any = {}) {
   else if (opts.instant) showStool(null);
   evalMotion();
   if (opts.remember !== false) rememberMotion();
-  syncPoser();
+  HOOKS.motion();
   return true;
 }
 // the Body view fits each pose or clip: a raised arm or a jump needs more room above, a seated figure less
@@ -1312,7 +1329,7 @@ function bodyFrameFor(c: any) {
     halfW: Math.max(0.58 * hip / MANIFEST.authoring.hip_height, wx + 0.1) };
 }
 function refitBody(c: any, force = false) {
-  if (SHOT || currentFrame !== 'body' || !c.bounds) return;
+  if (SHOT || currentFrame !== 'body' || !c.bounds || VIEW.userMoved) return;
   const f = bodyFrameFor(c), dNow = camera.position.distanceTo(controls.target);
   const dOld = frameDistance(bodyFrameFor(MOTION.lastFramed)), dNew = frameDistance(f);
   // a view the viewer has zoomed well away from the fitted one stays as it is
@@ -1334,6 +1351,17 @@ function tickMotion(dt: number) {
   if (MOTION.cur.kind === 'loop' && MOTION.playing) { MOTION.t += dt * MOTION.speed; moving = true; }
   if (moving) evalMotion();
   return moving;
+}
+// the posed figure, for the navigation and the framings: the box of its joints, its face, the top of its head
+const FIG: any = { lo: new THREE.Vector3(-0.3, -0.84, -0.15), hi: new THREE.Vector3(0.3, 0.6, 0.2), top: 0.625, head: new THREE.Vector3(0, 0.495, 0.035), joints: [] };
+// the Upper body view: from the waist to the top of the head, as wide as the joints above the waist
+function upperFrame() {
+  if (!RIG.ready || !FIG.joints.length) return FRAMES.upper;
+  const k = HEADMAP.k, w = FIG.joints.find((j: any) => j.name === 'spine03');
+  const lo = (w ? w.p.y : (FIG.lo.y + FIG.top) / 2) - 0.06 * k, hi = FIG.top + 0.05 * k;
+  let wx = 0;
+  for (const j of FIG.joints) if (j.p.y > lo) wx = Math.max(wx, Math.abs(j.p.x - FIG.head.x));
+  return { target: [FIG.head.x, (lo + hi) / 2, w ? (w.p.z + FIG.head.z) / 2 : 0.03], yaw: 24, pitch: 4, halfH: (hi - lo) / 2, halfW: Math.max(0.24 * k, wx + 0.08) };
 }
 // everything that rides on the head, the shadow cameras, the floor shade and the stool follow the pose
 const _headSkin = new THREE.Matrix4(), _headFull = new THREE.Matrix4(), _m3 = new THREE.Matrix3(), _v = new THREE.Vector3();
@@ -1357,11 +1385,16 @@ function poseChanged() {
   // shadow cameras: the head map follows the head, the body map covers every joint
   SHADOW_FOCUS.head.set(0, 0.5, 0.03).applyMatrix4(_headFull);
   const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
-  for (const b of RIG.bones) {
-    _v.setFromMatrixPosition(b.matrixWorld);
+  if (FIG.joints.length !== RIG.bones.length) FIG.joints = RIG.bones.map((b: any) => ({ name: b.name, p: new THREE.Vector3() }));
+  RIG.bones.forEach((b: any, i: number) => {
+    _v.setFromMatrixPosition(b.matrixWorld); FIG.joints[i].p.copy(_v);
     mn[0] = Math.min(mn[0], _v.x); mn[1] = Math.min(mn[1], _v.y); mn[2] = Math.min(mn[2], _v.z);
     mx[0] = Math.max(mx[0], _v.x); mx[1] = Math.max(mx[1], _v.y); mx[2] = Math.max(mx[2], _v.z);
-  }
+  });
+  // the figure for the navigation: the box of the joints, the face and the top of the head
+  FIG.lo.set(mn[0], mn[1], mn[2]); FIG.hi.set(mx[0], mx[1], mx[2]);
+  FIG.head.set(0, 0.495, 0.035).applyMatrix4(_headFull);
+  FIG.top = _v.set(0, 0.625, 0.03).applyMatrix4(_headFull).y;
   mn[1] = Math.min(mn[1], GROUND_Y);
   SHADOW_FOCUS.body.set((mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2);
   SHADOW_FOCUS.bodyHalf = Math.max(0.95 * hipHeight() / MANIFEST.authoring.hip_height, 0.5 * Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) + 0.2);
@@ -1565,7 +1598,7 @@ function applyLook(look: any, remember = true) {
   if (remember) { try { localStorage.setItem('anny-look', JSON.stringify(L)); } catch (e) { /* storage unavailable */ } }
   shadowsDirty = true;
   resetAccum();
-  syncEditor();
+  HOOKS.look();
 }
 function loadRememberedMotion() {
   try { const t = localStorage.getItem('anny-motion'); return t ? JSON.parse(t) : null; } catch (e) { return null; }
@@ -1675,8 +1708,6 @@ async function init() {
     vertexShader: SKIN_GLSL + '\nattribute vec4 attrV; uniform vec4 uWearOn;\n' + COVER_GLSL + '\nvoid main(){ gl_Position = projectionMatrix * modelViewMatrix * (skinMat() * vec4(coveredPosition(), 1.0)); }',
   });
   scene.add(head); opaque.push(head);
-  buildBodySliders();
-  buildFaceSliders();
   initMotion(meta, B);
   initCorrectives(meta, B);
   STOOL = buildStool();
@@ -1703,9 +1734,7 @@ async function init() {
   HAIR.setStyle(meta.hair.styles.some((x) => x.name === 'medium_tousled') ? 'medium_tousled' : meta.hair.styles[0].name);
   // the physics runs unless the page takes still pictures (tests and reviews) or the address turns it off
   HAIR.setPhysics(qs.has('physics') ? qs.get('physics') !== 'off' : !SHOT);
-  $('toggle-physics')?.setAttribute('aria-pressed', String(HAIR.physics));
   fitHairColliders();
-  buildHairUI();
   Object.assign(U, HAIR.volumeUniforms());
   U.uHairOn.value = 1;
   setProgress(0.75, 'Placing strands');
@@ -1730,12 +1759,15 @@ async function init() {
     if (rm) { MOTION.playing = rm.playing !== false; MOTION.speed = rm.speed || 1; }
     setMotion(rm && MOTION.byName[rm.name] ? rm.name : 'a_pose', { instant: true, remember: false });
     if (!SHOT) { const f = bodyFrameFor(MOTION.cur); placeCamera(f.yaw, f.pitch, frameDistance(f), ...f.target); MOTION.lastFramed = MOTION.cur; }
-    buildPoser();
   }
   setProgress(0.95, 'Compiling shaders');
   await nextFrame();
   renderer.compile(scene, camera);
   setProgress(1, '');
+  UI = initUI(APP);
+  Object.assign(HOOKS, UI.hooks);
+  // the first view fits the free space beside the inspectors
+  if (!SHOT && MOTION.cur) { const f = bodyFrameFor(MOTION.cur); placeCamera(VIEW.yaw, f.pitch, frameDistance(f), ...f.target); }
   document.body.classList.add('ready');
   (window as any).__ready = true;
   if (!SHOT) animate();
@@ -1768,7 +1800,7 @@ function renderShadows() {
 
 // ------------------------------------------------------------------ progressive accumulation
 let accCount = 0;
-const MAX_ACC = SHOT ? parseInt(qs.get('acc') || '16') : (isSmall ? 20 : 40);
+let MAX_ACC = SHOT ? parseInt(qs.get('acc') || '16') : (isSmall ? 20 : 40);
 const rtOpts = { type: THREE.HalfFloatType, depthBuffer: true, generateMipmaps: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter };
 let sceneRT, sssRT, accRT = [];
 function allocRTs() {
@@ -1888,6 +1920,7 @@ const quadScene = new THREE.Scene(); quadScene.add(quadMesh);
 function halton(i, b) { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; }
 function renderPass() {
   const t0 = performance.now();
+  HOOKS.passBegin();
   // a change of scale starts the accumulation again (without counting as a move)
   const sc = renderScale();
   if (sc !== DYN.last) { accCount = 0; DYN.last = sc; }
@@ -1927,24 +1960,24 @@ function renderPass() {
   dispMat.uniforms.tAcc.value = dst.texture; dispMat.uniforms.uSeed.value = (accCount * 0.618) % 1;
   quadMesh.material = dispMat;
   renderer.setRenderTarget(null); renderer.render(quadScene, quadCam);
+  HOOKS.passEnd();
   accCount++;
   DYN.rendered = true;
   PERF.passes++; PERF.passMs += performance.now() - t0; PERF.w = w; PERF.h = h;
-  updateStatus();
 }
 function resetAccum() { accCount = 0; DYN.lastReset = performance.now(); DYN.resetFrame = DYN.frame; }
 controls.addEventListener('change', resetAccum);
-controls.addEventListener('start', () => { document.body.classList.add('interacted'); });
+controls.addEventListener('start', () => { document.body.classList.add('interacted'); HOOKS.interacted(); });
 let lastFrameT = performance.now();
 let hairClock = false;   // a test steps the hair's physics itself (window.stepHair)
 const _hc = new THREE.Vector3();
 function animate() {
   requestAnimationFrame(animate);
-  const now = performance.now(), dt = Math.min(0.1, (now - lastFrameT) / 1000); lastFrameT = now;
+  const now = performance.now(), rawDt = (now - lastFrameT) / 1000, dt = Math.min(0.1, rawDt); lastFrameT = now;
   DYN.frame++;
   tuneScale(dt);
   DYN.rendered = false;
-  if (tickMotion(dt) && currentFrame === 'face' && !tween) {
+  if (tickMotion(dt) && currentFrame === 'face' && !tween && !VIEW.userMoved) {
     // the close view of the face keeps the head in frame while the figure moves
     _hc.set(0, 0.495, 0.035).applyMatrix4(_headFull);
     const d = _hc.sub(controls.target).multiplyScalar(Math.min(1, dt * 6));
@@ -1958,14 +1991,18 @@ function animate() {
     resetAccum();
     if (k >= 1) tween = null;
   }
+  UI?.nav.before();
   const moved = controls.update();
+  UI?.nav.after(dt);
   if (controls.autoRotate) resetAccum();
   if (HAIR && HAIR.due()) resetAccum();
   // the hair's physics: it sleeps once the hair rests, so the picture can refine
   if (HAIR && hairWanted && !hairClock && HAIR.stepPhysics(dt)) { shadowsDirty = true; resetAccum(); }
   if (accCount < MAX_ACC) renderPass();
-  if (DYN.rendered) { PERF.frames++; PERF.jsMs += performance.now() - now; }
+  const jsMs = performance.now() - now;
+  if (DYN.rendered) { PERF.frames++; PERF.jsMs += jsMs; }
   updatePerf(now);
+  HOOKS.frame(now, rawDt, DYN.rendered, jsMs);
 }
 window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
@@ -1978,6 +2015,7 @@ window.addEventListener('resize', () => {
 
 // ------------------------------------------------------------------ UI wiring
 function setProgress(f, label) {
+  LOADT.push([label || '', performance.now()]);
   const bar = $('loadbar'); if (bar) bar.style.transform = `scaleX(${f})`;
   const l = $('loadlabel'); if (l && label) l.textContent = label;
 }
@@ -1985,13 +2023,14 @@ function showError(msg) {
   const l = $('loadlabel'); if (l) l.textContent = msg;
   document.body.classList.add('failed');
 }
-// the frame readout (the status button, or ?stats=1): frames per second while the page draws, the JavaScript time of
-// a frame, the render scale and the work of the hair
+// the frame counters (the performance card of ui/stats.ts and ?stats=1, and window.frameStats for the benchmarks):
+// frames per second while the page draws, the JavaScript time of a frame, the render scale and the work of the hair
 const PERF = { frames: 0, passes: 0, jsMs: 0, passMs: 0, t0: performance.now(), w: 0, h: 0, fps: 0, js: 0, idle: true };
 function frameStats() {
   const st = HAIR ? HAIR.stats() : null;
-  return { fps: +PERF.fps.toFixed(1), js_ms: +PERF.js.toFixed(2), idle: PERF.idle, scale: DYN.last || 1, width: PERF.w, height: PERF.h,
-    hair: st ? { strands: st.strands, vertices: st.vertices, lod: st.lod, physics: st.physics ? (st.asleep ? 'asleep' : +st.sim.ms.toFixed(2)) : 'off' } : null };
+  return Object.assign({ fps: +PERF.fps.toFixed(1), js_ms: +PERF.js.toFixed(2), idle: PERF.idle, scale: DYN.last || 1, width: PERF.w, height: PERF.h,
+    hair: st ? { strands: st.strands, vertices: st.vertices, lod: st.lod, physics: st.physics ? (st.asleep ? 'asleep' : +st.sim.ms.toFixed(2)) : 'off' } : null },
+  UI ? UI.stats.snapshot() : {});
 }
 function updatePerf(now: number) {
   if (now - PERF.t0 < 500) return;
@@ -1999,89 +2038,71 @@ function updatePerf(now: number) {
   PERF.idle = PERF.frames === 0;
   PERF.fps = PERF.frames / sec; PERF.js = PERF.frames ? PERF.jsMs / PERF.frames : 0;
   PERF.frames = 0; PERF.passes = 0; PERF.jsMs = 0; PERF.passMs = 0; PERF.t0 = now;
-  const el = $('perf');
-  if (!el || el.hidden) return;
-  const f = frameStats(), h = f.hair;
-  el.textContent = (f.idle ? 'idle (refined)' : `${f.fps.toFixed(0)} fps   ${f.js_ms.toFixed(1)} ms JS`)
-    + `\nscale ${Math.round(f.scale * 100)}%   ${f.width} x ${f.height}`
-    + (h ? `\nhair ${h.strands.toLocaleString()} strands, lod ${Math.round(h.lod * 100)}%\n${(h.vertices / 1e6).toFixed(2)} M vertices per draw`
-      + `\nphysics ${typeof h.physics === 'number' ? h.physics.toFixed(2) + ' ms' : h.physics}` : '');
 }
-let lastStatus = '';
-function updateStatus() {
-  const el = $('status'); if (!el) return;
-  const moving = MOTION.cur && ((MOTION.cur.kind === 'loop' && MOTION.playing) || MOTION.fade < 1);
-  const txt = moving ? 'Playing' : controls.autoRotate ? 'Turntable' : accCount >= MAX_ACC ? 'Refined' : `Refining ${Math.round(accCount / MAX_ACC * 100)}%`;
-  if (txt !== lastStatus) { el.textContent = txt; lastStatus = txt; el.dataset.done = accCount >= MAX_ACC ? '1' : '0'; }
-}
-function wireUI() {
-  // panels and the hint sit above the control bar, which can wrap to more rows on a phone
-  const bar = document.querySelector('.bar');
-  if (bar && typeof ResizeObserver !== 'undefined') {
-    new ResizeObserver(() => document.documentElement.style.setProperty('--bar-h', bar.offsetHeight + 'px')).observe(bar);
-  }
-  document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => {
-    document.querySelectorAll('[data-preset]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-    applyPreset(b.dataset.preset);
-  }));
-  const statusBtn = $('status'), perfEl = $('perf');
-  const showPerf = (on: boolean) => {
-    if (!statusBtn || !perfEl) return;
-    perfEl.hidden = !on; statusBtn.setAttribute('aria-expanded', String(on));
-    statusBtn.title = on ? 'Hide the frame rate' : 'Show the frame rate';
-    if (on) { perfEl.textContent = 'measuring'; PERF.t0 = performance.now() - 500; }
-  };
-  statusBtn?.addEventListener('click', () => showPerf(perfEl ? perfEl.hidden : false));
-  if (qs.get('stats') === '1') showPerf(true);
-  const hairBtn = $('toggle-hair');
-  hairBtn?.addEventListener('click', () => {
-    const on = hairBtn.getAttribute('aria-pressed') !== 'true';
-    hairBtn.setAttribute('aria-pressed', String(on));
-    hairWanted = on; updateHairVisibility();
-    shadowsDirty = true; resetAccum();
-  });
-  const phys = $('toggle-physics');
-  phys?.addEventListener('click', () => {
-    const on = phys.getAttribute('aria-pressed') !== 'true';
-    phys.setAttribute('aria-pressed', String(on));
-    HAIR?.setPhysics(on);
-    shadowsDirty = true; resetAccum();
-  });
-  const turn = $('toggle-turn');
-  turn?.addEventListener('click', () => {
-    const on = turn.getAttribute('aria-pressed') !== 'true';
-    turn.setAttribute('aria-pressed', String(on));
-    controls.autoRotate = on; resetAccum();
-  });
-  document.querySelectorAll('[data-frame]').forEach(b => b.addEventListener('click', () => {
-    document.querySelectorAll('[data-frame]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-    flyTo(b.dataset.frame);
-  }));
-  canvas.addEventListener('dblclick', () => flyTo(currentFrame));
-}
-wireUI();
 
-// ------------------------------------------------------------------ character panel
-const lookName = (list, hex) => { const m = PALETTES[list].find(p => p[1] === hex); return m ? m[0] : 'Custom ' + hex; };
-function setEdMsg(text, kind = '') { const m = $('ed-msg'); if (m) { m.textContent = text; m.dataset.kind = kind; } }
-function buildSwatches(list, key, pick) {
-  const box = $('ed-' + list);
-  box.textContent = '';
-  for (const [name, hex] of PALETTES[list]) {
-    const b = document.createElement('button');
-    b.type = 'button'; b.className = 'ed-sw'; b.style.setProperty('--sw', hex);
-    b.setAttribute('aria-label', name); b.title = name; b.dataset.hex = hex; b.setAttribute('aria-pressed', 'false');
-    b.addEventListener('click', () => pick(hex));
-    box.appendChild(b);
-  }
-  // any other colour through the system colour picker
-  const c = document.createElement('label');
-  c.className = 'ed-sw ed-custom'; c.title = 'Custom colour';
-  const inp = document.createElement('input');
-  inp.type = 'color'; inp.id = 'ed-' + list + '-custom'; inp.setAttribute('aria-label', 'Custom ' + key + ' colour');
-  inp.addEventListener('input', () => pick(inp.value.toLowerCase()));
-  c.appendChild(inp);
-  box.appendChild(c);
+// ------------------------------------------------------------------ lights: rotation and exposure
+// the rotation turns every light of the preset about the vertical axis; the exposure is in stops over the preset's
+const LIGHT = { rot: 0, ev: 0 };
+function rotatedPreset(p: any) {
+  const r = LIGHT.rot;
+  if (!r) return p;
+  return Object.assign({}, p, { boxes: p.boxes.map((b: any) => Object.assign({}, b, { az: b.az + r })),
+    key: Object.assign({}, p.key, { az: p.key.az + r }), rim: Object.assign({}, p.rim, { az: p.rim.az + r }) });
+}
+function applyExposure() {
+  const p = PRESETS[currentPreset];
+  renderer.toneMappingExposure = (qs.get('exp') ? parseFloat(qs.get('exp')) : p.exposure) * Math.pow(2, LIGHT.ev);
+  resetAccum();
+}
+function setLightRotation(deg: number, rebuild: boolean) {
+  LIGHT.rot = deg;
+  if (rebuild) { applyPreset(currentPreset); return; }
+  // while the slider moves: the key and the rim lights turn at once, the environment follows on release
+  const p = rotatedPreset(PRESETS[currentPreset]);
+  U.uKeyDir.value.copy(dirAE(p.key.az, p.key.el)); U.uRimDir.value.copy(dirAE(p.rim.az, p.rim.el));
+  updateShadowCamera(); shadowsDirty = true; resetAccum();
+}
+
+// ------------------------------------------------------------------ quality presets
+// auto: the dynamic resolution while moving; sharp: full resolution and every strand; fast: fewer pixels, samples
+// and strands
+const MAX_ACC0 = MAX_ACC, LOD_BASE0 = LOD.base;
+let QUALITY = 'auto';
+function setQuality(q: string) {
+  if (!['auto', 'sharp', 'fast'].includes(q)) return;
+  QUALITY = q;
+  DYN.on = !SHOT && qs.get('dyn') !== 'off' && q !== 'sharp';
+  if (!SHOT) MAX_ACC = q === 'fast' ? Math.min(16, MAX_ACC0) : MAX_ACC0;
+  LOD.base = q === 'sharp' ? 1 : q === 'fast' ? 0.5 : LOD_BASE0;
+  const pr = q === 'fast' ? Math.min(1, PR0) : PR0;
+  if (pr !== PR) { PR = pr; renderer.setPixelRatio(PR); renderer.setSize(innerWidth, innerHeight, false); allocRTs(); }
+  resetAccum();
+  HOOKS.motion();
+}
+
+// ------------------------------------------------------------------ the motion and the faces for the interface
+function rememberMotion() {
+  try { localStorage.setItem('anny-motion', JSON.stringify({ name: MOTION.cur.name, speed: MOTION.speed, playing: MOTION.playing })); } catch (e) { /* storage unavailable */ }
+}
+function togglePlay() {
+  MOTION.playing = !MOTION.playing;
+  rememberMotion(); HOOKS.motion(); resetAccum();
+}
+// a face drawn from anny's calibrated face-shape distribution for the given body; spread scales the spread of the
+// prior (1: the calibrated draw)
+function drawFace(phenotype: any, spread = 1) {
+  const f = BODY.face;
+  if (!f?.prior) return {};
+  const face = spread === 1 ? f : Object.assign({}, f, { tables: Object.assign({}, f.tables, { prior: Object.assign({}, f.tables.prior, { spread: (f.tables.prior.spread ?? 1) * spread }) }) });
+  const v = sampleFace(face, phenotype);
+  const out: any = {};
+  f.tables.names.forEach((name: string, i: number) => { const r = Math.round(v[i] * 1000) / 1000; if (r !== 0) out[name] = r; });
+  return out;
+}
+function randomFace() {
+  if (!BODY.face?.prior) return;
+  const out = drawFace(currentLook.phenotype);
+  editLook(n => { n.face = out; });
 }
 function editLook(mut) {
   const next = JSON.parse(JSON.stringify(currentLook));
@@ -2105,412 +2126,76 @@ function sameCharacter(a, b) {
   const close = (x, y) => Object.keys(Object.assign({}, x, y)).every(k => Math.abs((x[k] ?? 0) - (y[k] ?? 0)) < 1e-3);
   return sameLook(A, B) && close(A.phenotype, B.phenotype) && close(A.face, B.face) && A.hair.style === B.hair.style;
 }
-function toneTrack() {
-  const stops = [];
-  for (let i = 0; i <= 10; i++) { const c = skinBase(i / 10, currentLook.skin.undertone); stops.push(`rgb(${c.map(v => Math.round(v * 255)).join(',')}) ${i * 10}%`); }
-  return `linear-gradient(90deg, ${stops.join(', ')})`;
+// the height of the current body standing, in metres (the page draws anny at the scale of the authoring rig)
+const AUTHORING_SCALE = 0.8916;
+function stature() {
+  if (!BODY.ready) return 0;
+  const V = BODY.anny.coarse, n = BODY.anny.nBody;
+  let hi = -Infinity;
+  for (let i = 0; i < n; i++) if (V[i * 3 + 1] > hi) hi = V[i * 3 + 1];
+  return (hi - BODY.anny.floor) / AUTHORING_SCALE;
 }
-function underTrack() {
-  const c0 = skinBase(currentLook.skin.tone, -1), c1 = skinBase(currentLook.skin.tone, 0), c2 = skinBase(currentLook.skin.tone, 1);
-  const f = (c) => `rgb(${c.map(v => Math.round(v * 255)).join(',')})`;
-  return `linear-gradient(90deg, ${f(c0)}, ${f(c1)}, ${f(c2)})`;
-}
-function syncEditor() {
-  const ed = $('editor'); if (!ed || !BODY.ready) return;
-  const L = currentLook;
-  const tone = $('ed-tone'), under = $('ed-under');
-  if (document.activeElement !== tone) tone.value = L.skin.tone;
-  if (document.activeElement !== under) under.value = L.skin.undertone;
-  $('ed-tone-v').textContent = L.skin.tone.toFixed(2);
-  $('ed-under-v').textContent = (L.skin.undertone > 0 ? '+' : '') + L.skin.undertone.toFixed(2);
-  const sk = skinBase(L.skin.tone, L.skin.undertone).map(v => Math.round(v * 255));
-  tone.style.setProperty('--track', toneTrack()); tone.style.setProperty('--thumb', `rgb(${sk.join(',')})`);
-  under.style.setProperty('--track', underTrack()); under.style.setProperty('--thumb', `rgb(${sk.join(',')})`);
-  for (const [list, hex] of [['hair', L.hair.color], ['eyes', L.eyes.color]]) {
-    $('ed-' + list).querySelectorAll('.ed-sw[data-hex]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.hex === hex)));
-    const custom = $('ed-' + list + '-custom');
-    if (custom && document.activeElement !== custom) custom.value = hex;
-  }
-  $('ed-hair-v').textContent = lookName('hair', L.hair.color);
-  syncHair(L);
-  $('ed-eyes-v').textContent = lookName('eyes', L.eyes.color);
-  $('ed-looks').querySelectorAll('.ed-chip').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.name === L.name && sameLook(EXAMPLE_LOOKS.find(l => l.name === b.dataset.name), L))));
-  $('ed-chars').querySelectorAll('.ed-chip').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.name === L.name && sameCharacter(CHARACTERS.find(l => l.name === b.dataset.name), L))));
-  for (const s of BODY.sliders) {
-    const inp = $('ed-b-' + s.name), out = $('ed-b-' + s.name + '-v');
-    if (!inp) continue;
-    const v = L.phenotype[s.name] ?? 0.5;
-    if (document.activeElement !== inp) inp.value = v;
-    const txt = shapeText(s, v);
-    out.textContent = txt; inp.setAttribute('aria-valuetext', txt);
-  }
-  const rb = $('ed-shape-reset');
-  if (rb) rb.disabled = BODY.sliders.every(s => Math.abs((L.phenotype[s.name] ?? 0.5) - 0.5) < 1e-6);
-  for (const s of BODY.faceSliders) {
-    const inp = $('ed-f-' + s.name), out = $('ed-f-' + s.name + '-v');
-    if (!inp) continue;
-    const v = L.face?.[s.name] ?? 0;
-    if (document.activeElement !== inp) inp.value = v;
-    out.textContent = v.toFixed(2); inp.setAttribute('aria-valuetext', v.toFixed(2));
-  }
-  const fr = $('ed-face-reset');
-  if (fr) fr.disabled = !L.face || Object.keys(L.face).length === 0;
-  document.querySelectorAll('#ed-face details.po-group').forEach((d: any) => {
-    const n = BODY.faceSliders.filter(s => s.group === d.dataset.group && (L.face?.[s.name] ?? 0) !== 0).length;
-    const c = d.querySelector('.po-n'); if (c) c.textContent = n ? `${n} set` : '';
-  });
-}
-function shapeText(s, v) {
-  return s.race ? `${Math.round(100 * raceShare(currentLook.phenotype, s.name))} %` : v.toFixed(2);
-}
-// body sliders, built once the model has loaded; the shape updates at most once a frame while a slider moves
-let bodyPending = null;
-function queueBody(name, v) {
-  if (!bodyPending) {
-    bodyPending = {};
-    requestAnimationFrame(() => { const p = bodyPending; bodyPending = null; editLook(n => { Object.assign(n.phenotype, p); }); });
-  }
-  bodyPending[name] = v;
-}
-function buildBodySliders() {
-  const box = $('ed-shape');
-  if (!box || !BODY.ready) return;
-  box.textContent = '';
-  let raceHead = false;
-  for (const s of BODY.sliders) {
-    if (s.race && !raceHead) {
-      raceHead = true;
-      const h = document.createElement('div'); h.className = 'ed-sub'; h.textContent = 'Ethnicity';
-      const note = document.createElement('p'); note.className = 'ed-note';
-      note.textContent = 'The three values mix by their shares, shown on the right. Eurasian is Asian and Caucasian at equal values, with African at 0.';
-      box.append(h, note);
-    }
-    const wrap = document.createElement('div'); wrap.className = 'ed-slider';
-    const row = document.createElement('div'); row.className = 'ed-row';
-    const lab = document.createElement('label'); lab.htmlFor = 'ed-b-' + s.name; lab.textContent = s.label;
-    const out = document.createElement('output'); out.id = 'ed-b-' + s.name + '-v'; out.setAttribute('for', 'ed-b-' + s.name);
-    row.append(lab, out);
-    const inp = document.createElement('input');
-    Object.assign(inp, { type: 'range', id: 'ed-b-' + s.name, min: '0', max: '1', step: '0.01', value: '0.5' });
-    inp.title = 'Double-click to return to anny\'s default (0.5)';
-    inp.addEventListener('input', () => queueBody(s.name, parseFloat(inp.value)));
-    inp.addEventListener('dblclick', () => { inp.value = '0.5'; queueBody(s.name, 0.5); });
-    wrap.append(row, inp);
-    if (s.ends.length) {
-      const ends = document.createElement('div'); ends.className = 'ed-ends'; ends.setAttribute('aria-hidden', 'true');
-      for (const t of s.ends) { const sp = document.createElement('span'); sp.textContent = t; ends.appendChild(sp); }
-      wrap.appendChild(ends);
-    }
-    box.appendChild(wrap);
-  }
-  $('ed-shape-sec').hidden = false;
-  syncEditor();
-}
-// ------------------------------------------------------------------ hair styles and their sliders
-const HAIR_FAMILIES: [string, string][] = [['short', 'Short'], ['medium', 'Medium'], ['long', 'Long'], ['tied', 'Tied']];
-const HAIR_SLIDERS: any[] = [
-  { key: 'length', label: 'Length', ends: ['Shorter', 'Longer'] },
-  { key: 'curl', label: 'Curl', ends: ['Straight', 'Curly'] },
-  { key: 'volume', label: 'Volume', ends: ['Flat', 'Full'] },
-  { key: 'density', label: 'Density', ends: ['Thin', 'Thick'] },
-  { key: 'fade', label: 'Fade height', ends: ['Low', 'High'], fade: true },
-];
-function buildHairUI() {
-  const box = $('ed-hair-styles'), params = $('ed-hair-params');
-  if (!box || !HAIR) return;
-  box.textContent = ''; params.textContent = '';
-  for (const [family, title] of HAIR_FAMILIES) {
-    const specs = hairSpecs().filter((s) => s.family === family);
-    if (!specs.length) continue;
-    const g = document.createElement('div');
-    const h = document.createElement('div'); h.className = 'ed-sub'; h.textContent = title;
-    const chips = document.createElement('div'); chips.className = 'ed-chips';
-    for (const s of specs) {
-      const b = document.createElement('button');
-      b.type = 'button'; b.className = 'ed-chip'; b.dataset.style = s.name; b.setAttribute('aria-pressed', 'false');
-      b.textContent = s.label;
-      b.addEventListener('click', () => editLook((n) => { n.hair = { color: n.hair.color, style: s.name, part: n.hair.part }; }));
-      chips.appendChild(b);
-    }
-    g.append(h, chips);
-    box.appendChild(g);
-  }
-  for (const s of HAIR_SLIDERS) {
-    const wrap = document.createElement('div'); wrap.className = 'ed-slider'; wrap.id = 'ed-h-' + s.key + '-w';
-    const row = document.createElement('div'); row.className = 'ed-row';
-    const lab = document.createElement('label'); lab.htmlFor = 'ed-h-' + s.key; lab.textContent = s.label;
-    const out = document.createElement('output'); out.id = 'ed-h-' + s.key + '-v'; out.setAttribute('for', 'ed-h-' + s.key);
-    row.append(lab, out);
-    const inp = document.createElement('input');
-    Object.assign(inp, { type: 'range', id: 'ed-h-' + s.key, step: '0.01' });
-    inp.title = 'Double-click to return to the style\'s default';
-    inp.addEventListener('input', () => queueHair(s.key, parseFloat(inp.value)));
-    inp.addEventListener('dblclick', () => { const d = s.key === 'fade' ? 0 : (HAIR.defaults(currentLook.hair.style) as any)[s.key]; queueHair(s.key, d); });
-    const ends = document.createElement('div'); ends.className = 'ed-ends'; ends.setAttribute('aria-hidden', 'true');
-    for (const t of s.ends) { const sp = document.createElement('span'); sp.textContent = t; ends.appendChild(sp); }
-    wrap.append(row, inp, ends);
-    params.appendChild(wrap);
-  }
-  // the side of the part, for the styles that have one
-  const part = document.createElement('div'); part.className = 'ed-row'; part.id = 'ed-h-part-w';
-  const pl = document.createElement('span'); pl.className = 'ed-sub'; pl.textContent = 'Part';
-  const pc = document.createElement('div'); pc.className = 'ed-chips';
-  for (const side of ['left', 'right']) {
-    const b = document.createElement('button');
-    b.type = 'button'; b.className = 'ed-chip'; b.dataset.part = side; b.textContent = side === 'left' ? 'Left' : 'Right';
-    b.addEventListener('click', () => editLook((n) => { n.hair.part = side; }));
-    pc.appendChild(b);
-  }
-  part.append(pl, pc);
-  params.appendChild(part);
-  syncEditor();
-}
-// the hair sliders apply at most once a frame
-let hairPending: any = null;
-function queueHair(key: string, v: number) {
-  if (!hairPending) {
-    hairPending = {};
-    requestAnimationFrame(() => { const p = hairPending; hairPending = null; editLook((n) => { Object.assign(n.hair, p); }); });
-  }
-  hairPending[key] = v;
-}
-function syncHair(L: any) {
-  const spec = hairSpecs().find((s) => s.name === L.hair.style);
-  if (!spec || !$('ed-hair-styles')) return;
-  $('ed-hair-style-v').textContent = spec.label;
-  $('ed-hair-styles').querySelectorAll('.ed-chip').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.style === spec.name)));
-  for (const s of HAIR_SLIDERS) {
-    const w = $('ed-h-' + s.key + '-w'), inp = $('ed-h-' + s.key), out = $('ed-h-' + s.key + '-v');
-    if (!w) continue;
-    const range = s.fade ? FADE_RANGE : spec.controls[s.key];
-    const show = s.fade ? !!spec.render.fade : range[1] > range[0];
-    w.hidden = !show;
-    if (!show) continue;
-    inp.min = String(range[0]); inp.max = String(range[1]);
-    const v = L.hair[s.key] ?? 0;
-    if (document.activeElement !== inp) inp.value = String(v);
-    out.textContent = s.fade ? (v > 0 ? '+' : '') + v.toFixed(0) + '°' : v.toFixed(2);
-  }
-  const part = $('ed-h-part-w');
-  if (part) {
-    part.hidden = !spec.mirror;
-    part.querySelectorAll('.ed-chip').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.part === (L.hair.part || 'left'))));
-  }
-}
-// face sliders: one group per part of the face, closed at first; the face updates at most once a frame
-let facePending = null;
-function queueFace(name, v) {
-  if (!facePending) {
-    facePending = {};
-    requestAnimationFrame(() => {
-      const p = facePending; facePending = null;
-      editLook(n => { n.face = Object.assign({}, n.face || {}, p); for (const k of Object.keys(n.face)) if (n.face[k] === 0) delete n.face[k]; });
-    });
-  }
-  facePending[name] = v;
-}
-function buildFaceSliders() {
-  const box = $('ed-face');
-  if (!box || !BODY.ready || !BODY.face) return;
-  box.textContent = '';
-  for (const group of BODY.face.tables.group_order) {
-    const d = document.createElement('details'); d.className = 'po-group'; d.dataset.group = group;
-    const sum = document.createElement('summary'); sum.textContent = FACE_GROUP_TITLES[group] || group;
-    const count = document.createElement('span'); count.className = 'po-n'; sum.appendChild(count);
-    const list = document.createElement('div'); list.className = 'ed-shape ed-face-list';
-    for (const s of BODY.faceSliders.filter(x => x.group === group)) {
-      const wrap = document.createElement('div'); wrap.className = 'ed-slider';
-      const row = document.createElement('div'); row.className = 'ed-row';
-      const lab = document.createElement('label'); lab.htmlFor = 'ed-f-' + s.name; lab.textContent = s.label; lab.title = s.name;
-      const out = document.createElement('output'); out.id = 'ed-f-' + s.name + '-v'; out.setAttribute('for', 'ed-f-' + s.name);
-      row.append(lab, out);
-      const inp = document.createElement('input');
-      Object.assign(inp, { type: 'range', id: 'ed-f-' + s.name, min: String(s.range[0]), max: String(s.range[1]), step: '0.01', value: '0' });
-      if (s.range[0] < 0) inp.classList.add('ed-centred');
-      inp.title = 'Double-click to return to 0';
-      inp.addEventListener('input', () => queueFace(s.name, parseFloat(inp.value)));
-      inp.addEventListener('dblclick', () => { inp.value = '0'; queueFace(s.name, 0); });
-      const ends = document.createElement('div'); ends.className = 'ed-ends'; ends.setAttribute('aria-hidden', 'true');
-      for (const t of s.ends) { const sp = document.createElement('span'); sp.textContent = t; ends.appendChild(sp); }
-      wrap.append(row, inp, ends);
-      list.appendChild(wrap);
-    }
-    d.append(sum, list);
-    box.appendChild(d);
-  }
-  $('ed-face-random').hidden = !BODY.face.prior;
-  $('ed-face-sec').hidden = false;
-  syncEditor();
-}
-// a face drawn from anny's calibrated face-shape distribution for the current age, gender, weight and muscle
-function randomFace() {
-  if (!BODY.face?.prior) return;
-  const f = sampleFace(BODY.face, currentLook.phenotype);
-  const out: any = {};
-  BODY.face.tables.names.forEach((name: string, i: number) => { const r = Math.round(f[i] * 1000) / 1000; if (r !== 0) out[name] = r; });
-  editLook(n => { n.face = out; });
-}
-function wireEditor() {
-  const ed = $('editor'), btn = $('toggle-editor');
-  if (!ed || !btn) return;
-  // the Character and Pose panels share the space at the side, so one closes when the other opens
-  const po = $('poser'), pbtn = $('toggle-poser');
-  const setOpen = (panel, button, on, focusEl) => {
-    panel.hidden = !on; button.setAttribute('aria-expanded', String(on));
-    if (on) focusEl.focus({ preventScroll: true }); else button.focus({ preventScroll: true });
-  };
-  const open = (on) => {
-    if (on && po && !po.hidden) setOpen(po, pbtn, false, pbtn);
-    setOpen(ed, btn, on, $('ed-close'));
-    if (on) syncEditor();
-    document.body.classList.toggle('editing', !ed.hidden || (po && !po.hidden));
-  };
-  const openPoser = (on) => {
-    if (on && !ed.hidden) setOpen(ed, btn, false, btn);
-    setOpen(po, pbtn, on, $('po-close'));
-    if (on) syncPoser();
-    document.body.classList.toggle('editing', !ed.hidden || !po.hidden);
-  };
-  btn.addEventListener('click', () => open(ed.hidden));
-  $('ed-close').addEventListener('click', () => open(false));
-  if (po && pbtn) {
-    pbtn.addEventListener('click', () => openPoser(po.hidden));
-    $('po-close').addEventListener('click', () => openPoser(false));
-  }
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    if (!ed.hidden) open(false); else if (po && !po.hidden) openPoser(false);
-  });
-  // characters
-  const charChips = $('ed-chars');
-  for (const l of CHARACTERS) {
-    const b = document.createElement('button');
-    b.type = 'button'; b.className = 'ed-chip'; b.dataset.name = l.name; b.setAttribute('aria-pressed', 'false');
-    const dot = document.createElement('i');
-    const c = skinBase(l.skin.tone, l.skin.undertone).map(v => Math.round(v * 255));
-    dot.style.background = `linear-gradient(135deg, rgb(${c.join(',')}) 50%, ${l.hair.color} 50%)`;
-    b.append(dot, document.createTextNode(l.name));
-    b.addEventListener('click', () => { applyLook(JSON.parse(JSON.stringify(l))); setEdMsg(''); });
-    charChips.appendChild(b);
-  }
-  // example looks
-  const chips = $('ed-looks');
-  for (const l of EXAMPLE_LOOKS) {
-    const b = document.createElement('button');
-    b.type = 'button'; b.className = 'ed-chip'; b.dataset.name = l.name; b.setAttribute('aria-pressed', 'false');
-    const dot = document.createElement('i');
-    const c = skinBase(l.skin.tone, l.skin.undertone).map(v => Math.round(v * 255));
-    dot.style.background = `linear-gradient(135deg, rgb(${c.join(',')}) 50%, ${l.hair.color} 50%)`;
-    b.append(dot, document.createTextNode(l.name));
-    b.addEventListener('click', () => { applyLook(Object.assign({}, l, { phenotype: currentLook.phenotype, face: currentLook.face })); setEdMsg(''); });
-    chips.appendChild(b);
-  }
-  // skin sliders (the view refreshes while dragging)
-  $('ed-tone').addEventListener('input', (e) => editLook(n => { n.skin.tone = parseFloat(e.target.value); }));
-  $('ed-under').addEventListener('input', (e) => editLook(n => { n.skin.undertone = parseFloat(e.target.value); }));
-  buildSwatches('hair', 'hair', (hex) => editLook(n => { n.hair.color = hex; }));
-  buildSwatches('eyes', 'eye', (hex) => editLook(n => { n.eyes.color = hex; }));
-  // preset text: copy, paste, reset
-  const box = $('ed-json');
-  $('ed-copy').addEventListener('click', () => {
-    const text = JSON.stringify(currentLook, null, 2);
-    box.value = text;
-    const fallback = () => { box.hidden = false; box.focus(); box.select(); setEdMsg('Select the text above and copy it.'); };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(() => { box.hidden = true; setEdMsg('Preset copied.'); }, fallback);
-    } else fallback();
-  });
-  $('ed-paste').addEventListener('click', () => {
-    box.hidden = false; box.value = ''; box.focus();
-    setEdMsg('Paste a preset into the box. It loads as soon as it reads as a preset.');
-  });
-  const tryLoad = () => {
-    const t = box.value.trim();
-    if (!t) return;
-    try {
-      const look = normaliseLook(JSON.parse(t));
-      applyLook(look);
-      box.hidden = true;
-      setEdMsg('Loaded "' + look.name + '".');
-    } catch (err) {
-      setEdMsg('This text is not a preset yet. A preset is JSON with skin, hair, eyes and phenotype fields.', 'error');
-    }
-  };
-  box.addEventListener('input', tryLoad);
-  $('ed-reset').addEventListener('click', () => { applyLook(BASELINE_LOOK); box.hidden = true; setEdMsg('Back to the baseline look and anny\'s defaults.'); });
-  $('ed-shape-reset').addEventListener('click', () => editLook(n => { n.phenotype = baselinePhenotype(); }));
-  $('ed-face-reset').addEventListener('click', () => editLook(n => { n.face = {}; }));
-  $('ed-face-random').addEventListener('click', () => { randomFace(); setEdMsg(''); });
-}
-wireEditor();
 
-// ------------------------------------------------------------------ pose panel
-function buildPoser() {
-  const box = $('po-poses'), an = $('po-anims');
-  if (!box || !an || !MOTION.clips.length) return;
-  box.textContent = ''; an.textContent = '';
-  const chip = (c) => {
-    const b = document.createElement('button');
-    b.type = 'button'; b.className = 'ed-chip'; b.dataset.motion = c.name; b.textContent = c.label; b.setAttribute('aria-pressed', 'false');
-    b.addEventListener('click', () => { if (c.kind === 'loop' && MOTION.cur === c) togglePlay(); else { if (c.kind === 'loop') MOTION.playing = true; setMotion(c.name); } });
-    return b;
-  };
-  // pose groups fold open and shut; the group of the current pose opens by itself
-  const groups = [];
-  for (const c of MOTION.clips) {
-    if (c.kind !== 'pose') { an.appendChild(chip(c)); continue; }
-    let g = groups.find(x => x.name === c.group);
-    if (!g) {
-      const wrap = document.createElement('details'); wrap.className = 'po-group'; wrap.dataset.group = c.group;
-      const sum = document.createElement('summary');
-      const name = document.createElement('span'); name.textContent = c.group;
-      const n = document.createElement('span'); n.className = 'po-n';
-      sum.append(name, n);
-      const row = document.createElement('div'); row.className = 'ed-chips'; row.setAttribute('role', 'group'); row.setAttribute('aria-label', c.group + ' poses');
-      wrap.append(sum, row); box.appendChild(wrap);
-      g = { name: c.group, row, n, count: 0 }; groups.push(g);
-    }
-    g.row.appendChild(chip(c));
-    g.n.textContent = String(++g.count);
-  }
-  $('po-play').addEventListener('click', togglePlay);
-  $('po-speed').querySelectorAll('.ed-chip').forEach(b => b.addEventListener('click', () => {
-    MOTION.speed = parseFloat(b.dataset.speed); rememberMotion(); syncPoser();
-  }));
-  if (CORR.ready) {
-    $('po-tissue-sec').hidden = false;
-    $('po-tissue').querySelectorAll('.ed-chip').forEach(b => b.addEventListener('click', () => setCorrectivesOn(b.dataset.corr === 'on')));
-  }
-  $('toggle-poser').hidden = false;
-  syncPoser();
-}
-function rememberMotion() {
-  try { localStorage.setItem('anny-motion', JSON.stringify({ name: MOTION.cur.name, speed: MOTION.speed, playing: MOTION.playing })); } catch (e) { /* storage unavailable */ }
-}
-function togglePlay() {
-  MOTION.playing = !MOTION.playing;
-  rememberMotion(); syncPoser(); resetAccum();
-}
-function syncPoser() {
-  const box = $('poser'); if (!box || !MOTION || !MOTION.cur) return;
-  box.querySelectorAll('.ed-chip[data-motion]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.motion === MOTION.cur.name)));
-  const loop = MOTION.cur.kind === 'loop';
-  const play = $('po-play');
-  play.disabled = !loop;
-  play.textContent = loop && !MOTION.playing ? 'Play' : 'Pause';
-  play.setAttribute('aria-pressed', String(loop && MOTION.playing));
-  $('po-speed').querySelectorAll('.ed-chip').forEach(b => b.setAttribute('aria-pressed', String(parseFloat(b.dataset.speed) === MOTION.speed)));
-  $('po-state').textContent = MOTION.cur.label + (loop ? (MOTION.playing ? '' : ', paused') : '');
-  if (!loop && MOTION.cur.group && syncPoser.openFor !== MOTION.cur.name) {
-    syncPoser.openFor = MOTION.cur.name;
-    const d = box.querySelector(`details.po-group[data-group="${MOTION.cur.group}"]`);
-    if (d) d.open = true;
-  }
-  const cr = $('po-credit');
-  if (cr) cr.textContent = MOTION.cur.credit ? 'Pose by ' + MOTION.cur.credit + ', from the MakeHuman community (CC0).' : '';
-  const tb = $('po-tissue');
-  if (tb) tb.querySelectorAll('.ed-chip').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.corr === 'on') === CORR.on)));
-}
+// ------------------------------------------------------------------ what the interface sees of the renderer
+const APP: any = {
+  THREE, renderer, camera, controls, canvas, shot: SHOT, small: isSmall, qs,
+  look: () => currentLook,
+  applyLook: (l: any, remember = true) => applyLook(l, remember),
+  editLook, normaliseLook,
+  baseline: () => JSON.parse(JSON.stringify(BASELINE_LOOK)),
+  characters: CHARACTERS, looks: EXAMPLE_LOOKS, palettes: PALETTES, skinBase, sameLook, sameCharacter, baselinePhenotype,
+  bodyReady: () => BODY.ready,
+  bodySliders: () => BODY.sliders,
+  faceSliders: () => BODY.faceSliders,
+  faceGroups: () => BODY.face ? BODY.face.tables.group_order : [],
+  faceGroupTitle: (g: string) => FACE_GROUP_TITLES[g] || g,
+  facePrior: () => !!BODY.face?.prior,
+  sampleFace: (ph: any, spread: number) => drawFace(ph, spread),
+  raceShare, stature,
+  bodyTiming: () => ({ ms: BODY.lastMs, total: BODY.lastTotalMs, steps: BODY.lastTiming }),
+  hairSpecs,
+  hairDefaults: (name: string) => HAIR ? HAIR.defaults(name) : null,
+  fadeRange: FADE_RANGE,
+  hairVisible: () => hairWanted,
+  setHairVisible: (on: boolean) => { hairWanted = !!on; updateHairVisibility(); HOOKS.hair(); },
+  hairPhysics: () => !!HAIR?.physics,
+  setHairPhysics: (on: boolean) => { HAIR?.setPhysics(!!on); shadowsDirty = true; resetAccum(); HOOKS.hair(); },
+  hairStats: () => HAIR ? HAIR.stats() : null,
+  clips: () => MOTION.clips,
+  motion: () => MOTION,
+  setMotion: (name: string) => { const c = MOTION.byName[name]; if (c && c.kind === 'loop') MOTION.playing = true; setMotion(name); },
+  togglePlay,
+  setSpeed: (s: number) => { MOTION.speed = s; rememberMotion(); HOOKS.motion(); },
+  seek: (t: number) => { MOTION.t = t; evalMotion(); },
+  correctives: () => ({ ready: CORR.ready, on: CORR.on }),
+  setCorrectives: (on: boolean) => setCorrectivesOn(on),
+  presets: PRESETS,
+  preset: () => currentPreset,
+  applyPreset: (n: string) => { applyPreset(n); HOOKS.motion(); },
+  lightRotation: () => LIGHT.rot,
+  setLightRotation,
+  exposureEV: () => LIGHT.ev,
+  setExposureEV: (ev: number) => { LIGHT.ev = ev; applyExposure(); },
+  quality: () => QUALITY,
+  setQuality,
+  turntable: () => !!controls.autoRotate,
+  setTurntable: (on: boolean) => { controls.autoRotate = !!on; resetAccum(); HOOKS.motion(); },
+  groundY: () => GROUND_Y,
+  figure: () => FIG,
+  flyTo: (name: string) => flyTo(name),
+  currentFrame: () => currentFrame,
+  view: VIEW,
+  tweenTo: (t: any, p: any, ms = 800) => { stopInertia(); tween = { t0: performance.now(), dur: ms, fromT: controls.target.clone(), fromP: camera.position.clone(), toT: t.clone(), toP: p.clone() }; },
+  tweening: () => !!tween,
+  resetAccum,
+  renderPass,
+  samples: () => ({ n: accCount, max: MAX_ACC }),
+  scale: () => ({ s: DYN.last || 1, w: PERF.w, h: PERF.h }),
+  pixelRatio: () => PR,
+  shadowSize: () => SHADOW_SIZE,
+  sssMode: () => SSS_ON ? 'screen space' : 'curvature table',
+  loadTimes: () => LOADT,
+};
 
 // test hook
 window.setView = (yaw = 25, pitch = 3, dist = 0.8, ty = TARGET.y, tz = TARGET.z, fov = 24, tx = 0) => {
@@ -2551,7 +2236,7 @@ window.hairRest = (n) => HAIR.readRest(renderer, n);
 window.hairGuides = () => HAIR.readGuides(renderer);
 window.frameStats = frameStats;
 window.stepHair = (dt = 1 / 60) => { hairClock = true; if (HAIR.stepPhysics(dt)) { shadowsDirty = true; resetAccum(); } return HAIR.stats(); };
-window.setHairPhysics = (on) => { HAIR.setPhysics(!!on); const b = $('toggle-physics'); if (b) b.setAttribute('aria-pressed', String(!!on)); return HAIR.physics; };
+window.setHairPhysics = (on) => { HAIR.setPhysics(!!on); HOOKS.hair(); return HAIR.physics; };
 window.setPreset = (n) => { applyPreset(n); return true; };
 window.setCorrectives = (on) => { setCorrectivesOn(on); return CORR.ready; };
 window.__CORR = CORR;
@@ -2559,6 +2244,8 @@ window.__U = U;
 window.setLook = (look) => { applyLook(look, false); return true; };
 window.setMotion = (name, t = 0, paused = true) => { MOTION.playing = !paused; return setMotion(name, { instant: true, t, remember: false }); };
 window.__MOTION = MOTION; window.__RIG = RIG;
+// the camera and the navigation state, for tests of the interface
+window.__view = { camera, controls, VIEW, FIG, ground: () => GROUND_Y, frame: () => DYN.frame, tweening: () => !!tween };
 window.__BODY = BODY;
 // anny's sliders from a test: returns the times of the update (ms)
 window.setSliders = (v) => { applyLook(Object.assign({}, currentLook, { phenotype: Object.assign({}, currentLook.phenotype, v) }), false); return { body: BODY.lastMs, total: BODY.lastTotalMs, steps: BODY.lastTiming }; };
