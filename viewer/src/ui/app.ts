@@ -94,6 +94,12 @@ export interface App {
   skeleton(): boolean;
   setSkeleton(on: boolean): void;
   pickBone(x: number, y: number): string | null;
+  // the weight view: the body in the colours of its skinning weights, of one bone (by name) or of every bone (null)
+  weightView(): boolean;
+  setWeightView(on: boolean): void;
+  weightBone(): string | null;
+  setWeightBone(name: string | null): void;
+  weightStats(): { vertices: number; area: number; bones: { name: string; touched: number; area: number }[] } | null;   // area in m²
   // the frame rate limit (0: the display's rate)
   fpsCaps: number[];
   fpsCap(): number;

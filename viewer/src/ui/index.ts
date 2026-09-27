@@ -4,7 +4,7 @@
 //
 // The interface of the viewer: the top bar (identity and quick actions), the Character and Stage segments, the view
 // bar, the height rail, the performance card, the help sheet, the first-run hint, the name of the bone under the
-// pointer while the skeleton shows, and the keyboard shortcuts.
+// pointer, the legend of the weight view, and the keyboard shortcuts.
 // main.ts calls initUI once the model is ready, and calls the returned hooks when the look, the motion or a frame
 // changes.
 
@@ -231,13 +231,35 @@ export function initUI(app: App): UI {
   }
   function dismissCoach() { if (!coach) return; coach.classList.add('out'); const c = coach; coach = null; setTimeout(() => c.remove(), 300); saveUi({ coach: 1 }); }
 
-  // ---------------------------------------------------------------- the name of the bone under the pointer
+  // ---------------------------------------------------------------- the bone under the pointer, and the weight view
+  // The name of the bone under the pointer shows while the skeleton shows. In the weight view, pointing at a bone shows
+  // its weights and a click keeps them (a click beside the bones returns to every bone); a legend reads them.
   const boneTip = h('div.bone-tip', { 'aria-hidden': 'true', hidden: true });
-  let tipAt: { x: number; y: number } | null = null, tipQueued = false;
+  const legend = h('div.wlegend.glass', { role: 'status', hidden: true });
+  let tipAt: { x: number; y: number } | null = null, tipQueued = false, kept = false;
+  const fmtN = (n: number) => n.toLocaleString('en');
+  const paintLegend = () => {
+    legend.hidden = !app.weightView();
+    if (legend.hidden) return;
+    const name = app.weightBone(), st = app.weightStats();
+    if (!name || !st) {
+      legend.replaceChildren(h('div.wl-head', {}, h('b', { text: 'Skin weights' }), h('span.wl-kept', { text: 'a colour per bone' })),
+        h('p', { text: 'Point at a bone to see its weights, and click it to keep it.' }));
+      return;
+    }
+    const b = st.bones.find((x) => x.name === name)!;
+    const all = h('button.tb.tb-quiet', { type: 'button', text: 'Every bone' });
+    all.addEventListener('click', () => { kept = false; app.setWeightBone(null); paintLegend(); });
+    legend.replaceChildren(
+      h('div.wl-head', {}, h('b.wl-name', { text: name }), h('span.wl-kept', { text: kept ? 'kept' : '' }), all),
+      h('div.wl-bar', {}, h('span', { text: '0' }), h('div.wl-ramp', { 'aria-hidden': 'true' }), h('span', { text: '1' })),
+      h('p', { text: b.touched ? `Weighs on ${fmtN(b.touched)} vertices, and leads ${fmtN(Math.round(b.area * 1e4))} cm² of skin (${(b.area / st.area * 100).toFixed(1)} %).` : 'This bone moves no vertex of the body.' }));
+  };
   const paintBoneTip = () => {
     tipQueued = false;
-    const name = tipAt && app.skeleton() ? app.pickBone(tipAt.x, tipAt.y) : null;
+    const name = tipAt && (app.skeleton() || app.weightView()) ? app.pickBone(tipAt.x, tipAt.y) : null;
     boneTip.hidden = !name;
+    if (name && app.weightView() && !kept && name !== app.weightBone()) { app.setWeightBone(name); paintLegend(); }
     if (!name || !tipAt) return;
     boneTip.textContent = name;
     boneTip.style.left = tipAt.x + 'px'; boneTip.style.top = tipAt.y + 'px';
@@ -246,11 +268,22 @@ export function initUI(app: App): UI {
     // a drag orbits the camera: the name waits until the pointer rests on a bone again
     if (e.buttons || e.pointerType === 'touch') { tipAt = null; boneTip.hidden = true; return; }
     tipAt = { x: e.clientX, y: e.clientY };
-    if (!tipQueued && app.skeleton()) { tipQueued = true; requestAnimationFrame(paintBoneTip); }
+    if (!tipQueued && (app.skeleton() || app.weightView())) { tipQueued = true; requestAnimationFrame(paintBoneTip); }
   });
   app.canvas.addEventListener('pointerleave', () => { tipAt = null; boneTip.hidden = true; });
+  // a click (a press without a drag) in the weight view keeps the bone under it, or returns to every bone
+  let press: { x: number; y: number; t: number } | null = null;
+  app.canvas.addEventListener('pointerdown', (e) => { press = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+  app.canvas.addEventListener('pointerup', (e) => {
+    const p = press; press = null;
+    if (!p || !app.weightView() || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 5 || performance.now() - p.t > 400) return;
+    const name = app.pickBone(e.clientX, e.clientY);
+    kept = !!name;
+    app.setWeightBone(name);
+    paintLegend();
+  });
 
-  document.body.append(top, left.rail, left.panel, right.rail, right.panel, nav.rail, viewbar, stats.el, help, shotDlg, boneTip);
+  document.body.append(top, left.rail, left.panel, right.rail, right.panel, nav.rail, viewbar, stats.el, help, shotDlg, boneTip, legend);
   if (coach) document.body.append(coach);
 
   // ---------------------------------------------------------------- the keyboard
@@ -281,6 +314,7 @@ export function initUI(app: App): UI {
       p: () => right.toggle('pose'), l: () => right.toggle('scene'),
       H: () => app.setHairVisible(!app.hairVisible()), t: () => app.setTurntable(!app.turntable()),
       B: () => app.setSkeleton(!app.skeleton()),
+      W: () => app.setWeightView(!app.weightView()),
       '`': () => stats.toggle(), '?': () => help.showModal(),
       ' ': () => { const m = app.motion(); if (m.cur && m.cur.kind === 'loop') app.togglePlay(); },
       Escape: () => {
@@ -324,7 +358,12 @@ export function initUI(app: App): UI {
   let tFrame = 0;
   const hooks: Hooks = {
     look: syncLook,
-    motion: () => { ss.sync(); if (!app.skeleton()) boneTip.hidden = true; },
+    motion: () => {
+      ss.sync();
+      if (!app.skeleton() && !app.weightView()) boneTip.hidden = true;
+      if (!app.weightView()) kept = false;
+      paintLegend();
+    },
     hair: () => { cs.sync(app.look()); ss.sync(); },
     frame(now, dt, drew, jsMs) {
       stats.frame(now, dt, drew, jsMs);

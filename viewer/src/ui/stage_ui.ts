@@ -4,7 +4,7 @@
 //
 // The sections of the Stage segment: Pose (the clips with a timeline, the poses, the soft tissue) and Scene (the
 // lights, their rotation, the exposure, the quality of the picture, the frame rate limit and the display toggles,
-// the skeleton among them).
+// the skeleton and the skin weights among them).
 
 import type { App } from './app.ts';
 import { chip, foldGroup, searchField, sectionHead, segmented, slider, toggle } from './controls.ts';
@@ -129,19 +129,21 @@ export function stageSections(app: App) {
     const physT = toggle('Hair physics', (on) => app.setHairPhysics(on));
     const turnT = toggle('Turntable', (on) => app.setTurntable(on));
     const skelT = toggle('Skeleton', (on) => app.setSkeleton(on), 'Shift+B');
+    const weightT = toggle('Skin weights', (on) => app.setWeightView(on), 'Shift+W');
     scene.append(head.el, h('h3.sub', { text: 'Lighting' }), cards, h('div.sliders', {}, rot.el, exp.el),
       h('h3.sub', { text: 'Quality' }), qual.el, qNote,
       h('h3.sub', { text: 'Frame rate limit' }), fps.el,
       h('p.note', { text: 'A lower limit saves energy while the figure, the hair or the camera moves. A still picture refines and then stops drawing at any limit.' }),
-      h('h3.sub', { text: 'Display' }), h('div.switches', {}, hairT.el, physT.el, turnT.el, skelT.el),
-      h('p.note', { text: 'The skeleton shows the bones of the rig in front of the body: the figure’s left side in teal, its right side in orange. Point at a bone to read its name.' }));
+      h('h3.sub', { text: 'Display' }), h('div.switches', {}, hairT.el, physT.el, turnT.el, skelT.el, weightT.el),
+      h('p.note', { text: 'The skeleton shows the bones of the rig in front of the body: the figure’s left side in teal, its right side in orange. Point at a bone to read its name.' }),
+      h('p.note', { text: 'Skin weights colour the body by the bones that move it. Point at a bone to see its weights from blue (none) to red (all), and click it to keep it.' }));
     const sync = () => {
       lightEls.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.preset === app.preset())));
       head.note.textContent = app.presets[app.preset()]?.label || '';
       rot.set(app.lightRotation()); exp.set(app.exposureEV());
       qual.set(app.quality()); qNote.textContent = QUALITY[app.quality()] || '';
       fps.set(String(app.fpsCap()));
-      hairT.set(app.hairVisible()); physT.set(app.hairPhysics()); turnT.set(app.turntable()); skelT.set(app.skeleton());
+      hairT.set(app.hairVisible()); physT.set(app.hairPhysics()); turnT.set(app.turntable()); skelT.set(app.skeleton()); weightT.set(app.weightView());
     };
     syncs.push(sync);
   }

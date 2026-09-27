@@ -920,6 +920,8 @@ function updateEyeShape() {
 // ------------------------------------------------------------------ rig
 // Every bone rests with the world axes at its head, so a bone's rest offset is its head minus its parent's head and
 // its inverse bind matrix is a plain translation. The rest heads come from anny's joints for the current sliders.
+// the skinned mesh of the body (the weight view shares its geometry)
+let BODY_MESH: any = null;
 const RIG: any = { ready: false, bones: [], skel: null, parents: null, heads: null, root: -1, head: -1, eyes: [], holder: null };
 function buildRig(rig: any, J: Float32Array) {
   RIG.parents = rig.parents;
@@ -957,14 +959,19 @@ function rigForBody() {
   setRigRest();
   evalMotion();
 }
-// ------------------------------------------------------------------ skeleton overlay
+// ------------------------------------------------------------------ skeleton and skin weights
 // The bones over the picture, as the Gradio demo (anny.examples.interactive_demo) showed them: a tapered bone from
 // each joint to the joint of each child, wide at the parent (the bone that the segment draws), and a ball at every
-// joint. The overlay draws on the canvas after the display pass, in front of the body, so the tone mapping and the
-// accumulation leave it alone. Bones of the figure's left side are teal, of its right side orange.
+// joint. Bones of the figure's left side are teal, of its right side orange. The weight view draws the body in the
+// colours of its skinning weights (the eight largest per fine vertex, as the page skins it): the weight of one bone on
+// a blue to red ramp, or a colour per bone blended by the weights when no bone is chosen. Both draw into a
+// multisampled overlay after the display pass, in front of the picture, so the tone mapping and the accumulation
+// leave their colours alone.
 const SKEL: any = { on: false, scene: null, bones: null, joints: null, segs: [] as number[][] };
 const SKEL_COLOURS = { L: '#3cc9bd', R: '#f39a4a', C: '#c9d6ea' };
 function boneSide(name: string) { return name.endsWith('.L') ? 'L' : name.endsWith('.R') ? 'R' : 'C'; }
+// the weight view shows the skeleton too, to choose a bone
+function skeletonShown() { return SKEL.on || WEIGHTS.on; }
 function buildSkeleton() {
   // a bone along +Y from 0 to 1, widest at 0.1 (Blender's octahedral bone); the instance matrix scales its width
   const P = [0, 0, 0, 1, 0.1, 0, 0, 0.1, 1, -1, 0.1, 0, 0, 0.1, -1, 0, 1, 0];
@@ -977,24 +984,39 @@ function buildSkeleton() {
   RIG.parents.forEach((p: number, i: number) => { if (p >= 0) SKEL.segs.push([p, i]); });
   SKEL.bones = new THREE.InstancedMesh(boneGeo, mat(true), SKEL.segs.length);
   SKEL.joints = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 2), mat(false), RIG.bones.length);
-  const c = new THREE.Color();
-  SKEL.segs.forEach(([p]: number[], k: number) => SKEL.bones.setColorAt(k, c.setStyle(SKEL_COLOURS[boneSide(RIG.bones[p].name)])));
-  RIG.bones.forEach((b: any, i: number) => SKEL.joints.setColorAt(i, c.setStyle(SKEL_COLOURS[boneSide(b.name)]).lerp(new THREE.Color(1, 1, 1), 0.35)));
+  paintSkeleton();
   for (const m of [SKEL.bones, SKEL.joints]) m.frustumCulled = false;
   SKEL.scene = new THREE.Scene();
   SKEL.scene.add(SKEL.bones, SKEL.joints);
 }
+// the colours of the bones: the side of each bone; the bone of the weight view stands out in white
+function paintSkeleton() {
+  if (!SKEL.bones) return;
+  const c = new THREE.Color(), white = new THREE.Color(1, 1, 1), sel = WEIGHTS.on ? WEIGHTS.bone : -1;
+  SKEL.segs.forEach(([p]: number[], k: number) => {
+    c.setStyle(SKEL_COLOURS[boneSide(RIG.bones[p].name)]);
+    if (sel === p) c.copy(white); else if (sel >= 0) c.multiplyScalar(0.55);
+    SKEL.bones.setColorAt(k, c);
+  });
+  RIG.bones.forEach((b: any, i: number) => {
+    c.setStyle(SKEL_COLOURS[boneSide(b.name)]).lerp(white, 0.35);
+    if (sel === i) c.copy(white); else if (sel >= 0) c.multiplyScalar(0.55);
+    SKEL.joints.setColorAt(i, c);
+  });
+  SKEL.bones.instanceColor.needsUpdate = true; SKEL.joints.instanceColor.needsUpdate = true;
+}
 const _sa = new THREE.Vector3(), _sb = new THREE.Vector3(), _sd = new THREE.Vector3(), _sx = new THREE.Vector3(), _sz = new THREE.Vector3(), _sm = new THREE.Matrix4();
+let _inLen = new Float32Array(0);
 // the instances follow the posed bones (poseChanged)
 function updateSkeleton() {
-  if (!SKEL.on || !RIG.ready) return;
+  if (!skeletonShown() || !RIG.ready) return;
   if (!SKEL.scene) buildSkeleton();
-  const inLen = new Float32Array(RIG.bones.length);
+  if (_inLen.length !== RIG.bones.length) _inLen = new Float32Array(RIG.bones.length);
   SKEL.segs.forEach(([p, i]: number[], k: number) => {
     _sa.setFromMatrixPosition(RIG.bones[p].matrixWorld); _sb.setFromMatrixPosition(RIG.bones[i].matrixWorld);
     _sd.subVectors(_sb, _sa);
     const len = _sd.length();
-    inLen[i] = len;
+    _inLen[i] = len;
     if (len < 1e-4) { SKEL.bones.setMatrixAt(k, _sm.makeScale(0, 0, 0)); return; }
     // the width axes turn with the parent bone, so the facets hold still while the figure moves
     _sx.setFromMatrixColumn(RIG.bones[p].matrixWorld, 0);
@@ -1006,19 +1028,171 @@ function updateSkeleton() {
     SKEL.bones.setMatrixAt(k, _sm.makeBasis(_sx, _sd, _sz).setPosition(_sa));
   });
   RIG.bones.forEach((b: any, i: number) => {
-    const r = RIG.parents[i] < 0 ? 0.009 : Math.max(0.0022, Math.min(0.008, 0.09 * inLen[i]));
+    const r = RIG.parents[i] < 0 ? 0.009 : Math.max(0.0022, Math.min(0.008, 0.09 * _inLen[i]));
     _sa.setFromMatrixPosition(b.matrixWorld);
     SKEL.joints.setMatrixAt(i, _sm.makeScale(r, r, r).setPosition(_sa));
   });
   SKEL.bones.instanceMatrix.needsUpdate = true; SKEL.joints.instanceMatrix.needsUpdate = true;
   SKEL.bones.boundingSphere = null; SKEL.joints.boundingSphere = null;
 }
-// the overlay on the canvas: in front of the picture, with the depth of the bones among themselves
-function drawSkeleton() {
-  if (!SKEL.on || !SKEL.scene) return;
+
+// the weight view: the body's geometry and skin on the same skeleton, with a material that colours the weights
+const WEIGHTS: any = { on: false, bone: -1, scene: null, mat: null, eyes: [], stats: null, body: null };
+const WEIGHT_GLSL = /* glsl */`
+uniform float uBone; uniform float uHead;
+varying vec3 vCol; varying vec3 vN;
+vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
+// Blender's weight ramp: blue at 0, then cyan, green, yellow, and red at 1
+vec3 ramp(float w) {
+  vec3 c = w < 0.25 ? mix(vec3(0.08, 0.12, 0.5), vec3(0.0, 0.75, 1.0), w / 0.25)
+         : w < 0.5 ? mix(vec3(0.0, 0.75, 1.0), vec3(0.1, 0.85, 0.2), (w - 0.25) / 0.25)
+         : w < 0.75 ? mix(vec3(0.1, 0.85, 0.2), vec3(1.0, 0.9, 0.1), (w - 0.5) / 0.25)
+         : mix(vec3(1.0, 0.9, 0.1), vec3(0.95, 0.15, 0.1), (w - 0.75) / 0.25);
+  return toLinear(c);
+}
+// a colour per bone: hues a golden angle apart
+vec3 boneColour(float i) {
+  vec3 k = clamp(abs(fract(fract(i * 0.618034 + 0.08) + vec3(0.0, 2.0, 1.0) / 3.0) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+  return toLinear(mix(vec3(1.0), k, 0.6) * 0.92);
+}
+float slot(float idx, float w) { return abs(idx - uBone) < 0.5 ? w : 0.0; }
+`;
+function buildWeightView() {
+  if (!BODY_MESH) return;
+  const defs = Object.assign({}, BODY_MESH.geometry.attributes.skinIndex2 ? SKIN8_DEF : {});
+  const common = { uBone: { value: -1 }, uHead: { value: RIG.head } };
+  WEIGHTS.mat = new THREE.ShaderMaterial({
+    uniforms: common, defines: defs, side: THREE.DoubleSide,
+    vertexShader: SKIN_GLSL + WEIGHT_GLSL + `
+void main() {
+  mat4 S = skinMat();
+  vN = normalize(normalMatrix * (mat3(S) * normal));
+  float w = 0.0;
+  if (uBone >= 0.0) {
+    w = slot(skinIndex.x, skinWeight.x) + slot(skinIndex.y, skinWeight.y) + slot(skinIndex.z, skinWeight.z) + slot(skinIndex.w, skinWeight.w);
+#ifdef SKIN8
+    w += slot(skinIndex2.x, skinWeight2.x) + slot(skinIndex2.y, skinWeight2.y) + slot(skinIndex2.z, skinWeight2.z) + slot(skinIndex2.w, skinWeight2.w);
+#endif
+    vCol = ramp(clamp(w, 0.0, 1.0));
+  } else {
+    vCol = skinWeight.x * boneColour(skinIndex.x) + skinWeight.y * boneColour(skinIndex.y) + skinWeight.z * boneColour(skinIndex.z) + skinWeight.w * boneColour(skinIndex.w);
+#ifdef SKIN8
+    vCol += skinWeight2.x * boneColour(skinIndex2.x) + skinWeight2.y * boneColour(skinIndex2.y) + skinWeight2.z * boneColour(skinIndex2.z) + skinWeight2.w * boneColour(skinIndex2.w);
+#endif
+  }
+  gl_Position = projectionMatrix * modelViewMatrix * (S * vec4(position, 1.0));
+}`,
+    fragmentShader: `varying vec3 vCol; varying vec3 vN;
+void main() { vec3 n = normalize(vN); gl_FragColor = vec4(vCol * (0.35 + 0.65 * abs(n.z)), 1.0); }`,
+  });
+  // the eyes ride on the head bone
+  const eyeMat = new THREE.ShaderMaterial({
+    uniforms: common,
+    vertexShader: WEIGHT_GLSL + `
+void main() {
+  vN = normalize(normalMatrix * normal);
+  vCol = uBone >= 0.0 ? ramp(abs(uBone - uHead) < 0.5 ? 1.0 : 0.0) : boneColour(uHead);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`,
+    fragmentShader: WEIGHTS.mat.fragmentShader,
+  });
+  const body = new THREE.SkinnedMesh(BODY_MESH.geometry, WEIGHTS.mat);
+  body.bind(RIG.skel, new THREE.Matrix4()); body.frustumCulled = false;
+  WEIGHTS.scene = new THREE.Scene(); WEIGHTS.scene.add(body);
+  WEIGHTS.eyes = RIG.eyes.map((e: any) => {
+    const g = e.mesh.geometry;
+    if (!g.attributes.normal) g.computeVertexNormals();
+    const m = new THREE.Mesh(g, eyeMat); m.matrixAutoUpdate = false; m.frustumCulled = false;
+    WEIGHTS.scene.add(m);
+    return { src: e.mesh, mesh: m };
+  });
+  // how much of the body each bone moves: the vertices it weighs on, and the skin (in m², at anny's own scale) where it
+  // weighs most; a vertex holds a third of the area of each triangle around it
+  const g = BODY_MESH.geometry, P = g.attributes.position.array, idx = g.index.array;
+  const si = [g.attributes.skinIndex, g.attributes.skinIndex2].filter(Boolean), sw = [g.attributes.skinWeight, g.attributes.skinWeight2].filter(Boolean);
+  const n = si[0].count, nb = RIG.bones.length, touched = new Uint32Array(nb), led = new Float64Array(nb), area = new Float64Array(n);
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t] * 3, b = idx[t + 1] * 3, c = idx[t + 2] * 3;
+    _sa.set(P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]); _sb.set(P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]);
+    const A = _sa.cross(_sb).length() / 6 / (AUTHORING_SCALE * AUTHORING_SCALE);
+    area[idx[t]] += A; area[idx[t + 1]] += A; area[idx[t + 2]] += A;
+  }
+  let total = 0;
+  for (let v = 0; v < n; v++) {
+    let best = -1, bw = 0;
+    for (let s = 0; s < si.length; s++) for (let k = 0; k < 4; k++) {
+      const w = sw[s].array[v * 4 + k], b = si[s].array[v * 4 + k];
+      if (w > 0) { touched[b]++; if (w > bw) { bw = w; best = b; } }
+    }
+    if (best >= 0) led[best] += area[v];
+    total += area[v];
+  }
+  WEIGHTS.stats = { vertices: n, area: total, touched, led };
+}
+function setWeightBone(name: string | null) {
+  const i = name ? RIG.bones.findIndex((b: any) => b.name === name) : -1;
+  if (i === WEIGHTS.bone) return;
+  WEIGHTS.bone = i;
+  if (WEIGHTS.mat) WEIGHTS.mat.uniforms.uBone.value = i;
+  paintSkeleton();
+  redisplay();
+  HOOKS.motion();
+}
+function setWeightView(on: boolean) {
+  WEIGHTS.on = !!on && RIG.ready && !!BODY_MESH;
+  if (WEIGHTS.on && !WEIGHTS.scene) buildWeightView();
+  if (!WEIGHTS.on) WEIGHTS.bone = -1;
+  if (WEIGHTS.mat) WEIGHTS.mat.uniforms.uBone.value = WEIGHTS.bone;
+  updateSkeleton(); paintSkeleton();
+  // the hair would cover the colours of the scalp
+  updateHairVisibility();
+  redisplay();
+  HOOKS.motion();
+}
+// the table of the weights, for the interface and the tests: per bone, the vertices it weighs on and the skin it leads
+function weightStats() {
+  if (!WEIGHTS.stats && RIG.ready && BODY_MESH) buildWeightView();
+  const s = WEIGHTS.stats;
+  if (!s) return null;
+  return { vertices: s.vertices, area: s.area, bones: RIG.bones.map((b: any, i: number) => ({ name: b.name, touched: s.touched[i], area: s.led[i] })) };
+}
+
+// the overlay: a multisampled target of the canvas's size, blended over the picture (premultiplied alpha)
+const OVL: any = { rt: null, mat: null };
+function overlayTarget() {
+  const w = renderer.domElement.width, h = renderer.domElement.height;
+  if (!OVL.rt || OVL.rt.width !== w || OVL.rt.height !== h) {
+    if (OVL.rt) OVL.rt.dispose();
+    OVL.rt = new THREE.WebGLRenderTarget(w, h, { samples: 4, type: THREE.HalfFloatType, depthBuffer: true });
+  }
+  if (!OVL.mat) OVL.mat = new THREE.ShaderMaterial({
+    uniforms: { tOvl: { value: null } }, vertexShader: FSQ_VS,
+    fragmentShader: `uniform sampler2D tOvl; varying vec2 vUv;
+void main() {
+  vec4 c = texture2D(tOvl, vUv);
+  if (c.a < 1e-3) discard;
+  gl_FragColor = vec4(sRGBTransferOETF(vec4(c.rgb / c.a, 1.0)).rgb * c.a, c.a);
+}`,
+    depthTest: false, depthWrite: false, transparent: true, toneMapped: false,
+    blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+  });
+  return OVL.rt;
+}
+function drawOverlay() {
+  if (!skeletonShown() || !SKEL.scene) return;
+  const rt = overlayTarget();
   renderer.autoClear = false;
-  renderer.clearDepth();
+  renderer.setRenderTarget(rt); renderer.setClearColor(0x000000, 0); renderer.clear();
+  if (WEIGHTS.on && WEIGHTS.scene) {
+    for (const e of WEIGHTS.eyes) { e.mesh.matrix.copy(e.src.matrix); e.mesh.matrixWorldNeedsUpdate = true; }
+    renderer.render(WEIGHTS.scene, camera);
+    renderer.clearDepth();
+  }
   renderer.render(SKEL.scene, camera);
+  renderer.setRenderTarget(null);
+  OVL.mat.uniforms.tOvl.value = rt.texture;
+  quadMesh.material = OVL.mat; renderer.render(quadScene, quadCam);
+  renderer.setClearColor(0x000000, 1);
   renderer.autoClear = true;
 }
 function setSkeleton(on: boolean) {
@@ -1031,7 +1205,7 @@ function setSkeleton(on: boolean) {
 // body it draws), a ball the bone whose head it marks
 const _ray = new THREE.Raycaster(), _ndc = new THREE.Vector2();
 function pickBone(x: number, y: number) {
-  if (!SKEL.on || !SKEL.scene) return null;
+  if (!skeletonShown() || !SKEL.scene) return null;
   const r = canvas.getBoundingClientRect();
   _ndc.set((x - r.left) / r.width * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
   _ray.setFromCamera(_ndc, camera);
@@ -1593,7 +1767,7 @@ const LOOK_PARTS: any = { hair: null, brows: null, lashes: null, hairMeshes: [],
 let currentLook: any = JSON.parse(JSON.stringify(BASELINE_LOOK));
 let hairWanted = true;
 function updateHairVisibility() {
-  LOOK_PARTS.hairMeshes.forEach((m: any, i: number) => { m.visible = i > 0 || hairWanted; });
+  LOOK_PARTS.hairMeshes.forEach((m: any, i: number) => { m.visible = !WEIGHTS.on && (i > 0 || hairWanted); });
   U.uHairOn.value = hairWanted && HAIR ? 1 : 0;
   shadowsDirty = true; resetAccum();
 }
@@ -1792,7 +1966,7 @@ async function init() {
     uniforms: { uWearOn: U.uWearOn }, defines: Object.assign({}, depthMat.defines, hg.attributes.skinIndex2 ? SKIN8_DEF : {}), side: THREE.DoubleSide, fragmentShader: depthMat.fragmentShader,
     vertexShader: SKIN_GLSL + '\nattribute vec4 attrV; uniform vec4 uWearOn;\n' + COVER_GLSL + '\nvoid main(){ gl_Position = projectionMatrix * modelViewMatrix * (skinMat() * vec4(coveredPosition(), 1.0)); }',
   });
-  scene.add(head); opaque.push(head);
+  scene.add(head); opaque.push(head); BODY_MESH = head;
   initMotion(meta, B);
   initCorrectives(meta, B);
   STOOL = buildStool();
@@ -2047,7 +2221,7 @@ function renderPass() {
   dispMat.uniforms.tAcc.value = dst.texture; dispMat.uniforms.uSeed.value = (accCount * 0.618) % 1;
   quadMesh.material = dispMat;
   renderer.setRenderTarget(null); renderer.render(quadScene, quadCam);
-  drawSkeleton();
+  drawOverlay();
   HOOKS.passEnd();
   accCount++;
   DYN.rendered = true;
@@ -2059,7 +2233,7 @@ function redisplay() {
   if (!accCount) return;
   quadMesh.material = dispMat;
   renderer.setRenderTarget(null); renderer.render(quadScene, quadCam);
-  drawSkeleton();
+  drawOverlay();
 }
 controls.addEventListener('change', resetAccum);
 controls.addEventListener('start', () => { document.body.classList.add('interacted'); HOOKS.interacted(); });
@@ -2297,6 +2471,11 @@ const APP: any = {
   skeleton: () => SKEL.on,
   setSkeleton,
   pickBone,
+  weightView: () => WEIGHTS.on,
+  setWeightView,
+  weightBone: () => WEIGHTS.bone >= 0 ? RIG.bones[WEIGHTS.bone].name : null,
+  setWeightBone,
+  weightStats,
   fpsCaps: FPS_CAPS,
   fpsCap: () => FPS.cap,
   setFpsCap,
@@ -2360,6 +2539,8 @@ window.setHairPhysics = (on) => { HAIR.setPhysics(!!on); HOOKS.hair(); return HA
 window.setPreset = (n) => { applyPreset(n); return true; };
 window.setCorrectives = (on) => { setCorrectivesOn(on); return CORR.ready; };
 window.setSkeleton = (on) => { setSkeleton(on); return SKEL.on; };
+window.setWeightView = (on, bone = null) => { setWeightView(on); setWeightBone(bone); return WEIGHTS.on; };
+window.weightStats = weightStats;
 window.setFpsCap = (cap) => { setFpsCap(cap); return FPS.cap; };
 window.__CORR = CORR;
 window.__U = U;
