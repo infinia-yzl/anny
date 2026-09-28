@@ -2,7 +2,7 @@
 
 All notable changes to this project.
 
-## Unreleased
+## v0.6.1 - 2026-09-28
 
 ### Fixed
 
@@ -11,6 +11,14 @@ All notable changes to this project.
   source mesh with its symmetry plane, rather than onto the closest surface point, which
   was ambiguous over concave midline regions. Cached model data is regenerated
   automatically (data version bump).
+- Phenotype parameters lying exactly on an anchor point, in particular internal ones
+  such as the default `weight=0.5`, now get a consistent non-zero gradient. The
+  interpolation weight was previously clamped with `torch.clamp`, whose gradient at the
+  bounds is inconsistent across torch versions and could vanish there.
+- SOMA assets are pinned to the Hugging Face revision matching `py-soma-x==0.1.0`
+  (`anny.models.soma.SOMA_ASSETS_REVISION`), since later assets are incompatible.
+- `KeypointsRegressor` now loads its keypoint data directly on the model device, fixing
+  device mismatches with models not on the CPU.
 
 ## v0.6 - 2026-08-06
 
