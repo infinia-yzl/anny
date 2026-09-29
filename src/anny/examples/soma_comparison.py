@@ -8,6 +8,8 @@ import roma
 import soma
 import trimesh
 
+from anny.models.soma import SOMA_ASSETS_REVISION
+
 device = torch.device("cpu")
 dtype = torch.float64
 
@@ -15,9 +17,12 @@ dtype = torch.float64
 anny_soma = anny.Anny(
     rig="soma", topology="soma", pose_parameterization="local-ref", phenotypes="all"
 ).to(device=device, dtype=dtype)
-soma_layer = soma.SOMALayer(identity_model_type="anny", mode="warp", device=device).to(
-    dtype=dtype
-)
+soma_layer = soma.SOMALayer(
+    data_root=soma.get_assets_dir(revision=SOMA_ASSETS_REVISION),
+    identity_model_type="anny",
+    mode="warp",
+    device=device,
+).to(dtype=dtype)
 
 phenotype_kwargs = torch.rand(
     (1, len(anny_soma.phenotype_labels)), device=device, dtype=dtype

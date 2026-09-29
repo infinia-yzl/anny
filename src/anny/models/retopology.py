@@ -198,6 +198,8 @@ def build_alternative_topology_model_data(
         target_faces=faces,
         source_vertices=reference_vertices,
         source_faces=reference_faces,
+        # The SOMA target mesh is not left/right symmetric.
+        symmetry_axis=None if topology.base_mesh == "soma" else 0,
     )
     if topology.triangulate_faces:
         data = triangulate(data)

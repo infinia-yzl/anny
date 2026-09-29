@@ -7,6 +7,8 @@ import copy
 import json
 import torch
 
+from anny.models.soma import SOMA_ASSETS_REVISION
+
 
 def precompute_soma_rig():
     """
@@ -15,7 +17,9 @@ def precompute_soma_rig():
     device = torch.device("cpu")
     dtype = torch.float64
 
-    soma_layer = soma.SOMALayer(device=device).to(dtype=dtype)
+    soma_layer = soma.SOMALayer(
+        data_root=soma.get_assets_dir(revision=SOMA_ASSETS_REVISION), device=device
+    ).to(dtype=dtype)
 
     # Compute bone positions and blendshapes from neutral pose
     sparse_rbf_matrix = soma_layer.skeleton_transfer.sparse_rbf_matrix.to(

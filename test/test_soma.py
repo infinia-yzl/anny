@@ -10,6 +10,7 @@ import torch
 
 import anny
 from anny.models.model_transforms import _select_blendshape_rows
+from anny.models.soma import SOMA_ASSETS_REVISION
 
 
 class TestSomaRigVertexCount(unittest.TestCase):
@@ -108,7 +109,10 @@ class TestSomaRigProcrustesOrientation(unittest.TestCase):
 
         dtype = torch.float64
         soma_layer = soma.SOMALayer(
-            identity_model_type="anny", mode="warp", device=torch.device("cpu")
+            data_root=soma.get_assets_dir(revision=SOMA_ASSETS_REVISION),
+            identity_model_type="anny",
+            mode="warp",
+            device=torch.device("cpu"),
         ).to(dtype=dtype)
         model = anny.Anny(rig="soma", topology="soma").to(dtype=dtype)
         torch.manual_seed(0)
@@ -222,7 +226,10 @@ class TestSomaForwardParity(unittest.TestCase):
 
         anny_soma = anny.Anny(rig="soma", topology="soma")
         soma_layer = soma.SOMALayer(
-            identity_model_type="anny", mode="warp", device=torch.device("cpu")
+            data_root=soma.get_assets_dir(revision=SOMA_ASSETS_REVISION),
+            identity_model_type="anny",
+            mode="warp",
+            device=torch.device("cpu"),
         )
         self.assertTrue(
             torch.equal(
@@ -246,7 +253,10 @@ class TestSomaForwardParity(unittest.TestCase):
             phenotypes="all",
         ).to(device=device, dtype=dtype)
         soma_layer = soma.SOMALayer(
-            identity_model_type="anny", mode="warp", device=device
+            data_root=soma.get_assets_dir(revision=SOMA_ASSETS_REVISION),
+            identity_model_type="anny",
+            mode="warp",
+            device=device,
         ).to(dtype=dtype)
 
         torch.manual_seed(0)
