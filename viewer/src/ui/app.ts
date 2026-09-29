@@ -90,15 +90,15 @@ export interface App {
   setQuality(q: string): void;
   turntable(): boolean;
   setTurntable(on: boolean): void;
-  // the bones drawn over the picture, and the name of the bone under a point of the canvas (client pixels)
-  skeleton(): boolean;
-  setSkeleton(on: boolean): void;
+  // the view of the rig ('off', 'skeleton', or 'weights': the body in the colours of its skinning weights, with the
+  // skeleton), the chosen bone (kept: chosen by a click), and the name of the bone under a point of the canvas
+  rigView(): string;
+  boneNames(): string[];
+  setRigView(mode: string): void;
+  rigBone(): string | null;
+  rigBoneKept(): boolean;
+  setRigBone(name: string | null, kept?: boolean): void;
   pickBone(x: number, y: number): string | null;
-  // the weight view: the body in the colours of its skinning weights, of one bone (by name) or of every bone (null)
-  weightView(): boolean;
-  setWeightView(on: boolean): void;
-  weightBone(): string | null;
-  setWeightBone(name: string | null): void;
   weightStats(): { vertices: number; area: number; bones: { name: string; touched: number; area: number }[] } | null;   // area in m²
   // the frame rate limit (0: the display's rate)
   fpsCaps: number[];

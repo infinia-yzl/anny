@@ -3,13 +3,14 @@
 // Apache License, Version 2.0
 //
 // The sections of the Stage segment: Pose (the clips with a timeline, the poses, the soft tissue) and Scene (the
-// lights, their rotation, the exposure, the quality of the picture, the frame rate limit and the display toggles,
-// the skeleton and the skin weights among them).
+// lights, their rotation, the exposure, the quality of the picture, the frame rate limit and the display toggles).
+// The Rig section (rig_ui.ts) sits between Pose and Scene.
 
 import type { App } from './app.ts';
 import { chip, foldGroup, searchField, sectionHead, segmented, slider, toggle } from './controls.ts';
 import { h, saveUi, uiState } from './dom.ts';
 import { icon } from './icons.ts';
+import { rigSection } from './rig_ui.ts';
 
 const QUALITY: Record<string, string> = {
   auto: 'Draws at a lower resolution while the figure moves, then refines the still picture at full resolution.',
@@ -128,22 +129,18 @@ export function stageSections(app: App) {
     const hairT = toggle('Hair', (on) => app.setHairVisible(on));
     const physT = toggle('Hair physics', (on) => app.setHairPhysics(on));
     const turnT = toggle('Turntable', (on) => app.setTurntable(on));
-    const skelT = toggle('Skeleton', (on) => app.setSkeleton(on), 'Shift+B');
-    const weightT = toggle('Skin weights', (on) => app.setWeightView(on), 'Shift+W');
     scene.append(head.el, h('h3.sub', { text: 'Lighting' }), cards, h('div.sliders', {}, rot.el, exp.el),
       h('h3.sub', { text: 'Quality' }), qual.el, qNote,
       h('h3.sub', { text: 'Frame rate limit' }), fps.el,
       h('p.note', { text: 'A lower limit saves energy while the figure, the hair or the camera moves. A still picture refines and then stops drawing at any limit.' }),
-      h('h3.sub', { text: 'Display' }), h('div.switches', {}, hairT.el, physT.el, turnT.el, skelT.el, weightT.el),
-      h('p.note', { text: 'The skeleton shows the bones of the rig in front of the body: the figure’s left side in teal, its right side in orange. Point at a bone to read its name.' }),
-      h('p.note', { text: 'Skin weights colour the body by the bones that move it. Point at a bone to see its weights from blue (none) to red (all), and click it to keep it.' }));
+      h('h3.sub', { text: 'Display' }), h('div.switches', {}, hairT.el, physT.el, turnT.el));
     const sync = () => {
       lightEls.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.preset === app.preset())));
       head.note.textContent = app.presets[app.preset()]?.label || '';
       rot.set(app.lightRotation()); exp.set(app.exposureEV());
       qual.set(app.quality()); qNote.textContent = QUALITY[app.quality()] || '';
       fps.set(String(app.fpsCap()));
-      hairT.set(app.hairVisible()); physT.set(app.hairPhysics()); turnT.set(app.turntable()); skelT.set(app.skeleton()); weightT.set(app.weightView());
+      hairT.set(app.hairVisible()); physT.set(app.hairPhysics()); turnT.set(app.turntable());
     };
     syncs.push(sync);
   }
@@ -153,5 +150,9 @@ export function stageSections(app: App) {
   if (q && q !== app.quality() && !app.shot) app.setQuality(q);
   const cap = uiState().fpsCap;
   if (typeof cap === 'number' && cap !== app.fpsCap() && !app.shot) app.setFpsCap(cap);
-  return { pose, scene, sync: () => { for (const s of syncs) s(); }, frame: () => { for (const f of frames) f(); } };
+  // ---------------------------------------------------------------- Rig
+  const rig = rigSection(app);
+  syncs.push(rig.sync);
+
+  return { pose, rig: rig.el, scene, sync: () => { for (const s of syncs) s(); }, frame: () => { for (const f of frames) f(); } };
 }

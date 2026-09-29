@@ -989,10 +989,10 @@ function buildSkeleton() {
   SKEL.scene = new THREE.Scene();
   SKEL.scene.add(SKEL.bones, SKEL.joints);
 }
-// the colours of the bones: the side of each bone; the bone of the weight view stands out in white
+// the colours of the bones: the side of each bone; the chosen bone stands out in white
 function paintSkeleton() {
   if (!SKEL.bones) return;
-  const c = new THREE.Color(), white = new THREE.Color(1, 1, 1), sel = WEIGHTS.on ? WEIGHTS.bone : -1;
+  const c = new THREE.Color(), white = new THREE.Color(1, 1, 1), sel = WEIGHTS.bone;
   SKEL.segs.forEach(([p]: number[], k: number) => {
     c.setStyle(SKEL_COLOURS[boneSide(RIG.bones[p].name)]);
     if (sel === p) c.copy(white); else if (sel >= 0) c.multiplyScalar(0.55);
@@ -1037,7 +1037,9 @@ function updateSkeleton() {
 }
 
 // the weight view: the body's geometry and skin on the same skeleton, with a material that colours the weights
-const WEIGHTS: any = { on: false, bone: -1, scene: null, mat: null, eyes: [], stats: null, body: null };
+// the chosen bone (-1: none) lights in the skeleton and shows its weights; kept: chosen by a click, so pointing at
+// another bone leaves it
+const WEIGHTS: any = { on: false, bone: -1, kept: false, scene: null, mat: null, eyes: [], stats: null, body: null };
 const WEIGHT_GLSL = /* glsl */`
 uniform float uBone; uniform float uHead;
 varying vec3 vCol; varying vec3 vN;
@@ -1129,19 +1131,24 @@ void main() {
   }
   WEIGHTS.stats = { vertices: n, area: total, touched, led };
 }
-function setWeightBone(name: string | null) {
+function setRigBone(name: string | null, kept = false) {
   const i = name ? RIG.bones.findIndex((b: any) => b.name === name) : -1;
-  if (i === WEIGHTS.bone) return;
-  WEIGHTS.bone = i;
-  if (WEIGHTS.mat) WEIGHTS.mat.uniforms.uBone.value = i;
-  paintSkeleton();
-  redisplay();
+  WEIGHTS.kept = i >= 0 && kept;
+  if (i !== WEIGHTS.bone) {
+    WEIGHTS.bone = i;
+    if (WEIGHTS.mat) WEIGHTS.mat.uniforms.uBone.value = i;
+    paintSkeleton();
+    redisplay();
+  }
   HOOKS.motion();
 }
-function setWeightView(on: boolean) {
-  WEIGHTS.on = !!on && RIG.ready && !!BODY_MESH;
+// the view of the rig: 'off', 'skeleton', or 'weights' (the body in the colours of its weights, with the skeleton)
+function rigView() { return WEIGHTS.on ? 'weights' : SKEL.on ? 'skeleton' : 'off'; }
+function setRigView(mode: string) {
+  if (!['off', 'skeleton', 'weights'].includes(mode) || !RIG.ready) return;
+  SKEL.on = mode === 'skeleton';
+  WEIGHTS.on = mode === 'weights' && !!BODY_MESH;
   if (WEIGHTS.on && !WEIGHTS.scene) buildWeightView();
-  if (!WEIGHTS.on) WEIGHTS.bone = -1;
   if (WEIGHTS.mat) WEIGHTS.mat.uniforms.uBone.value = WEIGHTS.bone;
   updateSkeleton(); paintSkeleton();
   // the hair would cover the colours of the scalp
@@ -1194,12 +1201,6 @@ function drawOverlay() {
   quadMesh.material = OVL.mat; renderer.render(quadScene, quadCam);
   renderer.setClearColor(0x000000, 1);
   renderer.autoClear = true;
-}
-function setSkeleton(on: boolean) {
-  SKEL.on = !!on;
-  updateSkeleton();
-  redisplay();
-  HOOKS.motion();
 }
 // the name of the bone under a point of the canvas (client pixels): a segment names its parent bone (the bone whose
 // body it draws), a ball the bone whose head it marks
@@ -2468,13 +2469,13 @@ const APP: any = {
   setQuality,
   turntable: () => !!controls.autoRotate,
   setTurntable: (on: boolean) => { controls.autoRotate = !!on; resetAccum(); HOOKS.motion(); },
-  skeleton: () => SKEL.on,
-  setSkeleton,
+  rigView,
+  setRigView,
+  boneNames: () => RIG.bones.map((b: any) => b.name),
+  rigBone: () => WEIGHTS.bone >= 0 ? RIG.bones[WEIGHTS.bone].name : null,
+  rigBoneKept: () => WEIGHTS.kept,
+  setRigBone,
   pickBone,
-  weightView: () => WEIGHTS.on,
-  setWeightView,
-  weightBone: () => WEIGHTS.bone >= 0 ? RIG.bones[WEIGHTS.bone].name : null,
-  setWeightBone,
   weightStats,
   fpsCaps: FPS_CAPS,
   fpsCap: () => FPS.cap,
@@ -2538,8 +2539,8 @@ window.stepHair = (dt = 1 / 60) => { hairClock = true; if (HAIR.stepPhysics(dt))
 window.setHairPhysics = (on) => { HAIR.setPhysics(!!on); HOOKS.hair(); return HAIR.physics; };
 window.setPreset = (n) => { applyPreset(n); return true; };
 window.setCorrectives = (on) => { setCorrectivesOn(on); return CORR.ready; };
-window.setSkeleton = (on) => { setSkeleton(on); return SKEL.on; };
-window.setWeightView = (on, bone = null) => { setWeightView(on); setWeightBone(bone); return WEIGHTS.on; };
+window.setSkeleton = (on) => { setRigView(on ? 'skeleton' : 'off'); return SKEL.on; };
+window.setWeightView = (on, bone = null) => { setRigView(on ? 'weights' : 'off'); setRigBone(bone, !!bone); return WEIGHTS.on; };
 window.weightStats = weightStats;
 window.setFpsCap = (cap) => { setFpsCap(cap); return FPS.cap; };
 window.__CORR = CORR;

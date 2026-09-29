@@ -30,7 +30,7 @@ export const SHORTCUTS: [string, [string, string][]][] = [
   ]],
   ['Panels', [
     ['C B F H E', 'Characters, Body, Face, Hair, Skin & eyes'],
-    ['P L', 'Pose, Scene'],
+    ['P R L', 'Pose, Rig, Scene'],
     ['`', 'Performance'],
     ['?', 'This sheet'],
     ['Esc', 'Close the panel or the sheet'],
