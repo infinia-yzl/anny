@@ -3,7 +3,8 @@
 // Apache License, Version 2.0
 //
 // The interface of the viewer: the top bar (identity and quick actions), the Character and Stage segments, the view
-// bar, the height rail, the performance card, the help sheet, the first-run hint and the keyboard shortcuts.
+// bar, the height rail, the performance card, the help sheet, the first-run hint, the name of the bone under the
+// pointer, and the keyboard shortcuts.
 // main.ts calls initUI once the model is ready, and calls the returned hooks when the look, the motion or a frame
 // changes.
 
@@ -113,6 +114,7 @@ export function initUI(app: App): UI {
   ], layout);
   const right: Segment = makeSegment('right', 'Stage', [
     { id: 'pose', label: 'Pose', icon: 'pose', key: 'p', el: ss.pose },
+    { id: 'rig', label: 'Rig', icon: 'bones', key: 'r', el: ss.rig },
     { id: 'scene', label: 'Scene', icon: 'scene', key: 'l', el: ss.scene },
   ], layout);
   if (!app.clips().length) { right.sections[0].el.remove(); (right.rail.querySelector('#tab-pose') as HTMLElement).hidden = true; }
@@ -228,7 +230,38 @@ export function initUI(app: App): UI {
   }
   function dismissCoach() { if (!coach) return; coach.classList.add('out'); const c = coach; coach = null; setTimeout(() => c.remove(), 300); saveUi({ coach: 1 }); }
 
-  document.body.append(top, left.rail, left.panel, right.rail, right.panel, nav.rail, viewbar, stats.el, help, shotDlg);
+  // ---------------------------------------------------------------- the bone under the pointer
+  // While the rig shows (the Rig section), the name of the bone under the pointer follows it. In the weight view,
+  // pointing at a bone shows its weights; a click keeps a bone, and a click beside the bones clears it.
+  const boneTip = h('div.bone-tip', { 'aria-hidden': 'true', hidden: true });
+  let tipAt: { x: number; y: number } | null = null, tipQueued = false;
+  const paintBoneTip = () => {
+    tipQueued = false;
+    const name = tipAt && app.rigView() !== 'off' ? app.pickBone(tipAt.x, tipAt.y) : null;
+    boneTip.hidden = !name;
+    if (name && app.rigView() === 'weights' && !app.rigBoneKept() && name !== app.rigBone()) app.setRigBone(name);
+    if (!name || !tipAt) return;
+    boneTip.textContent = name;
+    boneTip.style.left = tipAt.x + 'px'; boneTip.style.top = tipAt.y + 'px';
+  };
+  app.canvas.addEventListener('pointermove', (e) => {
+    // a drag orbits the camera: the name waits until the pointer rests on a bone again
+    if (e.buttons || e.pointerType === 'touch') { tipAt = null; boneTip.hidden = true; return; }
+    tipAt = { x: e.clientX, y: e.clientY };
+    if (!tipQueued && app.rigView() !== 'off') { tipQueued = true; requestAnimationFrame(paintBoneTip); }
+  });
+  app.canvas.addEventListener('pointerleave', () => { tipAt = null; boneTip.hidden = true; });
+  // a click is a press without a drag
+  let press: { x: number; y: number; t: number } | null = null;
+  app.canvas.addEventListener('pointerdown', (e) => { press = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+  app.canvas.addEventListener('pointerup', (e) => {
+    const p = press; press = null;
+    if (!p || app.rigView() === 'off' || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 5 || performance.now() - p.t > 400) return;
+    const name = app.pickBone(e.clientX, e.clientY);
+    app.setRigBone(name, !!name);
+  });
+
+  document.body.append(top, left.rail, left.panel, right.rail, right.panel, nav.rail, viewbar, stats.el, help, shotDlg, boneTip);
   if (coach) document.body.append(coach);
 
   // ---------------------------------------------------------------- the keyboard
@@ -256,8 +289,10 @@ export function initUI(app: App): UI {
       '0': () => nav.reset(), '1': () => nav.frame('body'), '2': () => nav.frame('upper'), '3': () => nav.frame('face'),
       '4': () => nav.angle('front'), '5': () => nav.angle('three'), '6': () => nav.angle('side'), '7': () => nav.angle('back'),
       c: () => left.toggle('characters'), b: () => left.toggle('body'), f: () => left.toggle('face'), h: () => left.toggle('hair'), e: () => left.toggle('skin'),
-      p: () => right.toggle('pose'), l: () => right.toggle('scene'),
+      p: () => right.toggle('pose'), r: () => right.toggle('rig'), l: () => right.toggle('scene'),
       H: () => app.setHairVisible(!app.hairVisible()), t: () => app.setTurntable(!app.turntable()),
+      B: () => app.setRigView(app.rigView() === 'skeleton' ? 'off' : 'skeleton'),
+      W: () => app.setRigView(app.rigView() === 'weights' ? 'off' : 'weights'),
       '`': () => stats.toggle(), '?': () => help.showModal(),
       ' ': () => { const m = app.motion(); if (m.cur && m.cur.kind === 'loop') app.togglePlay(); },
       Escape: () => {
@@ -301,7 +336,7 @@ export function initUI(app: App): UI {
   let tFrame = 0;
   const hooks: Hooks = {
     look: syncLook,
-    motion: () => ss.sync(),
+    motion: () => { ss.sync(); if (app.rigView() === 'off') boneTip.hidden = true; },
     hair: () => { cs.sync(app.look()); ss.sync(); },
     frame(now, dt, drew, jsMs) {
       stats.frame(now, dt, drew, jsMs);
