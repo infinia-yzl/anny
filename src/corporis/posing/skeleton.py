@@ -137,14 +137,16 @@ class Skeleton:
         ``direction``"""
         W[bone] = align(self.rest_direction(bone, child), direction)
 
-    def hinge(self, W: Rotations, chain, upper, lower, rest_axis, bent=8.0) -> None:
+    def hinge(self, W: Rotations, chain, upper, lower, rest_axis, bent=8.0):
         """two bones that meet at a hinge (an elbow, a knee, a finger joint)
 
         ``chain`` names (upper bone, lower bone, the lower bone's child); ``upper`` and
-        ``lower`` are the directions the two segments point along; ``rest_axis`` is the
-        hinge's axis in the rest pose. Both bones keep the hinge's axis, so the lower bone
+        ``lower`` are the directions the two segments point along; ``rest_axis`` gives the
+        hinge's axis in the rest pose, or its side when the rest pose bends the joint (the
+        axis then comes from that bend). Both bones keep the hinge's axis, so the lower bone
         turns about it alone. When the joint is nearly straight (under ``bent`` degrees), the
-        axis follows the upper bone by the smallest turn.
+        axis follows the upper bone by the smallest turn. Returns the hinge's axis, posed and
+        at rest.
         """
         a, b, c = chain
         u0, l0 = self.rest_direction(a, b), self.rest_direction(b, c)
@@ -152,6 +154,10 @@ class Skeleton:
         low = torch.as_tensor(lower, dtype=torch.float32)
         u, low = u / u.norm(), low / low.norm()
         n0 = torch.as_tensor(rest_axis, dtype=torch.float32)
+        n0 = n0 / n0.norm()
+        rest_cross = torch.linalg.cross(u0, l0)
+        if rest_cross.norm() > math.sin(math.radians(bent)):
+            n0 = rest_cross / rest_cross.norm() * torch.sign(torch.dot(rest_cross, n0))
         guess = align(u0, u) @ n0  # the axis after the smallest turn of the upper bone
         cross = torch.linalg.cross(u, low)
         if cross.norm() > math.sin(math.radians(bent)):
@@ -162,6 +168,7 @@ class Skeleton:
             n = guess
         W[a] = frame(u, n) @ frame(u0, n0).T
         W[b] = frame(low, n) @ frame(l0, n0).T
+        return n, n0
 
     def hand(
         self,
