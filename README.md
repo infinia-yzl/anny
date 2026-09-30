@@ -210,6 +210,8 @@ The character card stores the pose in `pose`: a quaternion for each bone that mo
 
 How it works: each bone turns to follow its landmarks, with hinges at the elbows, knees and finger joints, and a short optimisation then turns the torso, the collarbones and the limbs until the model's landmarks meet the picture's. A single picture fixes each limb's direction across the picture well and its depth less well: on drawn test poses, every limb comes back within 8° in the picture plane.
 
+Pictures can be noisy, and pictures made by AI models can draw anatomy that no body has, so some landmarks land in the wrong place. The head takes its turn from the face mesh when MediaPipe finds a face, and otherwise from the head points that agree with each other, in 3D or in the picture alone. A hand with impossible proportions keeps its rest pose, and the optimisation limits how far any single bad landmark can pull the pose.
+
 The viewer's Pose section offers the same step under **From a picture**. It reads the body, the head and the fingers, without the optimisation and the facial expression. It saves the pose shown as a character card or as a silhouette SVG. The picture stays in the browser, and MediaPipe's code and models load from their CDNs the first time.
 
 ## Technical details
