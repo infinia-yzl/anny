@@ -20,6 +20,13 @@ def linear_interpolation_coefficients(value, anchors, extrapolate=False):
         batch_size, n, dtype=anchors.dtype, device=anchors.device
     )
 
+    if not extrapolate:
+        # Clamp to the anchor range. torch.where routes the gradient to the selected branch,
+        # so values lying exactly on a boundary keep a non-zero one-sided gradient.
+        # (torch.clamp gradient behavior at boundaries seems inconsistent across torch versions)
+        value = torch.where(value < anchors[0], anchors[0], value)
+        value = torch.where(value > anchors[-1], anchors[-1], value)
+
     # Find the indices where each value falls in the anchors
     idx = torch.searchsorted(anchors, value.contiguous(), side="left")  # Shape: [bs]
 
@@ -32,8 +39,6 @@ def linear_interpolation_coefficients(value, anchors, extrapolate=False):
 
     # Compute alpha for linear interpolation
     alpha = (value - lower_anchor) / (upper_anchor - lower_anchor)  # Shape: [bs]
-    if not extrapolate:
-        alpha = torch.clamp(alpha, 0, 1)
 
     # Assign values to the weight tensor
     dummy_range = torch.arange(batch_size)
