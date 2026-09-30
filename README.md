@@ -197,6 +197,7 @@ Not in the file yet: textures (the material is a plain skin colour), the hair, t
 uv sync --extra pose
 corporis pose photo.jpg --card pose.json --glb pose.glb --svg pose.svg --outline pose_line.svg --png pose.png
 corporis pose photo.jpg --png pose.png --view three-quarter   # the picture's camera (the default), front or three-quarter
+corporis pose photo.jpg --png pose.png --head-turn 20 --head-up 7   # turn the head further (degrees; the figure's right and up)
 ```
 
 ```python
@@ -210,9 +211,9 @@ The character card stores the pose in `pose`: a quaternion for each bone that mo
 
 How it works: each bone turns to follow its landmarks, with hinges at the elbows, knees and finger joints, and a short optimisation then turns the torso, the collarbones and the limbs until the model's landmarks meet the picture's. A single picture fixes each limb's direction across the picture well and its depth less well: on drawn test poses, every limb comes back within 8° in the picture plane.
 
-Pictures can be noisy, and pictures made by AI models can draw anatomy that no body has, so some landmarks land in the wrong place. The head takes its turn from the face mesh when MediaPipe finds a face, and otherwise from the head points that agree with each other, in 3D or in the picture alone. A hand with impossible proportions keeps its rest pose, and the optimisation limits how far any single bad landmark can pull the pose.
+Pictures can be noisy, and pictures made by AI models can draw anatomy that no body has, so some landmarks land in the wrong place. The head takes its turn from the face mesh when MediaPipe finds a face, and otherwise from the head points that agree with each other, in 3D or in the picture alone. A hand with impossible proportions keeps its rest pose, and the optimisation limits how far any single bad landmark can pull the pose. A drawn or stylised face can still leave the head's turn unclear, so three angles correct it by hand: `--head-turn` (toward the figure's right), `--head-up` and `--head-tilt` (toward the right shoulder), or `head=dict(turn=..., up=..., tilt=...)` in Python.
 
-The viewer's Pose section offers the same step under **From a picture**. It reads the body, the head and the fingers, without the optimisation and the facial expression. It saves the pose shown as a character card or as a silhouette SVG. The picture stays in the browser, and MediaPipe's code and models load from their CDNs the first time.
+The viewer's Pose section offers the same step under **From a picture**. It reads the body, the head and the fingers, without the optimisation and the facial expression. Head turn, Head up and Head tilt sliders correct the head after a picture. It saves the pose shown as a character card or as a silhouette SVG. The picture stays in the browser, and MediaPipe's code and models load from their CDNs the first time.
 
 ## Technical details
 
