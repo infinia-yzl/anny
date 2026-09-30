@@ -35,50 +35,68 @@ def picture(points: np.ndarray) -> np.ndarray:
     return np.stack([PIXELS * points[:, 0] + 400, 600 - PIXELS * points[:, 2]], axis=1)
 
 
+def tipped_head(model, skeleton, retarget):
+    """a figure that tips its head back and turns it, as in a look up at a raised hand: the
+    model's output, the head's world turn from the rest pose, and clean landmarks with a
+    picture"""
+    h = skeleton.labels.index("head")
+    params = anny.poses.pose_parameters(model, "relaxed", grounded=False)[
+        "pose_parameters"
+    ][:1].clone()
+    turn = (rot("z", -30) @ bend(35)).to(params.dtype)
+    params[0, h, :3, :3] = params[0, h, :3, :3] @ turn
+    with torch.no_grad():
+        out = model(pose_parameters=params)
+    posed = out["bone_poses"][0, h, :3, :3].double().numpy()
+    truth = posed @ skeleton.rest[h, :3, :3].double().numpy().T
+    clean = retarget.anny.landmarks(out)
+    clean.image = picture(clean.body)
+    clean.visibility = np.ones(len(BODY))
+    return out, truth, clean
+
+
+def corrupted(clean: Landmarks) -> Landmarks:
+    """the head as a drawing and a noisy picture give it: 1.3 times Anny's size, the hidden
+    ear on the cheek and the hidden eye on the brow in 3D, and noise everywhere"""
+    rng = np.random.default_rng(7)
+    body = clean.body.copy()
+    head = body[:N_HEAD]
+    centre = head.mean(0)
+    head[:] = centre + 1.3 * (head - centre)
+    image = picture(body)
+    p = lambda n: body[BODY.index(n)]  # noqa: E731
+    body[BODY.index("right_ear")] = 0.5 * (p("nose") + p("right_eye_outer"))
+    for n in ("right_eye_inner", "right_eye", "right_eye_outer", "mouth_right"):
+        body[BODY.index(n)] += np.array([0.0, -0.03, 0.035])
+    body += rng.normal(0, 0.004, body.shape)
+    image += rng.normal(0, 1.5, image.shape)
+    return Landmarks(
+        body=body,
+        visibility=np.ones(len(BODY)),
+        image=image,
+        hands={s: h.copy() for s, h in clean.hands.items()},
+    )
+
+
+def long_finger(L: Landmarks) -> Landmarks:
+    """``L`` with the left index finger ten times too long"""
+    hand = L.hands[".L"]
+    hand[8] = hand[5] + 10 * (hand[8] - hand[5])
+    return L
+
+
 class TestRobustPose(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.model = Character().build_model()
         cls.skeleton = Skeleton(cls.model)
         cls.retarget = Retargeter(cls.skeleton)
-        labels = cls.skeleton.labels
-        # a figure that tips its head back and turns it, as in a look up at a raised hand
-        params = anny.poses.pose_parameters(cls.model, "relaxed", grounded=False)[
-            "pose_parameters"
-        ][:1].clone()
-        h = labels.index("head")
-        turn = (rot("z", -30) @ bend(35)).to(params.dtype)
-        params[0, h, :3, :3] = params[0, h, :3, :3] @ turn
-        with torch.no_grad():
-            cls.out = cls.model(pose_parameters=params)
-        # the head's turn from the rest pose, in the world
-        posed = cls.out["bone_poses"][0, h, :3, :3].double().numpy()
-        cls.truth = posed @ cls.skeleton.rest[h, :3, :3].double().numpy().T
-        cls.clean = cls.retarget.anny.landmarks(cls.out)
-        cls.clean.image = picture(cls.clean.body)
-        cls.clean.visibility = np.ones(len(BODY))
+        cls.out, cls.truth, cls.clean = tipped_head(
+            cls.model, cls.skeleton, cls.retarget
+        )
 
     def corrupted(self) -> Landmarks:
-        """the head as a drawing and a noisy picture give it: 1.3 times Anny's size, the hidden
-        ear on the cheek and the hidden eye on the brow in 3D, and noise everywhere"""
-        rng = np.random.default_rng(7)
-        body = self.clean.body.copy()
-        head = body[:N_HEAD]
-        centre = head.mean(0)
-        head[:] = centre + 1.3 * (head - centre)
-        image = picture(body)
-        p = lambda n: body[BODY.index(n)]  # noqa: E731
-        body[BODY.index("right_ear")] = 0.5 * (p("nose") + p("right_eye_outer"))
-        for n in ("right_eye_inner", "right_eye", "right_eye_outer", "mouth_right"):
-            body[BODY.index(n)] += np.array([0.0, -0.03, 0.035])
-        body += rng.normal(0, 0.004, body.shape)
-        image += rng.normal(0, 1.5, image.shape)
-        return Landmarks(
-            body=body,
-            visibility=np.ones(len(BODY)),
-            image=image,
-            hands={s: h.copy() for s, h in self.clean.hands.items()},
-        )
+        return corrupted(self.clean)
 
     def test_clean_head_comes_from_the_points(self):
         choice = self.retarget.head_fit(self.clean)

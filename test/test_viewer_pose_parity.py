@@ -19,11 +19,15 @@ import anny
 import anny.poses
 from corporis.posing.retarget import Retargeter
 from corporis.posing.skeleton import Skeleton
+from test.test_pose_robust import corrupted, long_finger, tipped_head
 from test.test_viewer_parity import node_available
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "viewer" / "test" / "pose_parity.mjs"
 POSES = ("mh_hero", "arms_crossed", "mh_thinking", "mh_star", "seated", "mh_cheer")
+# bad landmarks (test_pose_robust): misplaced and noisy head points, and a finger ten times
+# too long
+BAD = ("misplaced head", "bad hand")
 
 
 @unittest.skipUnless(
@@ -40,23 +44,30 @@ class TestViewerPoseParity(unittest.TestCase):
             torch.arange(model.vertex_bone_indices.shape[0]),
             model.vertex_bone_weights.argmax(dim=1),
         ]
-        landmarks, cls.expected = [], []
+        cases = []
         for name in POSES:
             params = anny.poses.pose_parameters(model, name, grounded=False)[
                 "pose_parameters"
             ][:1]
             with torch.no_grad():
                 out = model(pose_parameters=params)
-            L = cls.retarget.anny.landmarks(out)
-            landmarks.append(
-                {
-                    "body": L.body.tolist(),
-                    "hands": {s: h.tolist() for s, h in L.hands.items()},
-                }
-            )
+            cases.append(cls.retarget.anny.landmarks(out))
+        _, _, clean = tipped_head(model, cls.skeleton, cls.retarget)
+        cases += [corrupted(clean), long_finger(corrupted(clean))]
+        landmarks, cls.expected, cls.expected_heads = [], [], []
+        for L in cases:
+            entry = {
+                "body": L.body.tolist(),
+                "hands": {s: h.tolist() for s, h in L.hands.items()},
+            }
+            if L.image is not None:
+                entry["image"] = L.image.tolist()
+                entry["visibility"] = L.visibility.tolist()
+            landmarks.append(entry)
             W, _ = cls.retarget(L)
             P = cls.skeleton.params(W)[0, :, :3, :3].double()
             cls.expected.append(roma.rotmat_to_unitquat(P).numpy())
+            cls.expected_heads.append(cls.retarget.head_fit(L).source)
         inp = {
             "names": cls.skeleton.labels,
             "parents": [int(p) for p in cls.skeleton.parents],
@@ -86,8 +97,13 @@ class TestViewerPoseParity(unittest.TestCase):
                 self.output["sources"]["hands"][s], python(anny_lm.hands[s])
             )
 
+    def test_head_sources_match(self):
+        self.assertEqual(self.output["heads"], self.expected_heads)
+        self.assertEqual(self.expected_heads[-2:], ["picture", "picture"])
+
     def test_rotations_match(self):
-        for name, expected, got in zip(POSES, self.expected, self.output["poses"]):
+        names = POSES + BAD
+        for name, expected, got in zip(names, self.expected, self.output["poses"]):
             with self.subTest(pose=name):
                 got = np.array(got).reshape(-1, 4)
                 # q and -q are the same rotation

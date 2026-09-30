@@ -12,7 +12,7 @@ const MODELS = {
   hand: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task',
 };
 
-interface Point { x: number; y: number; z: number }
+interface Point { x: number; y: number; z: number; visibility?: number }
 interface Found { landmarks: Point[][]; worldLandmarks: Point[][] }
 interface Landmarker { detect(image: TexImageSource): Found }
 
@@ -38,9 +38,15 @@ export async function detect(image: TexImageSource & { width: number; height: nu
   const { pose, hand } = await landmarkers();
   const found = pose.detect(image);
   if (!found.worldLandmarks.length) throw new Error('No figure found in the picture.');
-  const landmarks: Landmarks = { body: fromMediapipe(found.worldLandmarks[0]), hands: {} };
-  // MediaPipe names a hand's side as seen in a mirror; the nearest wrist in the picture is surer
-  const img = found.landmarks[0], wrists: Record<string, Point> = { '.L': img[15], '.R': img[16] };
+  const img = found.landmarks[0];
+  const landmarks: Landmarks = {
+    body: fromMediapipe(found.worldLandmarks[0]), hands: {},
+    image: img.map((q) => [q.x * image.width, q.y * image.height]), visibility: img.map((q) => q.visibility ?? 1),
+  };
+  // MediaPipe names a hand's side as seen in a mirror; the nearest wrist in the picture is surer, and a hand belongs
+  // to a wrist only within most of a forearm's length of it
+  const wrists: Record<string, Point> = { '.L': img[15], '.R': img[16] }, elbows: Record<string, Point> = { '.L': img[13], '.R': img[14] };
+  const px = (a: Point, b: Point) => Math.hypot((a.x - b.x) * image.width, (a.y - b.y) * image.height);
   const hands = hand.detect(image), taken = new Set<string>();
   hands.landmarks.forEach((points, i) => {
     const at = points[0];
@@ -50,7 +56,7 @@ export async function detect(image: TexImageSource & { width: number; height: nu
       const d = Math.hypot((wrists[s].x - at.x) * image.width, (wrists[s].y - at.y) * image.height);
       if (d < best) { best = d; side = s; }
     }
-    if (!side) return;
+    if (!side || best > 0.6 * px(wrists[side], elbows[side])) return;
     taken.add(side);
     landmarks.hands[side] = fromMediapipe(hands.worldLandmarks[i]);
   });

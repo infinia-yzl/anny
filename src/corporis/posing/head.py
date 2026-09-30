@@ -11,7 +11,10 @@ agree with wins, and the fit is then repeated on the points that agree (the inli
 scale lets a drawn head be larger than Anny's.
 
 The fit uses MediaPipe's face mesh when the face landmarker finds a face (468 points, placed on
-Anny by ``data/keypoints/mediapipe.json``), and the pose landmarker's 11 head points otherwise.
+Anny by ``data/keypoints/mediapipe.json``), and the pose landmarker's 11 head points otherwise:
+in 3D (:func:`robust_fit`), or by their positions in the picture alone
+(:func:`robust_fit_image`), since MediaPipe only guesses their depth.
+:meth:`corporis.posing.retarget.Retargeter.head_fit` picks the source.
 """
 
 from __future__ import annotations

@@ -25,8 +25,9 @@ const THUMB = ['cmc', 'mcp', 'ip', 'tip'];
 const SPINE: [string, number][] = [['spine05', 0.15], ['spine04', 0.35], ['spine03', 0.55], ['spine02', 0.75], ['spine01', 1.0]];
 const NECK: [string, number][] = [['neck01', 0.3], ['neck02', 0.55], ['neck03', 0.75]];
 
-// the landmarks of one figure, in anny's frame: 33 body points, and 21 points per hand (".L", ".R")
-export interface Landmarks { body: V3[]; hands: Record<string, V3[]> }
+// the landmarks of one figure, in anny's frame: 33 body points, and 21 points per hand (".L", ".R"); the picture
+// positions of the body points (pixels, x right, y down) and their visibility when a picture gave them
+export interface Landmarks { body: V3[]; hands: Record<string, V3[]>; image?: [number, number][]; visibility?: number[] }
 
 // MediaPipe's world points (x right, y down, z away from the camera) in anny's frame
 export function fromMediapipe(points: { x: number; y: number; z: number }[]): V3[] {
@@ -167,6 +168,181 @@ export function landmarkSources(rest: RestBody): { body: Source[]; hands: Record
   return { body: BODY.map((b) => src[b]), hands };
 }
 
+// ---------------------------------------------------------------- bad landmarks (corporis.posing.head)
+// Pictures made by AI models can draw anatomy that no body has, and any picture can be noisy: the head comes from a
+// robust fit of its points, and a hand with impossible proportions keeps its rest fingers.
+const HEAD_POINTS = 11, INLIER = 0.12, SCALE_RANGE = [0.5, 2.2], MIN_INLIERS = 4, MIN_SPREAD = 0.2;
+const STRONG_AGREEMENT = 7, HEAD_LIMIT = 100, FINGER_RANGE = [0.8, 4.0], PALM_RANGE = [0.8, 3.5];
+const INLIER_IMAGE = 0.25, ROBUST_IMAGE = 0.15, PRIOR = 0.02;
+const STARTS: [number, number][] = [[0, 0], [40, 0], [-30, 0], [0, 40], [0, -40], [40, 40], [40, -40]];
+export interface HeadFit { rotation: M3; scale: number; inliers: number[]; error: number }
+
+// eigenvalues and eigenvectors (columns of V) of a symmetric n x n matrix, by Jacobi rotations
+function jacobi(A: number[][]): { values: number[]; V: number[][] } {
+  const n = A.length, a = A.map((r) => r.slice()), V: number[][] = a.map((_, i) => a.map((__, j) => (i === j ? 1 : 0)));
+  for (let sweep = 0; sweep < 60; sweep++) {
+    let off = 0;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) off += a[i][j] * a[i][j];
+    if (off < 1e-30) break;
+    for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) {
+      if (Math.abs(a[p][q]) < 1e-300) continue;
+      const th = (a[q][q] - a[p][p]) / (2 * a[p][q]), t = Math.sign(th || 1) / (Math.abs(th) + Math.sqrt(th * th + 1));
+      const c = 1 / Math.sqrt(t * t + 1), sn = t * c;
+      for (let k = 0; k < n; k++) { const akp = a[k][p], akq = a[k][q]; a[k][p] = c * akp - sn * akq; a[k][q] = sn * akp + c * akq; }
+      for (let k = 0; k < n; k++) { const apk = a[p][k], aqk = a[q][k]; a[p][k] = c * apk - sn * aqk; a[q][k] = sn * apk + c * aqk; }
+      for (let k = 0; k < n; k++) { const vkp = V[k][p], vkq = V[k][q]; V[k][p] = c * vkp - sn * vkq; V[k][q] = sn * vkp + c * vkq; }
+    }
+  }
+  return { values: a.map((r, i) => r[i]), V };
+}
+// the rotation R and scale s (and offset t) with s R rest + t closest to points in weighted least squares (Horn)
+export function similarity(rest: V3[], points: V3[], weights: number[]): { R: M3; s: number; t: V3 } {
+  const W = weights.reduce((a, b) => a + b, 0);
+  let ca: V3 = [0, 0, 0], cb: V3 = [0, 0, 0];
+  rest.forEach((r, i) => { ca = add(ca, scale(r, weights[i] / W)); cb = add(cb, scale(points[i], weights[i] / W)); });
+  const S = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  let va = 0;
+  rest.forEach((r, i) => {
+    const a = sub(r, ca), b = sub(points[i], cb), w = weights[i] / W;
+    for (let x = 0; x < 3; x++) for (let y = 0; y < 3; y++) S[x][y] += w * a[x] * b[y];
+    va += w * dot(a, a);
+  });
+  const [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]] = S;
+  const N = [[xx + yy + zz, yz - zy, zx - xz, xy - yx], [yz - zy, xx - yy - zz, xy + yx, zx + xz],
+    [zx - xz, xy + yx, -xx + yy - zz, yz + zy], [xy - yx, zx + xz, yz + zy, -xx - yy + zz]];
+  const { values, V } = jacobi(N);
+  const k = values.indexOf(Math.max(...values));
+  const [w, x, y, z] = [V[0][k], V[1][k], V[2][k], V[3][k]];
+  const R = rotation([x, y, z, w]);
+  let num = 0;
+  rest.forEach((r, i) => { num += (weights[i] / W) * dot(sub(points[i], cb), apply(R, sub(r, ca))); });
+  const s = num / Math.max(va, 1e-12);
+  return { R, s, t: sub(cb, scale(apply(R, ca), s)) };
+}
+// how far points spread off one line: the second singular value over the first
+function spread(points: V3[]): number {
+  let c: V3 = [0, 0, 0];
+  points.forEach((p) => { c = add(c, scale(p, 1 / points.length)); });
+  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  points.forEach((p) => { const d = sub(p, c); for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) C[i][j] += d[i] * d[j]; });
+  const ev = jacobi(C).values.map((v) => Math.sqrt(Math.max(v, 0))).sort((a, b) => b - a);
+  return ev[1] / Math.max(ev[0], 1e-12);
+}
+// the rotation and scale that the most points agree with, refitted on those points (corporis.posing.head.robust_fit)
+export function robustFit(rest: V3[], points: V3[], weights: number[]): HeadFit | null {
+  const n = rest.length, usable = weights.map((w, i) => (w > 0 ? i : -1)).filter((i) => i >= 0);
+  if (usable.length < MIN_INLIERS) return null;
+  let cu: V3 = [0, 0, 0];
+  usable.forEach((i) => { cu = add(cu, scale(rest[i], 1 / usable.length)); });
+  const size = Math.sqrt(usable.reduce((a, i) => a + dot(sub(rest[i], cu), sub(rest[i], cu)), 0) / usable.length);
+  const dist = (R: M3, s: number, t: V3) => rest.map((r, i) => norm(sub(add(scale(apply(R, r), s), t), points[i])) / (s * size));
+  let best: number[] | null = null, bestScore = -1;
+  for (let a = 0; a < usable.length; a++) for (let b = a + 1; b < usable.length; b++) for (let c = b + 1; c < usable.length; c++) {
+    const tri = [usable[a], usable[b], usable[c]];
+    if (spread(tri.map((i) => rest[i])) < MIN_SPREAD) continue;
+    const { R, s, t } = similarity(tri.map((i) => rest[i]), tri.map((i) => points[i]), [1, 1, 1]);
+    if (s <= 0) continue;
+    const inl = dist(R, s, t).map((r, i) => (r < INLIER && weights[i] > 0 ? 1 : 0));
+    const score = inl.reduce((acc, v, i) => acc + v * weights[i], 0);
+    if (score > bestScore) { best = inl; bestScore = score; }
+  }
+  if (!best || best.reduce((x, y) => x + y, 0) < MIN_INLIERS) return null;
+  let inliers = best, fit = similarity(rest, points, weights.map((w, i) => w * inliers[i])), r = dist(fit.R, fit.s, fit.t);
+  for (let round = 0; round < 3; round++) {
+    fit = similarity(rest, points, weights.map((w, i) => w * inliers[i]));
+    r = dist(fit.R, fit.s, fit.t);
+    const next = r.map((e, i): number => (e < INLIER && weights[i] > 0 ? 1 : 0));
+    if (next.reduce((x, y) => x + y, 0) < MIN_INLIERS || next.every((v, i) => v === inliers[i])) break;
+    inliers = next;
+  }
+  const kept = rest.filter((_, i) => inliers[i]);
+  if (spread(kept) < MIN_SPREAD) return null;
+  const rr = r.filter((_, i) => inliers[i]);
+  return { rotation: fit.R, scale: fit.s, inliers, error: Math.sqrt(rr.reduce((a, e) => a + e * e, 0) / rr.length) };
+}
+// whether a fitted head fits the body: its size against the body's, and its turn from the chest within limit degrees
+function plausible(fit: HeadFit, bodyScale: number, chest: M3, limit = 110): boolean {
+  const ratio = fit.scale / Math.max(bodyScale, 1e-12);
+  if (!(ratio >= SCALE_RANGE[0] && ratio <= SCALE_RANGE[1])) return false;
+  return norm(logRot(mul(transpose(chest), fit.rotation))) * 180 / Math.PI <= limit;
+}
+// solve A x = b (6 x 6) by Gaussian elimination with pivoting
+function solve(A: number[][], b: number[]): number[] {
+  const n = b.length, M = A.map((r, i) => [...r, b[i]]);
+  for (let c = 0; c < n; c++) {
+    let p = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    [M[c], M[p]] = [M[p], M[c]];
+    for (let r = c + 1; r < n; r++) { const f = M[r][c] / M[c][c]; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
+  }
+  const x = new Array(n).fill(0);
+  for (let r = n - 1; r >= 0; r--) { let v = M[r][n]; for (let k = r + 1; k < n; k++) v -= M[r][k] * x[k]; x[r] = v / M[r][r]; }
+  return x;
+}
+// the head's rotation from the picture positions of its points alone (image: pixels, x right, y up) seen by a camera
+// along +y, with a scale and an offset (corporis.posing.head.robust_fit_image)
+export function robustFitImage(rest: V3[], image: [number, number][], weights: number[], chest: M3, pixelScale: number, steps = 40): HeadFit | null {
+  const n = rest.length, W = weights.reduce((a, b) => a + b, 0);
+  let c: V3 = [0, 0, 0];
+  rest.forEach((p) => { c = add(c, scale(p, 1 / n)); });
+  const size = Math.sqrt(rest.reduce((a, p) => a + dot(sub(p, c), sub(p, c)), 0) / n);
+  let best: [number, M3, number, number[]] | null = null;
+  for (const [tip, turn] of STARTS) {
+    const R0 = mul(mul(chest, rotvec([-tip * Math.PI / 180, 0, 0])), rotvec([0, 0, turn * Math.PI / 180]));
+    const residuals = (p: number[]) => {
+      const R = mul(rotvec([p[0], p[1], p[2]]), R0), s = Math.exp(p[3]);
+      const e = rest.map((r, i) => { const q = apply(R, r); return [s * q[0] + p[4] - image[i][0], s * q[2] + p[5] - image[i][1]]; });
+      return { e, s, prior: scale(logRot(mul(R, transpose(R0))), Math.sqrt(PRIOR)) };
+    };
+    let mx = 0, my = 0, qx = 0, qz = 0;
+    rest.forEach((r, i) => { const q = apply(R0, r); mx += weights[i] * image[i][0]; my += weights[i] * image[i][1]; qx += weights[i] * q[0]; qz += weights[i] * q[2]; });
+    let p = [0, 0, 0, Math.log(pixelScale), mx / W - pixelScale * qx / W, my / W - pixelScale * qz / W], mu = 1e-2;
+    const stack = (e: number[][], k: number[], prior: V3) => [...e.flatMap((v, i) => [v[0] * k[i], v[1] * k[i]]), ...prior];
+    for (let it = 0; it < steps; it++) {
+      const { e, s, prior } = residuals(p);
+      const c2 = (ROBUST_IMAGE * s * size) ** 2;
+      const k = e.map((v, i) => Math.sqrt(weights[i] * c2 * c2 / (v[0] * v[0] + v[1] * v[1] + c2) ** 2) / (s * size));
+      const r = stack(e, k, prior);
+      const J = r.map(() => new Array(6).fill(0));
+      for (let d = 0; d < 6; d++) {
+        const q = p.slice(); q[d] += 1e-6;
+        const o = residuals(q), rd = stack(o.e, k, o.prior);
+        rd.forEach((v, i) => { J[i][d] = (v - r[i]) / 1e-6; });
+      }
+      const A = [0, 1, 2, 3, 4, 5].map((i) => [0, 1, 2, 3, 4, 5].map((j) => J.reduce((a, row) => a + row[i] * row[j], 0)));
+      const g = [0, 1, 2, 3, 4, 5].map((i) => -J.reduce((a, row, m) => a + row[i] * r[m], 0));
+      const step = solve(A.map((row, i) => row.map((v, j) => (i === j ? v + mu * (v + 1e-9) : v))), g);
+      const t = p.map((v, i) => v + step[i]), o = residuals(t), rn = stack(o.e, k, o.prior);
+      if (rn.reduce((a, v) => a + v * v, 0) < r.reduce((a, v) => a + v * v, 0)) { p = t; mu *= 0.3; } else mu *= 10;
+    }
+    const { e, s, prior } = residuals(p);
+    const c2 = (ROBUST_IMAGE * s * size) ** 2;
+    const e2 = e.map((v) => v[0] * v[0] + v[1] * v[1]);
+    const loss = e2.reduce((a, v, i) => a + weights[i] * c2 * v / (v + c2), 0) / (s * size) ** 2 + dot(prior, prior);
+    if (!best || loss < best[0]) best = [loss, mul(rotvec([p[0], p[1], p[2]]), R0), s, e2.map((v) => Math.sqrt(v) / (s * size))];
+  }
+  const [, R, s, dist] = best!;
+  const inliers = dist.map((d, i): number => (d < INLIER_IMAGE && weights[i] > 0 ? 1 : 0));
+  if (inliers.reduce((a, b) => a + b, 0) < MIN_INLIERS || spread(rest.filter((_, i) => inliers[i])) < MIN_SPREAD) return null;
+  const kept = dist.filter((_, i) => inliers[i]);
+  return { rotation: R, scale: s, inliers, error: Math.sqrt(kept.reduce((a, d) => a + d * d, 0) / kept.length) };
+}
+// whether 21 hand points have a hand's proportions (corporis.posing.retarget.plausible_hand)
+export function plausibleHand(h: V3[]): boolean {
+  const at = (n: string) => h[HAND.indexOf(n)];
+  const width = norm(sub(at('index_mcp'), at('pinky_mcp')));
+  if (!h.every((p) => p.every(Number.isFinite)) || width < 1e-9) return false;
+  const length = norm(sub(at('middle_mcp'), at('wrist'))) / width;
+  if (!(length >= PALM_RANGE[0] && length <= PALM_RANGE[1])) return false;
+  for (const [, finger] of FINGERS) {
+    const names = (finger === 'thumb' ? THUMB : KNUCKLES).map((n) => `${finger}_${n}`);
+    let chain = 0;
+    for (let i = 1; i < names.length; i++) chain += norm(sub(at(names[i]), at(names[i - 1])));
+    if (!(chain / width >= FINGER_RANGE[0] && chain / width <= FINGER_RANGE[1])) return false;
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------- the retarget
 const point = (L: Landmarks, name: string) => L.body[BODY.indexOf(name)];
 const handPoint = (L: Landmarks, s: string, name: string) => L.hands[s][HAND.indexOf(name)];
@@ -181,13 +357,9 @@ function chestFrame(L: Landmarks) {
   const up = sub(mid(p('left_shoulder'), p('right_shoulder')), mid(p('left_hip'), p('right_hip')));
   return frame(sub(p('left_shoulder'), p('right_shoulder')), up);
 }
-function headFrame(L: Landmarks) {
-  const p = (n: string) => point(L, n);
-  return frame(sub(p('left_ear'), p('right_ear')), sub(p('nose'), mid(p('left_ear'), p('right_ear'))));
-}
 // the hand's frame: along the middle knuckle, then toward the index side
 function palmFrame(L: Landmarks, s: string) {
-  if (L.hands[s]) {
+  if (L.hands[s] && plausibleHand(L.hands[s])) {
     const h = (n: string) => handPoint(L, s, n);
     return frame(sub(h('middle_mcp'), h('wrist')), sub(h('index_mcp'), h('pinky_mcp')));
   }
@@ -197,17 +369,50 @@ function palmFrame(L: Landmarks, s: string) {
 
 export class Retargeter {
   rest: RestBody; sources: ReturnType<typeof landmarkSources>; restLandmarks: Landmarks;
-  restPelvis: M3; restChest: M3; restHead: M3; restHands: Record<string, M3>;
+  restPelvis: M3; restChest: M3; restHands: Record<string, M3>;
   constructor(rest: RestBody, sources?: ReturnType<typeof landmarkSources>) {
     this.rest = rest;
     this.sources = sources || landmarkSources(rest);
     const at = (src: Source): V3 => src[0] === 'joint' ? rest.heads[src[1]] : [rest.vertices[src[1] * 3], rest.vertices[src[1] * 3 + 1], rest.vertices[src[1] * 3 + 2]];
     this.restLandmarks = { body: this.sources.body.map(at), hands: { '.L': this.sources.hands['.L'].map(at), '.R': this.sources.hands['.R'].map(at) } };
     const R = this.restLandmarks;
-    this.restPelvis = pelvisFrame(R); this.restChest = chestFrame(R); this.restHead = headFrame(R);
+    this.restPelvis = pelvisFrame(R); this.restChest = chestFrame(R);
     this.restHands = { '.L': palmFrame(R, '.L'), '.R': palmFrame(R, '.R') };
   }
   private joint(n: string) { return this.rest.heads[this.rest.names.indexOf(n)]; }
+
+  // the head's world rotation (null: the head follows the chest) and the source that gave it
+  // (corporis.posing.retarget.Retargeter.head_fit, without the face mesh, which the page does not read)
+  headFit(L: Landmarks, chest: M3): { rotation: M3 | null; source: string; inliers: number[] } {
+    const n = HEAD_POINTS, rest = this.restLandmarks.body.slice(0, n);
+    const vis = L.visibility ? L.visibility.slice(0, n) : new Array(n).fill(1);
+    let points = robustFit(rest, L.body.slice(0, n), vis);
+    if (points && !plausible(points, this.bodyScale(L), chest)) points = null;
+    const strong = !!points && points.inliers.reduce((a, b) => a + b, 0) >= STRONG_AGREEMENT;
+    if (strong) return { rotation: points!.rotation, source: 'points', inliers: points!.inliers };
+    if (L.image) {
+      const image: [number, number][] = L.image.slice(0, n).map(([x, y]) => [x, -y]);
+      const px = this.pixelScale(L);
+      const picture = robustFitImage(rest, image, vis, chest, px);
+      if (picture && plausible(picture, px, chest)) return { rotation: picture.rotation, source: 'picture', inliers: picture.inliers };
+    }
+    return { rotation: null, source: 'neck', inliers: new Array(n).fill(0) };
+  }
+  // the body's size in the landmarks against anny's: the shoulders' width
+  private bodyScale(L: Landmarks) {
+    const width = (M: Landmarks) => norm(sub(point(M, 'left_shoulder'), point(M, 'right_shoulder')));
+    return width(L) / width(this.restLandmarks);
+  }
+  // pixels per metre of anny's body: the longest ratio over the torso's sides, which a turn of the body shortens least
+  private pixelScale(L: Landmarks) {
+    const img = L.image!, i = (n: string) => img[BODY.indexOf(n)], r = (n: string) => point(this.restLandmarks, n);
+    let best = 0;
+    for (const [a, b] of [['left_shoulder', 'left_hip'], ['right_shoulder', 'right_hip'], ['left_shoulder', 'right_shoulder']]) {
+      const di = Math.hypot(i(a)[0] - i(b)[0], i(a)[1] - i(b)[1]), dr = Math.hypot(r(a)[0] - r(b)[0], r(a)[2] - r(b)[2]);
+      best = Math.max(best, di / dr);
+    }
+    return best;
+  }
   private restDirection(a: string, b: string) { return unit(sub(this.joint(b), this.joint(a))); }
 
   // two bones that meet at a hinge (corporis.posing.skeleton.Skeleton.hinge); returns the axis, posed and at rest
@@ -231,7 +436,10 @@ export class Retargeter {
     const W = new Map<string, M3>();
     const pelvis = mul(pelvisFrame(L), transpose(this.restPelvis));
     const chest = mul(chestFrame(L), transpose(this.restChest));
-    const head = mul(headFrame(L), transpose(this.restHead));
+    let head = this.headFit(L, chest).rotation || chest;
+    // a turn from the chest beyond HEAD_LIMIT is cut back to it
+    const turn = norm(logRot(mul(transpose(chest), head))) * 180 / Math.PI;
+    if (turn > HEAD_LIMIT) head = slerp(chest, head, HEAD_LIMIT / turn);
     W.set('root', pelvis);
     for (const [b, share] of SPINE) W.set(b, slerp(pelvis, chest, share));
     for (const [b, share] of NECK) W.set(b, slerp(chest, head, share));
@@ -259,7 +467,7 @@ export class Retargeter {
     const R = mul(palmFrame(L, s), transpose(this.restHands[s]));
     W.set('wrist' + s, R);
     for (let k = 2; k <= 5; k++) W.set(`metacarpal${k - 1}${s}`, R);
-    if (!L.hands[s]) return;
+    if (!L.hands[s] || !plausibleHand(L.hands[s])) return;
     // the fingers bend about the width of the hand, across the knuckles
     const restWidth: V3 = [this.restHands[s][1], this.restHands[s][4], this.restHands[s][7]], width = apply(R, restWidth);
     for (const [k, finger] of FINGERS) {

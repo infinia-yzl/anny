@@ -15,4 +15,8 @@ const rest = { names: inp.names, parents: inp.parents, heads: inp.heads, vertice
 const sources = landmarkSources(rest);
 const retarget = new Retargeter(rest, sources);
 const poses = inp.landmarks.map((L) => Array.from(quaternions(retarget.local(retarget.solve(L)))));
-fs.writeFileSync(path.join(dir, 'output.json'), JSON.stringify({ sources, poses }));
+const heads = inp.landmarks.map((L) => {
+  const W = retarget.solve(L);
+  return retarget.headFit(L, W.get('spine01')).source;
+});
+fs.writeFileSync(path.join(dir, 'output.json'), JSON.stringify({ sources, poses, heads }));
