@@ -9,6 +9,12 @@ further, in the world frame, so that Anny's landmarks (:class:`AnnyLandmarks`) m
 picture's: in 3D after the best scale and offset, and in the picture after the best scale and
 offset of a camera that looks along y, when the landmarks carry pixel positions. A prior keeps
 the turns small.
+
+Pictures can be noisy, and pictures made by AI models can draw anatomy that no body has, so a
+few landmarks can be far off. Each landmark's error passes through a robust loss (Geman and
+McClure), which grows like the squared error for small errors and levels off beyond
+``ROBUST`` of the body's size, so one bad landmark cannot pull the pose. The head points that
+the head fit rejected (:meth:`Retargeter.head_fit`) take no part, in 3D or in the picture.
 """
 
 from __future__ import annotations
@@ -19,7 +25,11 @@ import torch
 
 from corporis.posing.landmarks import Landmarks
 from corporis.posing.retarget import Retargeter
+from corporis.posing.head import HEAD_POINTS
 from corporis.posing.skeleton import Rotations
+
+# the error (a share of the body's size) beyond which a landmark's loss levels off
+ROBUST = 0.08
 
 # the bones the refinement turns; the torso, the collarbones and the limbs carry the pose
 BONES = (
@@ -66,6 +76,10 @@ def refine(
         L.visibility if L.visibility is not None else np.ones(len(L.body)),
         dtype=torch.float32,
     ).clamp(0.05, 1.0)
+    head = retargeter.head_fit(L)
+    vis_image = vis.clone()
+    vis[:HEAD_POINTS] *= torch.as_tensor(head.in_3d, dtype=torch.float32)
+    vis_image[:HEAD_POINTS] *= torch.as_tensor(head.in_image, dtype=torch.float32)
     image = None
     if L.image is not None and image_weight > 0:
         image = torch.as_tensor(L.image, dtype=torch.float32)
@@ -85,10 +99,10 @@ def refine(
         )
         pred = _points(anny_lm, out)
         err = (_align(pred, target, vis) - target) / size
-        loss = (vis[:, None] * err**2).sum() / vis.sum()
+        loss = (vis * _robust((err**2).sum(1))).sum() / vis.sum()
         if image is not None:
             flat = pred[:, [0, 2]]
-            loss = loss + image_weight * _image_loss(flat, image, vis)
+            loss = loss + image_weight * _image_loss(flat, image, vis_image)
         loss = loss + prior * (offsets**2).sum()
         opt.zero_grad()
         loss.backward()
@@ -118,4 +132,10 @@ def _image_loss(
     offset, relative to the figure's size in the picture"""
     fitted = _align(flat, image, vis)
     size = (image.max(0).values - image.min(0).values).norm().clamp_min(1e-6)
-    return (vis[:, None] * ((fitted - image) / size) ** 2).sum() / vis.sum()
+    return (vis * _robust((((fitted - image) / size) ** 2).sum(1))).sum() / vis.sum()
+
+
+def _robust(e2: torch.Tensor) -> torch.Tensor:
+    """Geman-McClure: about e2 for small errors, levelling off at ROBUST**2"""
+    c2 = ROBUST**2
+    return c2 * e2 / (e2 + c2)

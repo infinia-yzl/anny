@@ -16,9 +16,19 @@ which the round-trip test uses.
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
+import roma
 import torch
 
+from corporis.posing.head import (
+    HEAD_POINTS,
+    face_mesh_rest,
+    plausible,
+    robust_fit,
+    robust_fit_image,
+)
 from corporis.posing.landmarks import BODY, HAND, Landmarks
 from corporis.posing.skeleton import Rotations, Skeleton, axis_angle, frame, slerp
 
@@ -36,6 +46,45 @@ SPINE = [
     ("spine01", 1.0),
 ]
 NECK = [("neck01", 0.3), ("neck02", 0.55), ("neck03", 0.75)]
+# the 3D head points lead only when this many of the 11 agree
+STRONG_AGREEMENT = 7
+# the head turns at most this far from the chest (degrees): a larger turn comes from a bad fit
+HEAD_LIMIT = 100.0
+# a hand's fingers, from the knuckle to the tip, against the width of the palm across the
+# knuckles, and the palm's length against its width: outside these, a hand is not believed
+FINGER_RANGE = (0.8, 4.0)
+PALM_RANGE = (0.8, 3.5)
+
+
+@dataclasses.dataclass
+class HeadChoice:
+    """the head's world rotation (None: the head follows the chest), its source, and the
+    trust (1 or 0) in each of the 11 head points in 3D and in the picture"""
+
+    rotation: np.ndarray | None
+    source: str
+    in_3d: np.ndarray
+    in_image: np.ndarray
+
+
+def plausible_hand(h: np.ndarray) -> bool:
+    """whether 21 hand points (:data:`HAND`) have a hand's proportions"""
+    h = np.asarray(h, np.float64)
+    at = lambda n: h[HAND.index(n)]  # noqa: E731
+    width = np.linalg.norm(at("index_mcp") - at("pinky_mcp"))
+    if not np.isfinite(h).all() or width < 1e-9:
+        return False
+    length = np.linalg.norm(at("middle_mcp") - at("wrist")) / width
+    if not PALM_RANGE[0] <= length <= PALM_RANGE[1]:
+        return False
+    for finger in FINGERS.values():
+        names = [f"{finger}_{n}" for n in (THUMB if finger == "thumb" else KNUCKLES)]
+        chain = sum(
+            np.linalg.norm(at(b) - at(a)) for a, b in zip(names[:-1], names[1:])
+        )
+        if not FINGER_RANGE[0] <= chain / width <= FINGER_RANGE[1]:
+            return False
+    return True
 
 
 class AnnyLandmarks:
@@ -153,8 +202,10 @@ class Retargeter:
         R = self.rest
         self.rest_pelvis = self._pelvis(R)
         self.rest_chest = self._chest(R)
-        self.rest_head = self._head(R)
         self.rest_hands = {s: self._palm(R, s) for s in SIDES}
+        self.rest_face = face_mesh_rest(
+            skeleton.model, skeleton.output({})["vertices"][0].double().numpy()
+        )
 
     # the frames of the torso and the head, as (main direction, second direction)
     @staticmethod
@@ -173,18 +224,81 @@ class Retargeter:
             _unit(L.point("left_shoulder") - L.point("right_shoulder")), _unit(up)
         )
 
-    @staticmethod
-    def _head(L: Landmarks):
-        ears = (L.point("left_ear") + L.point("right_ear")) / 2
-        return frame(
-            _unit(L.point("left_ear") - L.point("right_ear")),
-            _unit(L.point("nose") - ears),
+    def head_fit(self, L: Landmarks, chest=None) -> HeadChoice:
+        """the head's world rotation and the head points to trust, from the first source that
+        gives a believable head (:mod:`corporis.posing.head`):
+
+        1. "face": the face landmarker's mesh, when it found a face;
+        2. "points": the pose landmarker's 11 head points in 3D, when most of them agree;
+        3. "picture": the same points' positions in the picture alone, whose depth MediaPipe
+           only guesses (on a drawing, the guess can put the hidden ear on the cheek);
+        4. "neck": no believable fit; the head follows the chest.
+        """
+        if chest is None:
+            chest = self._chest(L) @ self.rest_chest.T
+        chest = np.asarray(chest, np.float64)
+        n = HEAD_POINTS
+        vis = np.ones(n) if L.visibility is None else np.asarray(L.visibility[:n])
+        points = robust_fit(self.rest.body[:n], L.body[:n], vis)
+        if points is not None and not plausible(points, self._body_scale(L), chest):
+            points = None
+        strong = points is not None and points.inliers.sum() >= STRONG_AGREEMENT
+        picture = None
+        if not strong and L.image is not None:
+            image = np.stack([L.image[:n, 0], -L.image[:n, 1]], axis=1)
+            picture = robust_fit_image(
+                self.rest.body[:n], image, vis, chest, self._pixel_scale(L)
+            )
+            if picture is not None and not plausible(
+                picture, self._pixel_scale(L), chest
+            ):
+                picture = None
+        in_3d = points.inliers if strong else np.zeros(n)
+        in_image = (
+            picture.inliers if picture is not None else in_3d if strong else np.zeros(n)
+        )
+        if L.face_points is not None and self.rest_face is not None:
+            # the face mesh is in pixels: its scale is the body's in pixels, from the picture
+            face = robust_fit(self.rest_face, L.face_points)
+            if face is not None and plausible(face, self._pixel_scale(L), chest):
+                return HeadChoice(face.rotation, "face", in_3d, in_image)
+        if strong:
+            return HeadChoice(points.rotation, "points", in_3d, in_image)
+        if picture is not None:
+            return HeadChoice(picture.rotation, "picture", in_3d, in_image)
+        return HeadChoice(None, "neck", in_3d, in_image)
+
+    def _body_scale(self, L: Landmarks) -> float:
+        """the body's size in the landmarks against Anny's: the shoulders' width"""
+        width = lambda M: np.linalg.norm(  # noqa: E731
+            M.point("left_shoulder") - M.point("right_shoulder")
+        )
+        return float(width(L) / width(self.rest))
+
+    def _pixel_scale(self, L: Landmarks) -> float:
+        """pixels per metre of Anny's body: the pixel length of the torso against Anny's
+        (the longest side of the shoulders and hips, which a turn of the body shortens
+        least)"""
+        if L.image is None:
+            return float("nan")
+        i = lambda n: L.image[BODY.index(n)]  # noqa: E731
+        r = lambda n: self.rest.point(n)[[0, 2]]  # noqa: E731
+        pairs = [
+            ("left_shoulder", "left_hip"),
+            ("right_shoulder", "right_hip"),
+            ("left_shoulder", "right_shoulder"),
+        ]
+        return float(
+            max(
+                np.linalg.norm(i(a) - i(b)) / np.linalg.norm(r(a) - r(b))
+                for a, b in pairs
+            )
         )
 
     @staticmethod
     def _palm(L: Landmarks, s: str):
         """the hand's frame: along the middle knuckle, then toward the index side"""
-        if s in L.hands:
+        if s in L.hands and plausible_hand(L.hands[s]):
             h = lambda n: L.hand(s, n)  # noqa: E731
             return frame(
                 _unit(h("middle_mcp") - h("wrist")),
@@ -201,7 +315,16 @@ class Retargeter:
         W: Rotations = {}
         pelvis = self._pelvis(L) @ self.rest_pelvis.T
         chest = self._chest(L) @ self.rest_chest.T
-        head = self._head(L) @ self.rest_head.T
+        rotation = self.head_fit(L, chest).rotation
+        head = (
+            chest
+            if rotation is None
+            else torch.as_tensor(rotation, dtype=torch.float32)
+        )
+        # a turn from the chest beyond HEAD_LIMIT is cut back to it
+        turn = float(torch.rad2deg(roma.rotmat_to_rotvec(chest.T @ head).norm()))
+        if turn > HEAD_LIMIT:
+            head = slerp(chest, head, HEAD_LIMIT / turn)
         W["root"] = pelvis
         for bone, share in SPINE:
             W[bone] = slerp(pelvis, chest, share)
@@ -259,7 +382,7 @@ class Retargeter:
         W["wrist" + s] = R
         for k in (2, 3, 4, 5):
             W[f"metacarpal{k - 1}" + s] = R
-        if s not in L.hands:
+        if s not in L.hands or not plausible_hand(L.hands[s]):
             return
         h = lambda n: L.hand(s, n)  # noqa: E731
         rest = lambda n: self.rest.hand(s, n)  # noqa: E731

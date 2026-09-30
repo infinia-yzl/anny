@@ -97,6 +97,7 @@ class Landmarks:
     image_size: tuple[int, int] | None = None
     hands: dict[str, np.ndarray] = dataclasses.field(default_factory=dict)
     face: dict[str, float] = dataclasses.field(default_factory=dict)
+    face_points: np.ndarray | None = None
 
     def point(self, name: str) -> np.ndarray:
         return self.body[BODY.index(name)]
@@ -184,9 +185,12 @@ def detect(image, hands: bool = True, face: bool = True) -> Landmarks:
             options("hand", vision.HandLandmarkerOptions, num_hands=2)
         ) as landmarker:
             found = landmarker.detect(picture)
-        wrists = {
-            ".L": pixels[BODY.index("left_wrist")],
-            ".R": pixels[BODY.index("right_wrist")],
+        p = lambda n: pixels[BODY.index(n)]  # noqa: E731
+        wrists = {".L": p("left_wrist"), ".R": p("right_wrist")}
+        # a hand belongs to a wrist only within most of a forearm's length of it
+        reach = {
+            ".L": 0.6 * np.linalg.norm(p("left_wrist") - p("left_elbow")),
+            ".R": 0.6 * np.linalg.norm(p("right_wrist") - p("right_elbow")),
         }
         taken = set()
         for points, world_points in zip(
@@ -199,22 +203,50 @@ def detect(image, hands: bool = True, face: bool = True) -> Landmarks:
                 key=lambda s: np.linalg.norm(wrists[s] - at),
                 default=None,
             )
-            if side is None:
+            if side is None or np.linalg.norm(wrists[side] - at) > reach[side]:
                 continue
             taken.add(side)
             L.hands[side] = from_mediapipe([[p.x, p.y, p.z] for p in world_points])
     if face:
-        with vision.FaceLandmarker.create_from_options(
-            options(
-                "face",
-                vision.FaceLandmarkerOptions,
-                output_face_blendshapes=True,
-                num_faces=1,
-            )
-        ) as landmarker:
-            found = landmarker.detect(picture)
-        if found.face_blendshapes:
-            L.face = {
-                c.category_name: float(c.score) for c in found.face_blendshapes[0]
-            }
+        _detect_face(L, image, options, vision, mp)
     return L
+
+
+def _detect_face(L: Landmarks, image: np.ndarray, options, vision, mp) -> None:
+    """the face landmarker on a crop around the head, which finds a small face far more
+    often than the whole picture does, then on the whole picture"""
+    height, width = image.shape[:2]
+    head = L.image[:11]
+    centre = head.mean(0)
+    half = max(48.0, 1.6 * float(np.abs(head - centre).max()))
+    x0, y0 = (int(max(0, c - half)) for c in centre)
+    x1, y1 = int(min(width, centre[0] + half)), int(min(height, centre[1] + half))
+    crops = [(x0, y0, image[y0:y1, x0:x1])] if x1 - x0 > 16 and y1 - y0 > 16 else []
+    crops.append((0, 0, image))
+    with vision.FaceLandmarker.create_from_options(
+        options(
+            "face",
+            vision.FaceLandmarkerOptions,
+            output_face_blendshapes=True,
+            num_faces=1,
+        )
+    ) as landmarker:
+        for ox, oy, crop in crops:
+            h, w = crop.shape[:2]
+            found = landmarker.detect(
+                mp.Image(
+                    image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(crop)
+                )
+            )
+            if not found.face_landmarks:
+                continue
+            if found.face_blendshapes:
+                L.face = {
+                    c.category_name: float(c.score) for c in found.face_blendshapes[0]
+                }
+            # pixels of the whole picture; the depth is in the same units as x
+            mesh = [
+                [ox + q.x * w, oy + q.y * h, q.z * w] for q in found.face_landmarks[0]
+            ]
+            L.face_points = from_mediapipe(mesh[:468])
+            return
