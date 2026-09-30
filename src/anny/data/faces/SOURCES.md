@@ -1,9 +1,6 @@
 # Sources of anny's face data
 
-anny's face shapes, their scaling and their distribution rest on the sources below. Every
-source is free and downloads without an account (`python -m anny.faces.authoring.sources`).
-The downloaded files stay in `ANNY_CACHE_DIR/faces`; this repository keeps only the parameters
-derived from them.
+anny's face shapes, their scaling and their distribution rest on the sources below. Every source is free and downloads without an account (`python -m anny.faces.authoring.sources`). The downloaded files stay in `ANNY_CACHE_DIR/faces`; this repository keeps only the parameters derived from them.
 
 | Source | Use in anny | Licence and attribution |
 |---|---|---|
@@ -16,5 +13,4 @@ derived from them.
 | [MediaPipe Face Landmarker](https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker) and canonical face model | Landmarks of the photographs and of anny's renders | Apache 2.0 licence, Google. |
 | [MediaPipe Image Segmenter](https://developers.google.com/edge/mediapipe/solutions/vision/image_segmenter), selfie multiclass model | The hair of the photographs and of anny's renders, for the hairline benchmark (`anny.hair.authoring.photos`) | Apache 2.0 licence, Google. |
 
-Deferred because they need a registration: FLAME 2023 Open (CC BY 4.0) and the individual-level
-3D Facial Norms data.
+Deferred because they need a registration: FLAME 2023 Open (CC BY 4.0) and the individual-level 3D Facial Norms data.

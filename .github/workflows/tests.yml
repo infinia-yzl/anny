@@ -1,0 +1,75 @@
+# The Python test suite and the installed wheel (scripts/check.sh tests, scripts/check.sh package).
+# Runs only when Python code, tests or dependencies change, and skips draft pull requests:
+# marking a pull request ready for review runs it.
+name: Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "src/**"
+      - "test/**"
+      - "viewer/src/**" # test_viewer_parity runs the page's TypeScript
+      - pyproject.toml
+      - uv.lock
+      - scripts/check.sh
+      - .github/workflows/tests.yml
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "test/**"
+      - "viewer/src/**" # test_viewer_parity runs the page's TypeScript
+      - pyproject.toml
+      - uv.lock
+      - scripts/check.sh
+      - .github/workflows/tests.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_PYTHON: "3.11"
+
+jobs:
+  tests:
+    name: Tests
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Place the model cache
+        # the model caches take about 15 GB; the runner's disk has room for them
+        run: |
+          df -h /
+          echo "ANNY_CACHE_DIR=$RUNNER_TEMP/anny-cache" >> "$GITHUB_ENV"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          # pull requests restore the cache that main saved; saving it again costs about a minute
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22" # test_viewer_parity runs the page's TypeScript
+      - run: uv sync --locked --extra dev --extra examples
+      - run: scripts/check.sh tests
+
+  package:
+    name: Package
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # setuptools-scm reads the version from the git history
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      # the lowest Python that pyproject.toml supports
+      - run: scripts/check.sh package 3.10

@@ -7,7 +7,6 @@ from copy import copy
 import dataclasses
 import functools
 import hashlib
-import importlib.metadata
 import inspect
 import json
 import logging
@@ -17,6 +16,7 @@ from typing import Callable, Literal
 
 import torch
 
+from anny._version import distribution_version
 from anny.paths import get_anny_cache_path, get_anny_root_dir
 from anny.typing import (
     FaceShapes,
@@ -32,7 +32,7 @@ from anny.typing import (
     Submodel,
 )
 
-ANNY_VERSION = importlib.metadata.version("anny")
+ANNY_VERSION = distribution_version()
 # Increase this if there are any non-backwards-compatible changes to the data/metadata format
 CURRENT_DATA_VERSION = 12
 

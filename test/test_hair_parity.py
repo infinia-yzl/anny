@@ -19,6 +19,7 @@ import numpy as np
 from anny.hair import styles as H
 from anny.hair.layout import load_layout
 from test.test_viewer_parity import node_available
+from test.markers import local_only
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 BUILD = REPO / "viewer" / "build"
@@ -30,6 +31,7 @@ def data_available():
     return man.exists() and "hair" in json.loads(man.read_text())
 
 
+@local_only("the viewer data build (python -m anny.viewer build --data)")
 @unittest.skipUnless(
     node_available() and data_available(), "node 22 and the viewer data are needed"
 )

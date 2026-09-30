@@ -16,12 +16,14 @@ import tempfile
 import unittest
 
 from test.test_viewer_parity import node_available
+from test.markers import local_only
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 BUILD = REPO / "viewer" / "build"
 SCRIPT = REPO / "viewer" / "test" / "body.mjs"
 
 
+@local_only("the viewer data build (python -m anny.viewer build --data)")
 @unittest.skipUnless(
     node_available() and (BUILD / "manifest.json").exists(),
     "node 22 or later and the viewer data (python -m anny.viewer build --data) are needed",

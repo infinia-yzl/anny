@@ -8,6 +8,7 @@ import gzip
 from dataclasses import dataclass, replace
 from typing import cast
 
+import numpy as np
 import roma
 import torch
 
@@ -70,16 +71,17 @@ def _faces_to_keep_from_submodel(
 
 
 def load_blend_shape(filename, vertices_count, world_transformation, dtype):
+    # Each line holds a vertex index (starting at 0) and its offset. The whole file is parsed at
+    # once, which gives the same values as a parse line by line, many times faster.
+    with gzip.open(filename, "rb") as archive:
+        table = np.array(archive.read().split(), dtype=np.float64).reshape(-1, 4)
+    ids = table[:, 0].astype(np.int64)
+    assert np.array_equal(ids, table[:, 0]), f"non-integer vertex index in {filename}"
+    assert ((ids >= 0) & (ids < vertices_count)).all(), (
+        f"vertex index out of range in {filename}"
+    )
     blend_shape = torch.zeros((vertices_count, 3), dtype=dtype)
-    with gzip.open(filename, "rt") as archive:
-        for line in archive.readlines():
-            data = line.strip().split()
-            # Indexing starting at 0
-            id = int(data[0])
-            assert id >= 0 and id < vertices_count
-            offset = [float(x) for x in data[1:]]
-            assert len(offset) == 3
-            blend_shape[id, :] = torch.as_tensor(offset, dtype=dtype)
+    blend_shape[torch.from_numpy(ids)] = torch.from_numpy(table[:, 1:]).to(dtype)
     # Blend shapes were expressed in decimeters
     return world_transformation.apply(blend_shape)
 

@@ -10,6 +10,7 @@ import torch
 from anny.models.rigged_model import RiggedModelWithLinearBlendShapes
 
 import anny
+from test.markers import local_only
 
 SKIP_SMPL = False
 SKIP_SMPL_REASON = (
@@ -24,6 +25,7 @@ SMPLX_MODEL_PATH = os.environ.get("SMPLX_MODEL_PATH")
 SMPLX_MODEL_SKIP_REASON = "SMPLX_MODEL_PATH is not defined"
 
 
+@local_only("the licensed SMPL-X model files (SMPLX_MODEL_PATH)")
 @unittest.skipIf(SKIP_SMPL, SKIP_SMPL_REASON)
 @unittest.skipIf(SMPLX_MODEL_PATH is None, SMPLX_MODEL_SKIP_REASON)
 class TestSMPLForward(unittest.TestCase):
