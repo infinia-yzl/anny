@@ -84,6 +84,11 @@ faces = [
     "matplotlib",
     "playwright",
 ]
+# the pose from a picture (corporis pose, corporis.pose_from_image) and the flat drawings
+pose = [
+    "mediapipe",
+    "contourpy",
+]
 dev = [
     "ruff==0.14.5",
     "build",

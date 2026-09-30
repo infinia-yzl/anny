@@ -6,7 +6,8 @@ glTF 2.0 binary (GLB) export of an Anny character.
 The file holds the character's mesh in its rest (bind) pose with normals and UVs, the bones of
 the rig as joint nodes with inverse bind matrices, the skin weights (the strongest 4 or 8 bones
 of each vertex), morph targets for the facial actions and, on request, for the face shapes, and
-one animation for each pose or clip of ``anny.poses`` that the caller names. The phenotype, the
+one animation for each pose or clip of ``anny.poses`` that the caller names, after an animation
+named ``pose`` when the character holds its own pose. The phenotype, the
 local changes and the face shapes that are not morph targets are baked into the mesh and the
 skeleton. The settings of the character are stored in the ``extras`` of the scene, and
 ``read_character`` reads them back.
@@ -250,7 +251,8 @@ def export_glb(
             ``facial_actions="all"`` for facial-action morph targets, and face shapes for
             face-shape morph targets.
         animations: names of poses and clips of ``anny.poses`` (``anny.poses.names()``), one
-            animation each. A pose is one keyframe; a clip plays at its own frame rate.
+            animation each. A pose is one keyframe; a clip plays at its own frame rate. A
+            character with a ``pose`` also gets a one-keyframe animation named ``pose``, first.
         morph_targets: names of facial actions and face shapes to export as morph targets.
             None exports every facial action of the model. A facial action gives one target
             (weight 1 is the value 1). A face shape gives ``<name>.pos`` at +1 and, when the
@@ -420,6 +422,10 @@ def export_glb(
     }
 
     gltf_animations = []
+    if character.pose:
+        gltf_animations.append(
+            _character_pose(buffers, model, character, parents, default_local)
+        )
     for name in animations:
         gltf_animations.append(
             _animation(buffers, model, character, name, parents, default_local)
@@ -430,7 +436,7 @@ def export_glb(
         "anny_version": _anny_version(),
         "character": character.to_dict(),
         "morph_targets": [t[0] for t in targets],
-        "animations": list(animations),
+        "animations": (["pose"] if character.pose else []) + list(animations),
         "max_influences": max_influences,
         "frame": "metres, Y up, the figure faces +Z",
     }
@@ -492,16 +498,56 @@ def _animation(
         phenotype_kwargs=dict(character.phenotype) or None,
         local_changes_kwargs=dict(character.local_changes) or None,
     )
+    return _keyframes(
+        buffers,
+        model,
+        character,
+        name,
+        entry["pose_parameters"],
+        float(entry["fps"]),
+        parents,
+        default_local,
+    )
+
+
+def _character_pose(
+    buffers: _Buffers, model, character: Character, parents, default_local
+) -> dict:
+    """The character's own pose as a one-frame animation named ``pose``, on the floor."""
+    import anny.poses
+
+    params, _ = anny.poses.ground(
+        model,
+        character.pose_parameters(model),
+        phenotype_kwargs=dict(character.phenotype) or None,
+        local_changes_kwargs=dict(character.local_changes) or None,
+    )
+    return _keyframes(
+        buffers, model, character, "pose", params, 1.0, parents, default_local
+    )
+
+
+def _keyframes(
+    buffers: _Buffers,
+    model,
+    character: Character,
+    name: str,
+    pose_parameters: torch.Tensor,
+    fps: float,
+    parents,
+    default_local,
+) -> dict:
+    """One glTF animation for ``local-ref`` pose parameters (frames, bones, 4, 4)."""
     with torch.no_grad():
         out = model(
-            pose_parameters=entry["pose_parameters"],
+            pose_parameters=pose_parameters,
             pose_parameterization="local-ref",
             **character.model_kwargs(),
         )
     world = _to_gltf_matrices(out["bone_poses"].double().cpu().numpy())
     local = _local_transforms(world, parents)
     frames = local.shape[0]
-    times = (np.arange(frames) / float(entry["fps"])).astype(np.float32)
+    times = (np.arange(frames) / fps).astype(np.float32)
     time_accessor = buffers.accessor(times, minmax=True)
     samplers, channels = [], []
     for j in range(len(parents)):

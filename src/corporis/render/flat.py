@@ -133,6 +133,13 @@ class View:
     pitch: float = 0.0
     roll: float = 0.0
 
+    @classmethod
+    def facing(cls, forward, turn: float = 0.0, pitch: float = 0.0, roll: float = 0.0):
+        """the view from in front of a figure that faces ``forward`` (the model's frame; only
+        its horizontal part counts), turned ``turn`` degrees further about the vertical"""
+        yaw = math.degrees(math.atan2(-float(forward[0]), -float(forward[1])))
+        return cls(yaw + turn, pitch, roll)
+
     def basis(self):
         """the picture's right and up, and the direction toward the camera, in the model's
         frame"""
