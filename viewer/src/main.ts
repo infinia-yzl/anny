@@ -28,6 +28,9 @@ import { Hair } from './hair/gpu.ts';
 import { COLLIDERS, fitColliders } from './hair/colliders.ts';
 import { STRAND_VS } from './hair/glsl.ts';
 import { initUI } from './ui/index.ts';
+import { Retargeter, adjustHead, cardBones, quaternions, type M3, type RestBody, type V3 } from './pose_from_image.ts';
+import { detect as detectPicture } from './picture.ts';
+import { silhouetteSvg } from './flat.ts';
 
 const qs = new URLSearchParams(location.search);
 const DEG = Math.PI / 180;
@@ -1615,6 +1618,121 @@ function tickMotion(dt: number) {
   if (moving) evalMotion();
   return moving;
 }
+// ------------------------------------------------------------------ pose from a picture
+// MediaPipe's landmarks of a picture (picture.ts) pose the figure through the retarget of pose_from_image.ts, which
+// works in anny's frame on the current body. The pose joins the library as one more pose, named "picture". The pose
+// card (corporis.Character) and the silhouette SVG take whatever pose the figure shows.
+const ANNY_TO_PAGE = [1, 0, 0, 0, 0, 1, 0, -1, 0];
+function annyRest(): RestBody {
+  const fr = BODY.anny.meta.shape.frame, s = fr.scale, o = fr.offset;
+  const toAnny = (x: number, y: number, z: number): V3 => [(x - o[0]) / s, -(z - o[2]) / s, (y - o[1]) / s];
+  const C = BODY.anny.coarse, K = BODY.anny.coarseSkin, n = BODY.anny.nc;
+  const vertices = new Float64Array(n * 3), top = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    vertices.set(toAnny(C[i * 3], C[i * 3 + 1], C[i * 3 + 2]), i * 3);
+    let best = 0;
+    for (let k = 1; k < 8; k++) if (K[i * 16 + 8 + k] > K[i * 16 + 8 + best]) best = k;
+    top[i] = K[i * 16 + best];
+  }
+  return { names: RIG.bones.map((b: any) => b.name), parents: RIG.parents, heads: RIG.heads.map((h: number[]) => toAnny(h[0], h[1], h[2])), vertices, top };
+}
+// the last picture's retarget and rotations, and the head's correction (degrees: turn, up, tilt)
+const PICTURE: { retarget: Retargeter | null; W: Map<string, M3> | null; head: { turn: number; up: number; tilt: number } } =
+  { retarget: null, W: null, head: { turn: 0, up: 0, tilt: 0 } };
+async function poseFromPicture(file: Blob) {
+  if (!BODY.ready || !MOTION.nb) throw new Error('The figure is still loading.');
+  const bitmap = await createImageBitmap(file);
+  let found;
+  try { found = await detectPicture(bitmap); } finally { bitmap.close(); }
+  const retarget = new Retargeter(annyRest());
+  PICTURE.retarget = retarget; PICTURE.W = retarget.solve(found.landmarks);
+  PICTURE.head = { turn: 0, up: 0, tilt: 0 };
+  writePicturePose();
+  const c = MOTION.byName.picture;
+  c.bounds = poseBounds(c);
+  setMotion('picture', { remember: false });
+  return { hands: found.hands.length };
+}
+// the picture's pose, with the head's correction, into the motion data as the pose "picture"
+function writePicturePose() {
+  const { retarget, W, head } = PICTURE;
+  if (!retarget || !W) return;
+  const q = quaternions(retarget.local(adjustHead(W, head.turn, head.up, head.tilt)), ANNY_TO_PAGE);
+  const nb = MOTION.nb;
+  let c = MOTION.byName.picture;
+  if (!c) {
+    const frames = MOTION.Q.length / (nb * 4);
+    const Q = new Int16Array(MOTION.Q.length + nb * 4); Q.set(MOTION.Q); MOTION.Q = Q;
+    const R = new Float32Array(MOTION.R.length + 3); R.set(MOTION.R); MOTION.R = R;
+    c = { name: 'picture', label: 'From a picture', kind: 'pose', start: frames, count: 1, duration: 1 };
+    MOTION.byName.picture = c;
+  }
+  for (let i = 0; i < nb * 4; i++) MOTION.Q[c.start * nb * 4 + i] = Math.round(q[i] * 32767);
+}
+// correct the head of the picture's pose, and show that pose
+function setPictureHead(head: { turn: number; up: number; tilt: number }) {
+  if (!PICTURE.W) return;
+  PICTURE.head = { ...head };
+  writePicturePose();
+  if (MOTION.cur === MOTION.byName.picture) { MOTION.fade = 1; evalMotion(); HOOKS.motion(); }
+  else setMotion('picture', { instant: true, remember: false });
+}
+// the character card of the figure as it stands: the look's phenotype and face, and the pose shown
+function poseCard() {
+  const L = currentLook;
+  return {
+    schema: 1, name: L.name || 'character', rig: 'anny', topology: 'anny', phenotypes: 'all',
+    phenotype: { ...L.phenotype }, local_changes: {}, face_shapes: { ...L.face }, facial_actions: {},
+    pose: { bones: cardBones(MOTION.q, RIG.bones.map((b: any) => b.name), ANNY_TO_PAGE), root: [0, 0, 0] },
+  };
+}
+// the coarse body skinned by a pose (rotations q, root offset), in the page's frame
+function skinnedCoarse(q: Float32Array, root: number[]) {
+  const mats = poseMatrices(q, root), V = BODY.anny.coarse, K = BODY.anny.coarseSkin, n = BODY.anny.nBody;
+  const out = new Float64Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    let x = 0, y = 0, z = 0;
+    const px = V[i * 3], py = V[i * 3 + 1], pz = V[i * 3 + 2];
+    for (let k = 0; k < 8; k++) {
+      const w = K[i * 16 + 8 + k] / 255;
+      if (w === 0) continue;
+      const m = K[i * 16 + k] * 16;
+      x += w * (mats[m] * px + mats[m + 4] * py + mats[m + 8] * pz + mats[m + 12]);
+      y += w * (mats[m + 1] * px + mats[m + 5] * py + mats[m + 9] * pz + mats[m + 13]);
+      z += w * (mats[m + 2] * px + mats[m + 6] * py + mats[m + 10] * pz + mats[m + 14]);
+    }
+    out[i * 3] = x; out[i * 3 + 1] = y; out[i * 3 + 2] = z;
+  }
+  return out;
+}
+// the bounds of a pose for the Body view, as the build gives the library's (relative to the hip height)
+function poseBounds(c: any) {
+  const q = new Float32Array(MOTION.nb * 4), root = [0, 0, 0];
+  sampleClip(c, 0, q, root, groundFor(c));
+  const P = skinnedCoarse(q, root), hip = hipHeight(), fl = BODY.anny.floor;
+  let lo = Infinity, hi = -Infinity, wx = 0;
+  for (let i = 0; i < P.length; i += 3) { lo = Math.min(lo, P[i + 1]); hi = Math.max(hi, P[i + 1]); wx = Math.max(wx, Math.abs(P[i])); }
+  return [(lo - fl) / hip, (hi + 0.05 - fl) / hip, (wx + 0.03) / hip];
+}
+// the silhouette of the posed coarse body, seen along the camera's view, in a size x size picture
+function poseSilhouette(size = 512, margin = 24) {
+  const P = skinnedCoarse(MOTION.q, MOTION.rootOff), n = BODY.anny.nBody;
+  camera.updateMatrixWorld();
+  const e = camera.matrixWorld.elements, right = [e[0], e[1], e[2]], up = [e[4], e[5], e[6]];
+  const xy = new Float64Array(n * 2);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
+    const u = x * right[0] + y * right[1] + z * right[2], v = -(x * up[0] + y * up[1] + z * up[2]);
+    xy[i * 2] = u; xy[i * 2 + 1] = v;
+    x0 = Math.min(x0, u); x1 = Math.max(x1, u); y0 = Math.min(y0, v); y1 = Math.max(y1, v);
+  }
+  const k = (size - 2 * margin) / Math.max(x1 - x0, y1 - y0), ox = (size - k * (x1 - x0)) / 2, oy = (size - k * (y1 - y0)) / 2;
+  for (let i = 0; i < n; i++) { xy[i * 2] = ox + k * (xy[i * 2] - x0); xy[i * 2 + 1] = oy + k * (xy[i * 2 + 1] - y0); }
+  const label = MOTION.cur ? MOTION.cur.label : 'a pose';
+  return silhouetteSvg(xy, BODY.anny.quads, size, size, '#e2bca3', `${currentLook.name || 'A character'} in ${label}, from the Corporis viewer`);
+}
+
 // the posed figure, for the navigation and the framings: the box of its joints, its face, the top of its head
 const FIG: any = { lo: new THREE.Vector3(-0.3, -0.84, -0.15), hi: new THREE.Vector3(0.3, 0.6, 0.2), top: 0.625, head: new THREE.Vector3(0, 0.495, 0.035), joints: [] };
 // the Upper body view: from the waist to the top of the head, as wide as the joints above the waist
@@ -2460,6 +2578,11 @@ const APP: any = {
   togglePlay,
   setSpeed: (s: number) => { MOTION.speed = s; rememberMotion(); HOOKS.motion(); },
   seek: (t: number) => { MOTION.t = t; evalMotion(); },
+  poseFromPicture: (file: Blob) => poseFromPicture(file),
+  pictureHead: () => (PICTURE.W ? { ...PICTURE.head } : null),
+  setPictureHead,
+  poseCard,
+  poseSilhouette: () => poseSilhouette(),
   correctives: () => ({ ready: CORR.ready, on: CORR.on }),
   setCorrectives: (on: boolean) => setCorrectivesOn(on),
   presets: PRESETS,

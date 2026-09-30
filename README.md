@@ -28,13 +28,14 @@ These authors have not reviewed or endorsed Corporis.
 
 ### About the names
 
-The `corporis` distribution holds two packages: `anny` (`src/anny`), the upstream body model, which keeps its name so that upstream updates merge cleanly, and `corporis` (`src/corporis`), with the glTF export and the `corporis` command.
+The `corporis` distribution holds two packages: `anny` (`src/anny`), the upstream body model, which keeps its name so that upstream updates merge cleanly, and `corporis` (`src/corporis`), with the glTF export, the pose from a picture and the `corporis` command.
 
 ### Features
 - Anny's parametric body model: full body, hand and head, with 9 shape parameters (`model.phenotype_labels`).
 - 103 face shapes with a random face sampler, 25 procedural hairstyles, 50 poses and 7 clips, and soft-tissue correctives.
 - A web viewer with a character editor.
 - Export to glTF 2.0 (`.glb`) with the skeleton, the skin weights, facial morph targets and animations (see [Export to glTF](#export-to-gltf)).
+- Pose a character from a picture, and draw it flat as a silhouette, a line drawing or a toon picture (see [Pose from a picture](#pose-from-a-picture)).
 - Planned: **Corpi**, a desktop companion.
 - Apache License 2.0, with CC0 and other permissive data (see [LICENSE_THINGS](LICENSE_THINGS)).
 
@@ -177,7 +178,7 @@ The file holds:
 - The mesh in the rest pose of the character (13,718 Anny vertices, split into 14,898 at the UV seams), with normals and UVs, standing on the floor.
 - The 104 bones of the `anny` rig as a skeleton, with the skin weights of the 4 strongest bones of each vertex (`--influences 8` adds a second set).
 - Morph targets named after the 52 ARKit facial actions (`jawOpen`, `eyeBlinkLeft`, ...), and on request the face shapes (`<name>.pos` and `<name>.neg`). Sparse storage keeps them small.
-- One animation for each pose or clip of `anny.poses` that you name.
+- One animation for each pose or clip of `anny.poses` that you name, after one named `pose` when the character holds its own pose.
 - The settings of the character in the scene `extras`, and the Anny vertex of each glTF vertex in the `_ANNY_VERTEX` attribute.
 
 The phenotype, the local changes and the face shapes that are not morph targets are baked into the mesh and the skeleton. Axes: metres, Y up, the figure faces +Z.
@@ -187,6 +188,32 @@ Accuracy, measured against Anny's own output on the walk, run, arms-crossed and 
 Tested so far: the [Khronos glTF validator](https://github.com/KhronosGroup/glTF-Validator) reports no errors and no warnings, and three.js (r186, `GLTFLoader`) draws the skeleton, the morph targets and the animations. Blender, Godot, Unity and Unreal Engine have not been tested yet.
 
 Not in the file yet: textures (the material is a plain skin colour), the hair, the soft-tissue correctives (the export uses plain skinning) and the eyes' shading.
+
+## Pose from a picture
+
+`corporis.pose_from_image` poses a character as the figure in a picture: the body, the head, the fingers and the facial expression. It reads the picture with Google's [MediaPipe](https://ai.google.dev/edge/mediapipe) pose, hand and face landmarkers, which download on first use into `ANNY_CACHE_DIR/corporis/models`.
+
+```bash
+uv sync --extra pose
+corporis pose photo.jpg --card pose.json --glb pose.glb --svg pose.svg --outline pose_line.svg --png pose.png
+corporis pose photo.jpg --png pose.png --view three-quarter   # the picture's camera (the default), front or three-quarter
+corporis pose photo.jpg --png pose.png --head-turn 20 --head-up 7   # turn the head further (degrees; the figure's right and up)
+```
+
+```python
+from corporis import Character, export_glb, pose_from_image
+
+character = pose_from_image("photo.jpg", Character(name="ada", phenotype={"height": 0.7}))
+export_glb("ada.glb", character)  # the pose becomes an animation named "pose"
+```
+
+The character card stores the pose in `pose`: a quaternion for each bone that moves (Anny's `local-ref` parameters). The face's scores become `facial_actions`, because MediaPipe and Anny use the same 52 ARKit names. `corporis.render.flat` draws any posed mesh as a silhouette SVG, an outline SVG (the contour and the lines where a limb passes in front of the body) or a flat-shaded PNG with a transparent background.
+
+How it works: each bone turns to follow its landmarks, with hinges at the elbows, knees and finger joints, and a short optimisation then turns the torso, the collarbones and the limbs until the model's landmarks meet the picture's. A single picture fixes each limb's direction across the picture well and its depth less well: on drawn test poses, every limb comes back within 8° in the picture plane.
+
+Pictures can be noisy, and pictures made by AI models can draw anatomy that no body has, so some landmarks land in the wrong place. The head takes its turn from the face mesh when MediaPipe finds a face, and otherwise from the head points that agree with each other, in 3D or in the picture alone. A hand with impossible proportions keeps its rest pose, and the optimisation limits how far any single bad landmark can pull the pose. A drawn or stylised face can still leave the head's turn unclear, so three angles correct it by hand: `--head-turn` (toward the figure's right), `--head-up` and `--head-tilt` (toward the right shoulder), or `head=dict(turn=..., up=..., tilt=...)` in Python.
+
+The viewer's Pose section offers the same step under **From a picture**. It reads the body, the head and the fingers, without the optimisation and the facial expression. Head turn, Head up and Head tilt sliders correct the head after a picture. It saves the pose shown as a character card or as a silhouette SVG. The picture stays in the browser, and MediaPipe's code and models load from their CDNs the first time.
 
 ## Technical details
 

@@ -7,8 +7,8 @@
 // The Rig section (rig_ui.ts) sits between Pose and Scene.
 
 import type { App } from './app.ts';
-import { chip, foldGroup, searchField, sectionHead, segmented, slider, toggle } from './controls.ts';
-import { h, saveUi, uiState } from './dom.ts';
+import { chip, foldGroup, searchField, sectionHead, segmented, slider, textButton, toggle } from './controls.ts';
+import { download, h, saveUi, slug, uiState } from './dom.ts';
 import { icon } from './icons.ts';
 import { rigSection } from './rig_ui.ts';
 
@@ -71,11 +71,54 @@ export function stageSections(app: App) {
       empty.hidden = any;
     });
     const credit = h('p.note.credit');
+    // from a picture: MediaPipe reads the figure's pose, and the pose card and the silhouette take the pose shown
+    const file = h('input', { type: 'file', accept: 'image/*', hidden: true }) as HTMLInputElement;
+    const pictureMsg = h('p.inline-msg', { role: 'status' });
+    const say = (text: string, kind = '') => { pictureMsg.textContent = text; pictureMsg.dataset.kind = kind; };
+    const choosePicture = textButton('Choose a picture', () => file.click(), 'upload');
+    file.addEventListener('change', async () => {
+      const f = file.files && file.files[0]; file.value = '';
+      if (!f) return;
+      choosePicture.disabled = true;
+      say('Reading the pose. The first picture loads MediaPipe, about 20 MB.');
+      try {
+        const r = await app.poseFromPicture(f);
+        showHead();
+        say(r.hands === 2 ? 'Posed from the picture, with both hands.' : r.hands === 1 ? 'Posed from the picture, with one hand. The other hand keeps its rest pose.' : 'Posed from the picture. No hands were clear enough, so they keep their rest pose.');
+      } catch (e) {
+        say(e instanceof Error && e.message.startsWith('No figure') ? 'No figure was found in this picture. Try one where the whole figure shows.' : 'The picture could not be read. MediaPipe loads from the internet the first time.', 'error');
+      } finally { choosePicture.disabled = false; }
+    });
+    // the head's correction: a picture made by an AI model, or a stylised face, can leave the head's turn unclear
+    const headVals = { turn: 0, up: 0, tilt: 0 };
+    const headSlider = (key: 'turn' | 'up' | 'tilt', label: string, min: number, max: number, ends: string[]) => slider({
+      id: 'picture-head-' + key, label: label + ' (°)', min, max, step: 1, def: 0, digits: 0, ends,
+      onInput: (v) => { headVals[key] = v; app.setPictureHead({ ...headVals }); },
+    });
+    const headSliders = [headSlider('turn', 'Head turn', -60, 60, ['Left', 'Right']),
+      headSlider('up', 'Head up', -40, 60, ['Down', 'Up']), headSlider('tilt', 'Head tilt', -40, 40, ['Left', 'Right'])];
+    const headBox = h('div.picture-head', { hidden: true },
+      h('p.note', { text: 'When the picture leaves the head unclear, as a drawn or stylised face can, turn the head here. Left and right are the figure\'s own.' }),
+      ...headSliders.map((sl) => sl.el));
+    const showHead = () => {
+      const v = app.pictureHead();
+      headBox.hidden = !v;
+      if (v) { Object.assign(headVals, v); headSliders[0].set(v.turn); headSliders[1].set(v.up); headSliders[2].set(v.tilt); }
+    };
+    const name = () => slug(app.look().name || 'character');
+    // a hosted page (the artifact build) cannot start a download
+    const saves = (window as any).MODEL_PARTS ? null : h('div.btn-row', {},
+      textButton('Pose card', () => download(`${name()}-pose.json`, new Blob([JSON.stringify(app.poseCard(), null, 2) + '\n'], { type: 'application/json' })), 'download'),
+      textButton('Silhouette', () => download(`${name()}-silhouette.svg`, new Blob([app.poseSilhouette()], { type: 'image/svg+xml' })), 'download'));
     const tissue = toggle('Soft tissue', (on) => app.setCorrectives(on), 'Corrective shapes keep the volume of the joints');
     const tissueNote = h('p.note', { text: 'Corrective shapes from a soft-tissue simulation keep the volume of the shoulders, elbows, hips and knees as they bend. Switch them off to compare with plain skinning.' });
     pose.append(head.el, h('h3.sub', { text: 'Animations' }), anim, timeline, h('div.row', {}, h('span.row-label', { text: 'Speed' }), speed.el),
       h('p.note', { text: 'The view sharpens while the figure holds still. Pause an animation to see any moment at full quality.' }),
       h('h3.sub', { text: 'Poses' }), search.el, wrap, empty, credit,
+      h('h3.sub', { text: 'From a picture' }),
+      h('p.note', { text: 'Pose the figure as the figure in a picture: the body, the head and the fingers. The picture stays in this browser.' }),
+      h('div.btn-row', {}, choosePicture), pictureMsg, file, headBox,
+      ...(saves ? [h('p.note', { text: 'Save the pose shown as a character card for corporis export, or as a silhouette from this view.' }), saves] : []),
       h('h3.sub', { text: 'Soft tissue' }), tissue.el, tissueNote);
     let openFor = '';
     syncs.push(() => {

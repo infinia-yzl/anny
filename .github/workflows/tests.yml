@@ -10,6 +10,7 @@ on:
       - "src/**"
       - "test/**"
       - "viewer/src/**" # test_viewer_parity runs the page's TypeScript
+      - "viewer/test/**" # and the parity scripts
       - pyproject.toml
       - uv.lock
       - scripts/check.sh
@@ -20,6 +21,7 @@ on:
       - "src/**"
       - "test/**"
       - "viewer/src/**" # test_viewer_parity runs the page's TypeScript
+      - "viewer/test/**" # and the parity scripts
       - pyproject.toml
       - uv.lock
       - scripts/check.sh
