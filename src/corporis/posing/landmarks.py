@@ -103,3 +103,118 @@ class Landmarks:
 
     def hand(self, side: str, name: str) -> np.ndarray:
         return self.hands[side][HAND.index(name)]
+
+
+# MediaPipe's models, downloaded on first use into ANNY_CACHE_DIR/corporis/models
+MODELS = {
+    "pose": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
+    "pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task",
+    "hand": "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
+    "hand_landmarker/float16/latest/hand_landmarker.task",
+    "face": "https://storage.googleapis.com/mediapipe-models/face_landmarker/"
+    "face_landmarker/float16/latest/face_landmarker.task",
+}
+
+
+def model_path(name: str):
+    """the cached file of one of MediaPipe's models, downloaded if needed"""
+    import requests
+
+    from anny.paths import get_anny_cache_path
+
+    folder = get_anny_cache_path() / "corporis" / "models"
+    folder.mkdir(parents=True, exist_ok=True)
+    url = MODELS[name]
+    path = folder / url.rsplit("/", 1)[1]
+    if not path.exists():
+        try:
+            response = requests.get(url, stream=True, timeout=60)
+            response.raise_for_status()
+        except requests.RequestException as error:
+            raise RuntimeError(
+                f"could not download MediaPipe's {name} model from {url} ({error})"
+            ) from error
+        tmp = path.with_suffix(".part")
+        with open(tmp, "wb") as f:
+            for block in response.iter_content(1 << 20):
+                f.write(block)
+        tmp.rename(path)
+    return path
+
+
+def detect(image, hands: bool = True, face: bool = True) -> Landmarks:
+    """the landmarks of the most prominent figure in ``image`` (a path, a PIL image or an RGB
+    array), with MediaPipe's pose, hand and face landmarkers"""
+    import mediapipe as mp
+    from mediapipe.tasks.python import BaseOptions, vision
+    from PIL import Image
+
+    if not isinstance(image, np.ndarray):
+        image = np.asarray(
+            Image.open(image).convert("RGB")
+            if not hasattr(image, "convert")
+            else image.convert("RGB")
+        )
+    height, width = image.shape[:2]
+    picture = mp.Image(
+        image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(image)
+    )
+
+    def options(kind, cls, **kwargs):
+        return cls(
+            base_options=BaseOptions(model_asset_path=str(model_path(kind))), **kwargs
+        )
+
+    with vision.PoseLandmarker.create_from_options(
+        options("pose", vision.PoseLandmarkerOptions, num_poses=1)
+    ) as landmarker:
+        result = landmarker.detect(picture)
+    if not result.pose_world_landmarks:
+        raise ValueError("MediaPipe found no figure in the picture")
+    world = result.pose_world_landmarks[0]
+    normalised = result.pose_landmarks[0]
+    body = from_mediapipe([[p.x, p.y, p.z] for p in world])
+    visibility = np.array([p.visibility for p in normalised], dtype=np.float64)
+    pixels = np.array(
+        [[p.x * width, p.y * height] for p in normalised], dtype=np.float64
+    )
+    L = Landmarks(body, visibility, pixels, (width, height))
+    if hands:
+        with vision.HandLandmarker.create_from_options(
+            options("hand", vision.HandLandmarkerOptions, num_hands=2)
+        ) as landmarker:
+            found = landmarker.detect(picture)
+        wrists = {
+            ".L": pixels[BODY.index("left_wrist")],
+            ".R": pixels[BODY.index("right_wrist")],
+        }
+        taken = set()
+        for points, world_points in zip(
+            found.hand_landmarks, found.hand_world_landmarks
+        ):
+            at = np.array([points[0].x * width, points[0].y * height])
+            # MediaPipe names a hand's side as seen in a mirror; the nearest wrist is surer
+            side = min(
+                (s for s in wrists if s not in taken),
+                key=lambda s: np.linalg.norm(wrists[s] - at),
+                default=None,
+            )
+            if side is None:
+                continue
+            taken.add(side)
+            L.hands[side] = from_mediapipe([[p.x, p.y, p.z] for p in world_points])
+    if face:
+        with vision.FaceLandmarker.create_from_options(
+            options(
+                "face",
+                vision.FaceLandmarkerOptions,
+                output_face_blendshapes=True,
+                num_faces=1,
+            )
+        ) as landmarker:
+            found = landmarker.detect(picture)
+        if found.face_blendshapes:
+            L.face = {
+                c.category_name: float(c.score) for c in found.face_blendshapes[0]
+            }
+    return L
