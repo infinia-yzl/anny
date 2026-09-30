@@ -7,14 +7,21 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "anny"
+# Corporis, an independent fork of Anny (NAVER LABS Europe). The distribution is "corporis"; it
+# installs the "anny" package (the body model, kept close to upstream) and the "corporis" package.
+name = "corporis"
 dynamic = ["version"]
 authors = [
+    # author of Anny, the upstream body model
     { name = "Romain Brégier", email = "romain.bregier@naverlabs.com" }
 ]
-description="A differentiable human body model for all ages in PyTorch, based on MakeHuman, with face shapes, poses, soft-tissue correctives, procedural hair and a WebGL viewer."
+maintainers = [
+    # maintainer of the Corporis fork; its additions are written by AI coding agents (see README)
+    { name = "infinia-yzl" }
+]
+description="Humanoid 3D characters built on the Anny body model, with a web viewer and glTF export."
 readme = "README.md"
-license-files = ["LICENSE", "LICENSE_THINGS"]
+license-files = ["LICENSE", "LICENSE_THINGS", "NOTICE"]
 requires-python = ">=3.10"
 
 dependencies = [
@@ -28,6 +35,13 @@ dependencies = [
     "trimesh",
     "warp-lang"
 ]
+
+[project.urls]
+Homepage = "https://github.com/infinia-yzl/anny"
+Upstream = "https://github.com/naver/anny"
+
+[project.scripts]
+corporis = "corporis.cli:main"
 
 [tool.setuptools_scm]
 

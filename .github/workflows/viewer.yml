@@ -1,0 +1,38 @@
+# The viewer page: the type-check, and a check that the committed page matches viewer/src
+# (scripts/check.sh viewer). Runs only when the viewer changes.
+name: Viewer
+
+on:
+  pull_request:
+    paths:
+      - "viewer/**"
+      - scripts/check.sh
+      - .github/workflows/viewer.yml
+  push:
+    branches: [main]
+    paths:
+      - "viewer/**"
+      - scripts/check.sh
+      - .github/workflows/viewer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: viewer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  viewer:
+    name: Viewer page
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: viewer/package-lock.json
+      - run: scripts/check.sh viewer

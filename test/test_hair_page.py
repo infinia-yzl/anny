@@ -23,6 +23,7 @@ import numpy as np
 from anny.hair import styles as H
 from anny.hair.layout import load_layout
 from anny.viewer.benchmark import WRAP
+from test.markers import local_only
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 # the level of detail of the page, and the sum of the bytes of its density volume
@@ -57,6 +58,7 @@ def unpack_normals(w):
     return n / np.linalg.norm(n, axis=1, keepdims=True)
 
 
+@local_only("Playwright with the built viewer page")
 @unittest.skipUnless(
     playwright_available(), "Playwright and the built viewer page are needed"
 )
