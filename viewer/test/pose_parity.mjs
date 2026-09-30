@@ -7,7 +7,7 @@
 // reads <folder>/input.json and writes <folder>/output.json.
 import fs from 'fs';
 import path from 'path';
-import { Retargeter, landmarkSources, quaternions } from '../src/pose_from_image.ts';
+import { Retargeter, adjustHead, landmarkSources, quaternions } from '../src/pose_from_image.ts';
 
 const dir = process.argv[2];
 const inp = JSON.parse(fs.readFileSync(path.join(dir, 'input.json')));
@@ -19,4 +19,7 @@ const heads = inp.landmarks.map((L) => {
   const W = retarget.solve(L);
   return retarget.headFit(L, W.get('spine01')).source;
 });
-fs.writeFileSync(path.join(dir, 'output.json'), JSON.stringify({ sources, poses, heads }));
+// the first pose with the head corrected by hand
+const [turn, up, tilt] = inp.head;
+const adjusted = Array.from(quaternions(retarget.local(adjustHead(retarget.solve(inp.landmarks[0]), turn, up, tilt))));
+fs.writeFileSync(path.join(dir, 'output.json'), JSON.stringify({ sources, poses, heads, adjusted }));

@@ -30,7 +30,15 @@ from corporis.posing.head import (
     robust_fit_image,
 )
 from corporis.posing.landmarks import BODY, HAND, Landmarks
-from corporis.posing.skeleton import Rotations, Skeleton, axis_angle, frame, slerp
+from corporis.posing.skeleton import (
+    Rotations,
+    Skeleton,
+    axis_angle,
+    bend,
+    frame,
+    rot,
+    slerp,
+)
 
 SIDES = {".L": "left", ".R": "right"}
 FINGERS = {1: "thumb", 2: "index", 3: "middle", 4: "ring", 5: "pinky"}
@@ -54,6 +62,29 @@ HEAD_LIMIT = 100.0
 # knuckles, and the palm's length against its width: outside these, a hand is not believed
 FINGER_RANGE = (0.8, 4.0)
 PALM_RANGE = (0.8, 3.5)
+
+
+# the neck's shares of a head adjustment, from the base of the neck to the head
+HEAD_SHARES = [("neck01", 0.3), ("neck02", 0.55), ("neck03", 0.75), ("head", 1.0)]
+
+
+def adjust_head(
+    W: Rotations, turn: float = 0.0, up: float = 0.0, tilt: float = 0.0
+) -> Rotations:
+    """``W`` with the head turned further in its own frame, in degrees: ``turn`` toward the
+    figure's right (negative: its left), ``up`` to raise the face (negative: lower it) and
+    ``tilt`` to lean the head toward the right shoulder (negative: the left). The neck carries
+    a growing share of the turn up to the head, as a neck does.
+
+    A picture made by an AI model can leave the head's turn unclear to MediaPipe (see
+    :meth:`Retargeter.head_fit`); these three angles let a person correct it.
+    """
+    A = rot("z", -turn) @ bend(up) @ rot("y", -tilt)
+    v = roma.rotmat_to_rotvec(A)
+    W = dict(W)
+    for bone, share in HEAD_SHARES:
+        W[bone] = W[bone] @ roma.rotvec_to_rotmat(v * share).to(W[bone].dtype)
+    return W
 
 
 @dataclasses.dataclass

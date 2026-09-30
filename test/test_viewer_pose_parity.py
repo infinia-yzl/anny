@@ -17,7 +17,7 @@ import torch
 
 import anny
 import anny.poses
-from corporis.posing.retarget import Retargeter
+from corporis.posing.retarget import Retargeter, adjust_head
 from corporis.posing.skeleton import Skeleton
 from test.test_pose_robust import corrupted, long_finger, tipped_head
 from test.test_viewer_parity import node_available
@@ -28,6 +28,8 @@ POSES = ("mh_hero", "arms_crossed", "mh_thinking", "mh_star", "seated", "mh_chee
 # bad landmarks (test_pose_robust): misplaced and noisy head points, and a finger ten times
 # too long
 BAD = ("misplaced head", "bad hand")
+# a head correction (degrees: turn, up, tilt) of the first pose
+HEAD = (20.0, 7.0, -3.5)
 
 
 @unittest.skipUnless(
@@ -68,6 +70,9 @@ class TestViewerPoseParity(unittest.TestCase):
             P = cls.skeleton.params(W)[0, :, :3, :3].double()
             cls.expected.append(roma.rotmat_to_unitquat(P).numpy())
             cls.expected_heads.append(cls.retarget.head_fit(L).source)
+        W, _ = cls.retarget(cases[0])
+        P = cls.skeleton.params(adjust_head(W, *HEAD))[0, :, :3, :3].double()
+        cls.expected_adjusted = roma.rotmat_to_unitquat(P).numpy()
         inp = {
             "names": cls.skeleton.labels,
             "parents": [int(p) for p in cls.skeleton.parents],
@@ -75,6 +80,7 @@ class TestViewerPoseParity(unittest.TestCase):
             "vertices": rest["vertices"][0].reshape(-1).tolist(),
             "top": top.tolist(),
             "landmarks": landmarks,
+            "head": list(HEAD),
         }
         with tempfile.TemporaryDirectory() as tmp:
             (pathlib.Path(tmp) / "input.json").write_text(json.dumps(inp))
@@ -96,6 +102,12 @@ class TestViewerPoseParity(unittest.TestCase):
             self.assertEqual(
                 self.output["sources"]["hands"][s], python(anny_lm.hands[s])
             )
+
+    def test_head_correction_matches(self):
+        got = np.array(self.output["adjusted"]).reshape(-1, 4)
+        expected = self.expected_adjusted
+        gap = np.minimum(np.abs(got - expected).max(1), np.abs(got + expected).max(1))
+        self.assertLess(gap.max(), 2e-4, self.skeleton.labels[gap.argmax()])
 
     def test_head_sources_match(self):
         self.assertEqual(self.output["heads"], self.expected_heads)

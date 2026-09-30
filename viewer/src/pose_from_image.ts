@@ -493,6 +493,17 @@ export class Retargeter {
   }
 }
 
+// the neck's shares of a head adjustment, from the base of the neck to the head
+const HEAD_SHARES: [string, number][] = [['neck01', 0.3], ['neck02', 0.55], ['neck03', 0.75], ['head', 1.0]];
+// W with the head turned further in its own frame, in degrees (corporis.posing.retarget.adjust_head): turn toward the
+// figure's right, up to raise the face and tilt toward the right shoulder; the neck carries a growing share of it
+export function adjustHead(W: Map<string, M3>, turn = 0, up = 0, tilt = 0): Map<string, M3> {
+  const A = mul(mul(axisAngle([0, 0, 1], -turn), axisAngle([1, 0, 0], -up)), axisAngle([0, 1, 0], -tilt));
+  const v = logRot(A), out = new Map(W);
+  for (const [bone, share] of HEAD_SHARES) if (W.has(bone)) out.set(bone, mul(W.get(bone)!, rotvec(scale(v, share))));
+  return out;
+}
+
 // rotations of anny's frame in another frame: M R M^T for each rotation, as quaternions (x, y, z, w), one after another
 export function quaternions(rotations: M3[], M: M3 = I3): Float32Array {
   const out = new Float32Array(rotations.length * 4), Mt = transpose(M);

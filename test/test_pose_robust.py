@@ -16,7 +16,7 @@ from corporis import Character
 from corporis.posing.head import face_mesh_rest
 from corporis.posing.landmarks import BODY, Landmarks
 from corporis.posing.refine import refine
-from corporis.posing.retarget import Retargeter
+from corporis.posing.retarget import Retargeter, adjust_head
 from corporis.posing.skeleton import Skeleton, bend, rot
 from test.markers import local_only
 
@@ -135,6 +135,29 @@ class TestRobustPose(unittest.TestCase):
         W, _ = self.retarget(L)
         self.assertNotIn("finger2-2.L", W)
         self.assertIn("finger2-2.R", W)
+
+    def test_head_correction_turns_the_head_by_hand(self):
+        W, _ = self.retarget(self.clean)
+
+        def head(W):
+            """the face's direction and the head's up, in the chest's frame"""
+            R = W["spine01"].double().numpy().T @ W["head"].double().numpy()
+            return R @ np.array([0.0, -1.0, 0.0]), R @ np.array([0.0, 0.0, 1.0])
+
+        face, up = head(W)
+        turned, _ = head(adjust_head(W, turn=20))
+        raised, _ = head(adjust_head(W, up=15))
+        _, tilted = head(adjust_head(W, tilt=15))
+        # x is the figure's left, so its right is -x
+        self.assertLess(turned[0], face[0] - 0.2)
+        self.assertGreater(raised[2], face[2] + 0.15)
+        self.assertLess(tilted[0], up[0] - 0.15)
+        # the head takes the whole correction, the neck a share of it
+        full = adjust_head(W, turn=20, up=10, tilt=-5)
+        rel = W["head"].double().numpy().T @ full["head"].double().numpy()
+        self.assertAlmostEqual(angle(np.eye(3), rel), 23.3, delta=0.2)
+        neck = W["neck01"].double().numpy().T @ full["neck01"].double().numpy()
+        self.assertAlmostEqual(angle(np.eye(3), neck), 0.3 * 23.3, delta=0.2)
 
     def test_refinement_resists_a_far_off_point(self):
         params = anny.poses.pose_parameters(self.model, "mh_hero", grounded=False)[

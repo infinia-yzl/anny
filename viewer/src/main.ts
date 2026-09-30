@@ -28,7 +28,7 @@ import { Hair } from './hair/gpu.ts';
 import { COLLIDERS, fitColliders } from './hair/colliders.ts';
 import { STRAND_VS } from './hair/glsl.ts';
 import { initUI } from './ui/index.ts';
-import { Retargeter, cardBones, quaternions, type RestBody, type V3 } from './pose_from_image.ts';
+import { Retargeter, adjustHead, cardBones, quaternions, type M3, type RestBody, type V3 } from './pose_from_image.ts';
 import { detect as detectPicture } from './picture.ts';
 import { silhouetteSvg } from './flat.ts';
 
@@ -1636,13 +1636,28 @@ function annyRest(): RestBody {
   }
   return { names: RIG.bones.map((b: any) => b.name), parents: RIG.parents, heads: RIG.heads.map((h: number[]) => toAnny(h[0], h[1], h[2])), vertices, top };
 }
+// the last picture's retarget and rotations, and the head's correction (degrees: turn, up, tilt)
+const PICTURE: { retarget: Retargeter | null; W: Map<string, M3> | null; head: { turn: number; up: number; tilt: number } } =
+  { retarget: null, W: null, head: { turn: 0, up: 0, tilt: 0 } };
 async function poseFromPicture(file: Blob) {
   if (!BODY.ready || !MOTION.nb) throw new Error('The figure is still loading.');
   const bitmap = await createImageBitmap(file);
   let found;
   try { found = await detectPicture(bitmap); } finally { bitmap.close(); }
   const retarget = new Retargeter(annyRest());
-  const q = quaternions(retarget.local(retarget.solve(found.landmarks)), ANNY_TO_PAGE);
+  PICTURE.retarget = retarget; PICTURE.W = retarget.solve(found.landmarks);
+  PICTURE.head = { turn: 0, up: 0, tilt: 0 };
+  writePicturePose();
+  const c = MOTION.byName.picture;
+  c.bounds = poseBounds(c);
+  setMotion('picture', { remember: false });
+  return { hands: found.hands.length };
+}
+// the picture's pose, with the head's correction, into the motion data as the pose "picture"
+function writePicturePose() {
+  const { retarget, W, head } = PICTURE;
+  if (!retarget || !W) return;
+  const q = quaternions(retarget.local(adjustHead(W, head.turn, head.up, head.tilt)), ANNY_TO_PAGE);
   const nb = MOTION.nb;
   let c = MOTION.byName.picture;
   if (!c) {
@@ -1653,9 +1668,14 @@ async function poseFromPicture(file: Blob) {
     MOTION.byName.picture = c;
   }
   for (let i = 0; i < nb * 4; i++) MOTION.Q[c.start * nb * 4 + i] = Math.round(q[i] * 32767);
-  c.bounds = poseBounds(c);
-  setMotion('picture', { remember: false });
-  return { hands: found.hands.length };
+}
+// correct the head of the picture's pose, and show that pose
+function setPictureHead(head: { turn: number; up: number; tilt: number }) {
+  if (!PICTURE.W) return;
+  PICTURE.head = { ...head };
+  writePicturePose();
+  if (MOTION.cur === MOTION.byName.picture) { MOTION.fade = 1; evalMotion(); HOOKS.motion(); }
+  else setMotion('picture', { instant: true, remember: false });
 }
 // the character card of the figure as it stands: the look's phenotype and face, and the pose shown
 function poseCard() {
@@ -2559,6 +2579,8 @@ const APP: any = {
   setSpeed: (s: number) => { MOTION.speed = s; rememberMotion(); HOOKS.motion(); },
   seek: (t: number) => { MOTION.t = t; evalMotion(); },
   poseFromPicture: (file: Blob) => poseFromPicture(file),
+  pictureHead: () => (PICTURE.W ? { ...PICTURE.head } : null),
+  setPictureHead,
   poseCard,
   poseSilhouette: () => poseSilhouette(),
   correctives: () => ({ ready: CORR.ready, on: CORR.on }),

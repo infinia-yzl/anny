@@ -67,6 +67,7 @@ def _pose(args) -> int:
         refine=not args.no_refine,
         hands=not args.no_hands,
         face=not args.no_face,
+        head=dict(turn=args.head_turn, up=args.head_up, tilt=args.head_tilt),
     )
     written = []
     if args.card:
@@ -196,6 +197,18 @@ def main(argv=None) -> int:
     )
     p.add_argument("--no-hands", action="store_true", help="leave the fingers at rest")
     p.add_argument("--no-face", action="store_true", help="leave the face neutral")
+    for name, what in (
+        ("turn", "toward the figure's right (negative: its left)"),
+        ("up", "to raise the face (negative: lower it)"),
+        ("tilt", "toward the figure's right shoulder (negative: the left)"),
+    ):
+        p.add_argument(
+            f"--head-{name}",
+            type=float,
+            default=0.0,
+            metavar="DEG",
+            help=f"turn the head further {what}, when the picture leaves it unclear",
+        )
 
     n = sub.add_parser("names", help="list parameter, pose and clip names")
     n.add_argument(

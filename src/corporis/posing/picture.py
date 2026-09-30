@@ -13,6 +13,7 @@ landmarks (:func:`corporis.posing.refine.refine`), and stores the result in the 
 from __future__ import annotations
 
 import dataclasses
+from typing import Mapping
 
 import numpy as np
 import torch
@@ -20,7 +21,7 @@ import torch
 from corporis.character import Character
 from corporis.posing.landmarks import Landmarks, detect
 from corporis.posing.refine import refine as refine_pose
-from corporis.posing.retarget import Retargeter
+from corporis.posing.retarget import Retargeter, adjust_head
 from corporis.posing.skeleton import Skeleton
 from corporis.render.flat import View
 
@@ -35,10 +36,13 @@ def pose_from_landmarks(
     model=None,
     refine: bool = True,
     face_threshold: float = 0.01,
+    head: Mapping[str, float] | None = None,
 ) -> Character:
     """``character`` (the default character when None) posed by ``landmarks``: the body and
     the hands in ``pose``, and the face's scores above ``face_threshold`` in
-    ``facial_actions``"""
+    ``facial_actions``. ``head`` turns the head further after the fit, in degrees: ``turn``
+    toward the figure's right, ``up`` and ``tilt`` toward the right shoulder
+    (:func:`corporis.posing.retarget.adjust_head`)."""
     character = character or Character(name="pose")
     model = model if model is not None else character.build_model()
     skeleton = Skeleton(model, character.phenotype)
@@ -46,6 +50,8 @@ def pose_from_landmarks(
     W, face = retargeter(landmarks)
     if refine:
         W = refine_pose(retargeter, W, landmarks)
+    if head:
+        W = adjust_head(W, **head)
     pose = Character.pose_from_parameters(model, skeleton.params(W))
     actions = dict(character.facial_actions)
     actions.update({n: round(v, 3) for n, v in face.items() if v >= face_threshold})
@@ -59,12 +65,14 @@ def pose_from_image(
     refine: bool = True,
     hands: bool = True,
     face: bool = True,
+    head: Mapping[str, float] | None = None,
 ) -> Character:
     """``character`` (the default character when None) posed as the most prominent figure in
     ``image`` (a path, a PIL image or an RGB array). ``hands`` and ``face`` read the hands and
-    the facial expression as well as the body. Needs the ``pose`` extra (MediaPipe)."""
+    the facial expression as well as the body, and ``head`` corrects the head's turn
+    (:func:`pose_from_landmarks`). Needs the ``pose`` extra (MediaPipe)."""
     landmarks = detect(image, hands=hands, face=face)
-    return pose_from_landmarks(landmarks, character, model, refine)
+    return pose_from_landmarks(landmarks, character, model, refine, head=head)
 
 
 def posed_mesh(character: Character, model=None) -> tuple[np.ndarray, np.ndarray]:
