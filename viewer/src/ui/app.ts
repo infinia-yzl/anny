@@ -72,6 +72,10 @@ export interface App {
   clips(): Clip[];
   motion(): { cur: Clip | null; t: number; playing: boolean; speed: number };
   setMotion(name: string): void;
+  // the pose from a picture (MediaPipe loads on first use), and the character card and silhouette of the pose shown
+  poseFromPicture(file: Blob): Promise<{ hands: number }>;
+  poseCard(): object;
+  poseSilhouette(): string;
   togglePlay(): void;
   setSpeed(s: number): void;
   seek(t: number): void;

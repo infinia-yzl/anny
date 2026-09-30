@@ -7,8 +7,8 @@
 // The Rig section (rig_ui.ts) sits between Pose and Scene.
 
 import type { App } from './app.ts';
-import { chip, foldGroup, searchField, sectionHead, segmented, slider, toggle } from './controls.ts';
-import { h, saveUi, uiState } from './dom.ts';
+import { chip, foldGroup, searchField, sectionHead, segmented, slider, textButton, toggle } from './controls.ts';
+import { download, h, saveUi, slug, uiState } from './dom.ts';
 import { icon } from './icons.ts';
 import { rigSection } from './rig_ui.ts';
 
@@ -71,11 +71,37 @@ export function stageSections(app: App) {
       empty.hidden = any;
     });
     const credit = h('p.note.credit');
+    // from a picture: MediaPipe reads the figure's pose, and the pose card and the silhouette take the pose shown
+    const file = h('input', { type: 'file', accept: 'image/*', hidden: true }) as HTMLInputElement;
+    const pictureMsg = h('p.inline-msg', { role: 'status' });
+    const say = (text: string, kind = '') => { pictureMsg.textContent = text; pictureMsg.dataset.kind = kind; };
+    const choosePicture = textButton('Choose a picture', () => file.click(), 'upload');
+    file.addEventListener('change', async () => {
+      const f = file.files && file.files[0]; file.value = '';
+      if (!f) return;
+      choosePicture.disabled = true;
+      say('Reading the pose. The first picture loads MediaPipe, about 20 MB.');
+      try {
+        const r = await app.poseFromPicture(f);
+        say(r.hands === 2 ? 'Posed from the picture, with both hands.' : r.hands === 1 ? 'Posed from the picture, with one hand. The other hand keeps its rest pose.' : 'Posed from the picture. No hands were clear enough, so they keep their rest pose.');
+      } catch (e) {
+        say(e instanceof Error && e.message.startsWith('No figure') ? 'No figure was found in this picture. Try one where the whole figure shows.' : 'The picture could not be read. MediaPipe loads from the internet the first time.', 'error');
+      } finally { choosePicture.disabled = false; }
+    });
+    const name = () => slug(app.look().name || 'character');
+    // a hosted page (the artifact build) cannot start a download
+    const saves = (window as any).MODEL_PARTS ? null : h('div.btn-row', {},
+      textButton('Pose card', () => download(`${name()}-pose.json`, new Blob([JSON.stringify(app.poseCard(), null, 2) + '\n'], { type: 'application/json' })), 'download'),
+      textButton('Silhouette', () => download(`${name()}-silhouette.svg`, new Blob([app.poseSilhouette()], { type: 'image/svg+xml' })), 'download'));
     const tissue = toggle('Soft tissue', (on) => app.setCorrectives(on), 'Corrective shapes keep the volume of the joints');
     const tissueNote = h('p.note', { text: 'Corrective shapes from a soft-tissue simulation keep the volume of the shoulders, elbows, hips and knees as they bend. Switch them off to compare with plain skinning.' });
     pose.append(head.el, h('h3.sub', { text: 'Animations' }), anim, timeline, h('div.row', {}, h('span.row-label', { text: 'Speed' }), speed.el),
       h('p.note', { text: 'The view sharpens while the figure holds still. Pause an animation to see any moment at full quality.' }),
       h('h3.sub', { text: 'Poses' }), search.el, wrap, empty, credit,
+      h('h3.sub', { text: 'From a picture' }),
+      h('p.note', { text: 'Pose the figure as the figure in a picture: the body, the head and the fingers. The picture stays in this browser.' }),
+      h('div.btn-row', {}, choosePicture), pictureMsg, file,
+      ...(saves ? [h('p.note', { text: 'Save the pose shown as a character card for corporis export, or as a silhouette from this view.' }), saves] : []),
       h('h3.sub', { text: 'Soft tissue' }), tissue.el, tissueNote);
     let openFor = '';
     syncs.push(() => {
