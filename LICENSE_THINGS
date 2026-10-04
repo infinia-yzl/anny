@@ -4,7 +4,7 @@ The code of this repository is licensed under the Apache License, Version 2.0 (s
 The data and tools below keep their own licences, which are stated by each source. The last
 entry is not part of the package and is not licensed for commercial use.
 
-Data bundled in the package (src/anny/data)
+Data bundled in the package (src/anny/data and src/opensculptboy/data)
 
   mpfb2/                     MakeHuman assets adapted from MPFB2 (https://github.com/makehumancommunity/mpfb2/).
                              CC0 1.0 Universal. Full text in src/anny/data/mpfb2/LICENSE.md.
@@ -29,10 +29,33 @@ Data bundled in the package (src/anny/data)
                                  Joo, J. FairFace: Face Attribute Dataset for Balanced Race, Gender, and Age.
                                  WACV 2021. Used for the benchmark of face proportions only.
                                MediaPipe Face Landmarker and canonical face model, Apache License, Version 2.0.
+  opensculptboy/data/vrm/    The VRM expression mixes (expressions.json). The work of this project.
+                             Apache License, Version 2.0.
 
 Tools and libraries used at authoring time only (not part of the package)
 
   MediaPipe models (face landmarks, image segmenter), Apache License, Version 2.0.
+
+Tools used by the tests only (not part of the package)
+
+  @pixiv/three-vrm (https://github.com/pixiv/three-vrm), MIT licence. A devDependency of
+  viewer/ for test/test_vrm_three.py.
+  gltf-validator (https://github.com/KhronosGroup/glTF-Validator), Apache License, Version 2.0.
+  A devDependency of viewer/ for test/test_vrm_three.py.
+  The VRM JSON schemas of vrm-c/vrm-specification (https://github.com/vrm-c/vrm-specification)
+  and the glTF 2.0 schemas of KhronosGroup/glTF. test/test_vrm_schema.py downloads them at
+  pinned commits into ANNY_CACHE_DIR. The VRM repository states no licence, so its schemas are
+  never copied into this repository or the package.
+
+VRM files exported by OpenSculptBoy
+
+  opensculptboy export writes VRM avatars (opensculptboy.export.vrm). Each file credits the
+  parts it is built from, in meta.thirdPartyLicenses (VRM 1.0) or meta.reference (VRM 0.x):
+  OpenSculptBoy and the Anny body model (Apache License, Version 2.0), the MakeHuman and MPFB2
+  assets and the Face Units (CC0 1.0), and ICT-FaceKit (MIT licence) for the detail face shapes.
+  The licence and permission fields of a file (who may use the avatar, and for what) are set by
+  the person who exports it, through --author and --meta; they start restrictive. VRM 0.x files
+  link to this file as their otherPermissionUrl.
 
 Not part of the package
 
