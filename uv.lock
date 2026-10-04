@@ -758,104 +758,6 @@ wheels = [
 ]
 
 [[package]]
-name = "corporis"
-source = { editable = "." }
-dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pillow" },
-    { name = "pyyaml" },
-    { name = "requests" },
-    { name = "roma" },
-    { name = "safetensors" },
-    { name = "torch" },
-    { name = "trimesh" },
-    { name = "warp-lang" },
-]
-
-[package.optional-dependencies]
-cu126 = [
-    { name = "torch" },
-]
-dev = [
-    { name = "build" },
-    { name = "ruff" },
-    { name = "twine" },
-]
-examples = [
-    { name = "gradio" },
-    { name = "ipykernel" },
-    { name = "jsonargparse" },
-    { name = "jupytext" },
-    { name = "matplotlib" },
-    { name = "notebook" },
-    { name = "py-soma-x" },
-    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-]
-faces = [
-    { name = "matplotlib" },
-    { name = "mediapipe" },
-    { name = "playwright" },
-    { name = "pyarrow" },
-    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-]
-pose = [
-    { name = "contourpy", version = "1.3.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "contourpy", version = "1.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "mediapipe" },
-]
-smpl = [
-    { name = "chumpy" },
-    { name = "smplx" },
-]
-viewer = [
-    { name = "embreex" },
-    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "tetgen" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "build", marker = "extra == 'dev'" },
-    { name = "chumpy", marker = "extra == 'smpl'" },
-    { name = "contourpy", marker = "extra == 'pose'" },
-    { name = "embreex", marker = "extra == 'viewer'" },
-    { name = "gradio", marker = "extra == 'examples'" },
-    { name = "ipykernel", marker = "extra == 'examples'" },
-    { name = "jsonargparse", marker = "extra == 'examples'" },
-    { name = "jupytext", marker = "extra == 'examples'" },
-    { name = "matplotlib", marker = "extra == 'examples'", specifier = ">=3.10.9" },
-    { name = "matplotlib", marker = "extra == 'faces'" },
-    { name = "mediapipe", marker = "extra == 'faces'" },
-    { name = "mediapipe", marker = "extra == 'pose'" },
-    { name = "notebook", marker = "extra == 'examples'" },
-    { name = "numpy" },
-    { name = "pillow" },
-    { name = "playwright", marker = "extra == 'faces'" },
-    { name = "py-soma-x", marker = "extra == 'examples'", specifier = "==0.1.0" },
-    { name = "pyarrow", marker = "extra == 'faces'" },
-    { name = "pyyaml" },
-    { name = "requests" },
-    { name = "roma", specifier = ">=1.5.7" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.14.5" },
-    { name = "safetensors" },
-    { name = "scipy", marker = "extra == 'examples'" },
-    { name = "scipy", marker = "extra == 'faces'" },
-    { name = "scipy", marker = "extra == 'viewer'" },
-    { name = "smplx", marker = "extra == 'smpl'" },
-    { name = "tetgen", marker = "extra == 'viewer'" },
-    { name = "torch", specifier = ">=2.0.0" },
-    { name = "torch", marker = "extra == 'cu126'", index = "https://download.pytorch.org/whl/cu126", conflict = { package = "corporis", extra = "cu126" } },
-    { name = "trimesh" },
-    { name = "twine", marker = "extra == 'dev'" },
-    { name = "warp-lang" },
-]
-provides-extras = ["examples", "smpl", "viewer", "faces", "pose", "dev", "cu126"]
-
-[[package]]
 name = "cryptography"
 version = "50.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2828,6 +2730,104 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/25/6d/31fee2843aef301252f6fa54bafe6bc2500fab80b152c5850ed3cbc2b7ef/opencv_contrib_python-5.0.0.93-cp37-abi3-win32.whl", hash = "sha256:dd8a80a04a8610c033757135b7846ad2027ba2d3bf9faf2f83f3dc6ed9e3814a", size = 44362046, upload-time = "2026-07-02T05:50:05.275Z" },
     { url = "https://files.pythonhosted.org/packages/09/29/6985260569ee3c7f6fcae252bc06e2a843e5b90eed665a2936bdd26fa283/opencv_contrib_python-5.0.0.93-cp37-abi3-win_amd64.whl", hash = "sha256:461622db95c964652d4d8fda171034961c3de270f78a6095aaad31050771774a", size = 53822579, upload-time = "2026-07-02T05:50:02.092Z" },
 ]
+
+[[package]]
+name = "opensculptboy"
+source = { editable = "." }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pillow" },
+    { name = "pyyaml" },
+    { name = "requests" },
+    { name = "roma" },
+    { name = "safetensors" },
+    { name = "torch" },
+    { name = "trimesh" },
+    { name = "warp-lang" },
+]
+
+[package.optional-dependencies]
+cu126 = [
+    { name = "torch" },
+]
+dev = [
+    { name = "build" },
+    { name = "ruff" },
+    { name = "twine" },
+]
+examples = [
+    { name = "gradio" },
+    { name = "ipykernel" },
+    { name = "jsonargparse" },
+    { name = "jupytext" },
+    { name = "matplotlib" },
+    { name = "notebook" },
+    { name = "py-soma-x" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+faces = [
+    { name = "matplotlib" },
+    { name = "mediapipe" },
+    { name = "playwright" },
+    { name = "pyarrow" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+pose = [
+    { name = "contourpy", version = "1.3.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "contourpy", version = "1.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "mediapipe" },
+]
+smpl = [
+    { name = "chumpy" },
+    { name = "smplx" },
+]
+viewer = [
+    { name = "embreex" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "tetgen" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "build", marker = "extra == 'dev'" },
+    { name = "chumpy", marker = "extra == 'smpl'" },
+    { name = "contourpy", marker = "extra == 'pose'" },
+    { name = "embreex", marker = "extra == 'viewer'" },
+    { name = "gradio", marker = "extra == 'examples'" },
+    { name = "ipykernel", marker = "extra == 'examples'" },
+    { name = "jsonargparse", marker = "extra == 'examples'" },
+    { name = "jupytext", marker = "extra == 'examples'" },
+    { name = "matplotlib", marker = "extra == 'examples'", specifier = ">=3.10.9" },
+    { name = "matplotlib", marker = "extra == 'faces'" },
+    { name = "mediapipe", marker = "extra == 'faces'" },
+    { name = "mediapipe", marker = "extra == 'pose'" },
+    { name = "notebook", marker = "extra == 'examples'" },
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "playwright", marker = "extra == 'faces'" },
+    { name = "py-soma-x", marker = "extra == 'examples'", specifier = "==0.1.0" },
+    { name = "pyarrow", marker = "extra == 'faces'" },
+    { name = "pyyaml" },
+    { name = "requests" },
+    { name = "roma", specifier = ">=1.5.7" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.14.5" },
+    { name = "safetensors" },
+    { name = "scipy", marker = "extra == 'examples'" },
+    { name = "scipy", marker = "extra == 'faces'" },
+    { name = "scipy", marker = "extra == 'viewer'" },
+    { name = "smplx", marker = "extra == 'smpl'" },
+    { name = "tetgen", marker = "extra == 'viewer'" },
+    { name = "torch", specifier = ">=2.0.0" },
+    { name = "torch", marker = "extra == 'cu126'", index = "https://download.pytorch.org/whl/cu126", conflict = { package = "opensculptboy", extra = "cu126" } },
+    { name = "trimesh" },
+    { name = "twine", marker = "extra == 'dev'" },
+    { name = "warp-lang" },
+]
+provides-extras = ["examples", "smpl", "viewer", "faces", "pose", "dev", "cu126"]
 
 [[package]]
 name = "orjson"

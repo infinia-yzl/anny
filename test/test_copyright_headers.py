@@ -11,9 +11,9 @@ HEADER_LINES = [
     "# Copyright (C) 2025 NAVER Corp.",
     "# Apache License, Version 2.0",
 ]
-# Files that the Corporis fork adds carry its own header, since NAVER did not write them.
-CORPORIS_HEADER_LINES = [
-    "# Corporis",
+# Files that the OpenSculptBoy fork adds carry its own header, since NAVER did not write them.
+OPENSCULPTBOY_HEADER_LINES = [
+    "# OpenSculptBoy",
     "# Apache License, Version 2.0",
 ]
 
@@ -43,7 +43,7 @@ def _has_header(text: str) -> bool:
             break
         if lines[i : i + 3] == HEADER_LINES:
             return True
-        if lines[i : i + 2] == CORPORIS_HEADER_LINES:
+        if lines[i : i + 2] == OPENSCULPTBOY_HEADER_LINES:
             return True
     return False
 

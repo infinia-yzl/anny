@@ -1,4 +1,4 @@
-// Corporis
+// OpenSculptBoy
 // Apache License, Version 2.0
 //
 // MediaPipe's pose and hand landmarkers in the page, for the pose from a picture. The page loads MediaPipe's code,

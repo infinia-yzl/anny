@@ -1,7 +1,7 @@
-// Corporis
+// OpenSculptBoy
 // Apache License, Version 2.0
 //
-// Parity of the page's retarget (src/pose_from_image.ts) with corporis.posing.retarget, run by
+// Parity of the page's retarget (src/pose_from_image.ts) with opensculptboy.posing.retarget, run by
 // test/test_viewer_pose_parity.py:
 //   node viewer/test/pose_parity.mjs <folder>
 // reads <folder>/input.json and writes <folder>/output.json.

@@ -1,7 +1,7 @@
-// Corporis
+// OpenSculptBoy
 // Apache License, Version 2.0
 //
-// The silhouette of the posed figure as an SVG path, the page's counterpart of corporis.render.flat.silhouette_svg:
+// The silhouette of the posed figure as an SVG path, the page's counterpart of opensculptboy.render.flat.silhouette_svg:
 // the projected mesh fills a mask, the mask's outline runs along the pixel edges, and Douglas-Peucker simplifies each
 // ring.
 
@@ -94,6 +94,6 @@ export function silhouetteSvg(px: Float64Array, quads: Uint32Array, w: number, h
   const rings = traceMask(mask, W, H).map((r) => simplify(r, 0.6 * supersample)).filter((r) => r.length > 2);
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">\n` +
-    `  <title>Corporis</title>\n  <desc>${esc(desc)}</desc>\n` +
+    `  <title>OpenSculptBoy</title>\n  <desc>${esc(desc)}</desc>\n` +
     `  <path fill="${fill}" fill-rule="evenodd" d="${svgPath(rings, 1 / supersample)}"/>\n</svg>\n`;
 }

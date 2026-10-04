@@ -1,4 +1,4 @@
-# Corporis
+# OpenSculptBoy
 # Apache License, Version 2.0
 """The flat pictures of a posed character: silhouette, outline and shaded picture."""
 
@@ -11,7 +11,7 @@ import torch
 
 import anny
 import anny.poses
-from corporis.render.flat import View, outline_svg, shaded_png, silhouette_svg
+from opensculptboy.render.flat import View, outline_svg, shaded_png, silhouette_svg
 
 SIZE = (300, 420)
 

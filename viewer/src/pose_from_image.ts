@@ -1,15 +1,15 @@
-// Corporis
+// OpenSculptBoy
 // Apache License, Version 2.0
 //
 // Pose from a picture, the page's side: MediaPipe's landmarks turned into a rotation for each of anny's bones. This
-// repeats corporis.posing.retarget (AnnyLandmarks and Retargeter) and corporis.posing.skeleton (the hinge) in anny's
+// repeats opensculptboy.posing.retarget (AnnyLandmarks and Retargeter) and opensculptboy.posing.skeleton (the hinge) in anny's
 // frame (x toward the figure's left, -y forward, z up, metres), and test/test_viewer_parity.py checks it against
-// Python. The refinement of corporis.posing.refine stays in Python. Matrices are 3x3, row-major.
+// Python. The refinement of opensculptboy.posing.refine stays in Python. Matrices are 3x3, row-major.
 
 export type V3 = [number, number, number];
 export type M3 = number[];
 
-// MediaPipe's names of the body points and the hand points (corporis.posing.landmarks)
+// MediaPipe's names of the body points and the hand points (opensculptboy.posing.landmarks)
 export const BODY = ['nose', 'left_eye_inner', 'left_eye', 'left_eye_outer', 'right_eye_inner', 'right_eye', 'right_eye_outer',
   'left_ear', 'right_ear', 'mouth_left', 'mouth_right', 'left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow',
   'left_wrist', 'right_wrist', 'left_pinky', 'right_pinky', 'left_index', 'right_index', 'left_thumb', 'right_thumb',
@@ -114,7 +114,7 @@ export function quaternion(R: M3): number[] {
 export interface RestBody { names: string[]; parents: number[]; heads: V3[]; vertices: ArrayLike<number>; top: ArrayLike<number> }
 type Source = ['joint', number] | ['vertex', number];
 
-// MediaPipe's landmarks on anny's mesh (corporis.posing.retarget.AnnyLandmarks): each is a joint or a vertex
+// MediaPipe's landmarks on anny's mesh (opensculptboy.posing.retarget.AnnyLandmarks): each is a joint or a vertex
 export function landmarkSources(rest: RestBody): { body: Source[]; hands: Record<string, Source[]> } {
   const V = rest.vertices, nv = V.length / 3, bone = (n: string) => rest.names.indexOf(n);
   const v = (i: number): V3 => [V[i * 3], V[i * 3 + 1], V[i * 3 + 2]];
@@ -168,7 +168,7 @@ export function landmarkSources(rest: RestBody): { body: Source[]; hands: Record
   return { body: BODY.map((b) => src[b]), hands };
 }
 
-// ---------------------------------------------------------------- bad landmarks (corporis.posing.head)
+// ---------------------------------------------------------------- bad landmarks (opensculptboy.posing.head)
 // Pictures made by AI models can draw anatomy that no body has, and any picture can be noisy: the head comes from a
 // robust fit of its points, and a hand with impossible proportions keeps its rest fingers.
 const HEAD_POINTS = 11, INLIER = 0.12, SCALE_RANGE = [0.5, 2.2], MIN_INLIERS = 4, MIN_SPREAD = 0.2;
@@ -228,7 +228,7 @@ function spread(points: V3[]): number {
   const ev = jacobi(C).values.map((v) => Math.sqrt(Math.max(v, 0))).sort((a, b) => b - a);
   return ev[1] / Math.max(ev[0], 1e-12);
 }
-// the rotation and scale that the most points agree with, refitted on those points (corporis.posing.head.robust_fit)
+// the rotation and scale that the most points agree with, refitted on those points (opensculptboy.posing.head.robust_fit)
 export function robustFit(rest: V3[], points: V3[], weights: number[]): HeadFit | null {
   const n = rest.length, usable = weights.map((w, i) => (w > 0 ? i : -1)).filter((i) => i >= 0);
   if (usable.length < MIN_INLIERS) return null;
@@ -280,7 +280,7 @@ function solve(A: number[][], b: number[]): number[] {
   return x;
 }
 // the head's rotation from the picture positions of its points alone (image: pixels, x right, y up) seen by a camera
-// along +y, with a scale and an offset (corporis.posing.head.robust_fit_image)
+// along +y, with a scale and an offset (opensculptboy.posing.head.robust_fit_image)
 export function robustFitImage(rest: V3[], image: [number, number][], weights: number[], chest: M3, pixelScale: number, steps = 40): HeadFit | null {
   const n = rest.length, W = weights.reduce((a, b) => a + b, 0);
   let c: V3 = [0, 0, 0];
@@ -327,7 +327,7 @@ export function robustFitImage(rest: V3[], image: [number, number][], weights: n
   const kept = dist.filter((_, i) => inliers[i]);
   return { rotation: R, scale: s, inliers, error: Math.sqrt(kept.reduce((a, d) => a + d * d, 0) / kept.length) };
 }
-// whether 21 hand points have a hand's proportions (corporis.posing.retarget.plausible_hand)
+// whether 21 hand points have a hand's proportions (opensculptboy.posing.retarget.plausible_hand)
 export function plausibleHand(h: V3[]): boolean {
   const at = (n: string) => h[HAND.indexOf(n)];
   const width = norm(sub(at('index_mcp'), at('pinky_mcp')));
@@ -382,7 +382,7 @@ export class Retargeter {
   private joint(n: string) { return this.rest.heads[this.rest.names.indexOf(n)]; }
 
   // the head's world rotation (null: the head follows the chest) and the source that gave it
-  // (corporis.posing.retarget.Retargeter.head_fit, without the face mesh, which the page does not read)
+  // (opensculptboy.posing.retarget.Retargeter.head_fit, without the face mesh, which the page does not read)
   headFit(L: Landmarks, chest: M3): { rotation: M3 | null; source: string; inliers: number[] } {
     const n = HEAD_POINTS, rest = this.restLandmarks.body.slice(0, n);
     const vis = L.visibility ? L.visibility.slice(0, n) : new Array(n).fill(1);
@@ -415,7 +415,7 @@ export class Retargeter {
   }
   private restDirection(a: string, b: string) { return unit(sub(this.joint(b), this.joint(a))); }
 
-  // two bones that meet at a hinge (corporis.posing.skeleton.Skeleton.hinge); returns the axis, posed and at rest
+  // two bones that meet at a hinge (opensculptboy.posing.skeleton.Skeleton.hinge); returns the axis, posed and at rest
   private hinge(W: Map<string, M3>, chain: string[], upper: V3, lower: V3, restAxis: V3, bent = 8): [V3, V3] {
     const [a, b, c] = chain, u0 = this.restDirection(a, b), l0 = this.restDirection(b, c);
     const u = unit(upper), low = unit(lower), sinBent = Math.sin(bent * Math.PI / 180);
@@ -495,7 +495,7 @@ export class Retargeter {
 
 // the neck's shares of a head adjustment, from the base of the neck to the head
 const HEAD_SHARES: [string, number][] = [['neck01', 0.3], ['neck02', 0.55], ['neck03', 0.75], ['head', 1.0]];
-// W with the head turned further in its own frame, in degrees (corporis.posing.retarget.adjust_head): turn toward the
+// W with the head turned further in its own frame, in degrees (opensculptboy.posing.retarget.adjust_head): turn toward the
 // figure's right, up to raise the face and tilt toward the right shoulder; the neck carries a growing share of it
 export function adjustHead(W: Map<string, M3>, turn = 0, up = 0, tilt = 0): Map<string, M3> {
   const A = mul(mul(axisAngle([0, 0, 1], -turn), axisAngle([1, 0, 0], -up)), axisAngle([0, 1, 0], -tilt));
@@ -519,7 +519,7 @@ export function rotation(q: ArrayLike<number>, o = 0): M3 {
     2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)];
 }
 
-// the "bones" of a character card's pose (corporis.Character.pose): quaternions (x, y, z, w) in anny's frame for the
+// the "bones" of a character card's pose (opensculptboy.Character.pose): quaternions (x, y, z, w) in anny's frame for the
 // bones that leave the rest pose, from quaternions q (bones x 4) in a frame that M turns anny's frame into
 export function cardBones(q: ArrayLike<number>, names: string[], M: M3 = I3): Record<string, number[]> {
   const Mt = transpose(M), out: Record<string, number[]> = {};

@@ -1621,7 +1621,7 @@ function tickMotion(dt: number) {
 // ------------------------------------------------------------------ pose from a picture
 // MediaPipe's landmarks of a picture (picture.ts) pose the figure through the retarget of pose_from_image.ts, which
 // works in anny's frame on the current body. The pose joins the library as one more pose, named "picture". The pose
-// card (corporis.Character) and the silhouette SVG take whatever pose the figure shows.
+// card (opensculptboy.Character) and the silhouette SVG take whatever pose the figure shows.
 const ANNY_TO_PAGE = [1, 0, 0, 0, 0, 1, 0, -1, 0];
 function annyRest(): RestBody {
   const fr = BODY.anny.meta.shape.frame, s = fr.scale, o = fr.offset;
@@ -1730,7 +1730,7 @@ function poseSilhouette(size = 512, margin = 24) {
   const k = (size - 2 * margin) / Math.max(x1 - x0, y1 - y0), ox = (size - k * (x1 - x0)) / 2, oy = (size - k * (y1 - y0)) / 2;
   for (let i = 0; i < n; i++) { xy[i * 2] = ox + k * (xy[i * 2] - x0); xy[i * 2 + 1] = oy + k * (xy[i * 2 + 1] - y0); }
   const label = MOTION.cur ? MOTION.cur.label : 'a pose';
-  return silhouetteSvg(xy, BODY.anny.quads, size, size, '#e2bca3', `${currentLook.name || 'A character'} in ${label}, from the Corporis viewer`);
+  return silhouetteSvg(xy, BODY.anny.quads, size, size, '#e2bca3', `${currentLook.name || 'A character'} in ${label}, from the OpenSculptBoy viewer`);
 }
 
 // the posed figure, for the navigation and the framings: the box of its joints, its face, the top of its head

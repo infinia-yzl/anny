@@ -118,7 +118,7 @@ export function stageSections(app: App) {
       h('h3.sub', { text: 'From a picture' }),
       h('p.note', { text: 'Pose the figure as the figure in a picture: the body, the head and the fingers. The picture stays in this browser.' }),
       h('div.btn-row', {}, choosePicture), pictureMsg, file, headBox,
-      ...(saves ? [h('p.note', { text: 'Save the pose shown as a character card for corporis export, or as a silhouette from this view.' }), saves] : []),
+      ...(saves ? [h('p.note', { text: 'Save the pose shown as a character card for opensculptboy export, or as a silhouette from this view.' }), saves] : []),
       h('h3.sub', { text: 'Soft tissue' }), tissue.el, tissueNote);
     let openFor = '';
     syncs.push(() => {

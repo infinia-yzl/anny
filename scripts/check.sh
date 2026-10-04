@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Corporis
+# OpenSculptBoy
 # Apache License, Version 2.0
 #
 # The checks of the project, in the tiers of AGENTS.md ("Testing"). GitHub Actions runs the
@@ -47,7 +47,7 @@ suite() {
   shift
   step "test suite (${mode})"
   if [[ "${mode}" == "ci" ]]; then
-    CORPORIS_CI=1 CORPORIS_SKIP_NONCOMMERCIAL=1 uv run "${EXTRAS[@]}" python -m unittest "$@"
+    OPENSCULPTBOY_CI=1 OPENSCULPTBOY_SKIP_NONCOMMERCIAL=1 uv run "${EXTRAS[@]}" python -m unittest "$@"
   else
     uv run "${EXTRAS[@]}" python -m unittest "$@"
   fi
@@ -63,18 +63,18 @@ package() {
   uv venv --python "${python}" "${work}/venv"
   # --python names the new environment; UV_PYTHON (set in CI) would otherwise pick another one.
   uv pip install --python "${work}/venv/bin/python" --torch-backend cpu "${work}"/dist/*.whl
-  step "package: import, version and the corporis command"
+  step "package: import, version and the opensculptboy command"
   (
     cd "${work}"
     ./venv/bin/python - <<'EOF'
 import importlib.metadata
-import anny, corporis
-wheel = importlib.metadata.version("corporis")
+import anny, opensculptboy
+wheel = importlib.metadata.version("opensculptboy")
 assert anny.__version__ == wheel, (anny.__version__, wheel)
-print("anny", anny.__version__, "| corporis", wheel)
+print("anny", anny.__version__, "| opensculptboy", wheel)
 EOF
-    ./venv/bin/corporis names poses | head -3
-    ./venv/bin/corporis export smoke.glb --animation walk
+    ./venv/bin/opensculptboy names poses | head -3
+    ./venv/bin/opensculptboy export smoke.glb --animation walk
     test -s smoke.glb
   )
 }

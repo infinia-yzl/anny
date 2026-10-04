@@ -1,7 +1,7 @@
-# Corporis
+# OpenSculptBoy
 # Apache License, Version 2.0
 """
-Parity of the page's retarget (viewer/src/pose_from_image.ts) with corporis.posing.retarget.
+Parity of the page's retarget (viewer/src/pose_from_image.ts) with opensculptboy.posing.retarget.
 Node runs the TypeScript module directly; the test skips when node is missing.
 """
 
@@ -17,8 +17,8 @@ import torch
 
 import anny
 import anny.poses
-from corporis.posing.retarget import Retargeter, adjust_head
-from corporis.posing.skeleton import Skeleton
+from opensculptboy.posing.retarget import Retargeter, adjust_head
+from opensculptboy.posing.skeleton import Skeleton
 from test.test_pose_robust import corrupted, long_finger, tipped_head
 from test.test_viewer_parity import node_available
 

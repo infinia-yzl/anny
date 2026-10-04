@@ -47,7 +47,7 @@ export function helpSheet() {
   const close = iconButton('close', 'Close', { key: 'Esc', tip: 'left' });
   const dlg = h('dialog.help', { 'aria-labelledby': 'help-title' },
     h('header.help-head', {}, h('h2', { id: 'help-title', text: 'Anny Viewer' }), close),
-    h('p.help-lead', { text: 'Corporis characters are humanoid 3D models built on the Anny body model. This page renders them live, with skin, eye and hair shading.' }),
+    h('p.help-lead', { text: 'OpenSculptBoy characters are humanoid 3D models built on the Anny body model. This page renders them live, with skin, eye and hair shading.' }),
     h('div.help-grid', {}, ...SHORTCUTS.map(([title, rows]) => h('section', {}, h('h3', { text: title }),
       h('dl', {}, ...rows.flatMap(([k, v]) => [h('dt', {}, ...k.split(', ').map((x, i) => [i ? ', ' : '', h('kbd', { text: x })]).flat()), h('dd', { text: v })]))))),
   ) as HTMLDialogElement;

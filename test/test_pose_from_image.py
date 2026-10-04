@@ -1,4 +1,4 @@
-# Corporis
+# OpenSculptBoy
 # Apache License, Version 2.0
 """The pose from a picture: the character card, the views and MediaPipe on a drawn pose."""
 
@@ -10,11 +10,11 @@ import numpy as np
 import torch
 
 import anny.poses
-from corporis import Character
-from corporis.posing.picture import flat_view, pose_from_landmarks, posed_mesh
-from corporis.posing.retarget import AnnyLandmarks
-from corporis.posing.skeleton import Skeleton, rot
-from corporis.render.flat import View, shaded_png
+from opensculptboy import Character
+from opensculptboy.posing.picture import flat_view, pose_from_landmarks, posed_mesh
+from opensculptboy.posing.retarget import AnnyLandmarks
+from opensculptboy.posing.skeleton import Skeleton, rot
+from opensculptboy.render.flat import View, shaded_png
 from test.markers import local_only
 
 LIMBS = [
@@ -103,7 +103,7 @@ def _turned(model, degrees):
 )
 class TestPoseFromImage(unittest.TestCase):
     def test_drawn_pose_comes_back(self):
-        from corporis import pose_from_image
+        from opensculptboy import pose_from_image
 
         character = Character(name="drawn")
         model = character.build_model()

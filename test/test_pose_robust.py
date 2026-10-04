@@ -1,4 +1,4 @@
-# Corporis
+# OpenSculptBoy
 # Apache License, Version 2.0
 """The pose from a picture on bad landmarks: misplaced and noisy head points, a head larger
 than Anny's (as drawn by AI models), a hand with impossible proportions and a far-off point."""
@@ -12,12 +12,12 @@ import numpy as np
 import torch
 
 import anny.poses
-from corporis import Character
-from corporis.posing.head import face_mesh_rest
-from corporis.posing.landmarks import BODY, Landmarks
-from corporis.posing.refine import refine
-from corporis.posing.retarget import Retargeter, adjust_head
-from corporis.posing.skeleton import Skeleton, bend, rot
+from opensculptboy import Character
+from opensculptboy.posing.head import face_mesh_rest
+from opensculptboy.posing.landmarks import BODY, Landmarks
+from opensculptboy.posing.refine import refine
+from opensculptboy.posing.retarget import Retargeter, adjust_head
+from opensculptboy.posing.skeleton import Skeleton, bend, rot
 from test.markers import local_only
 
 PIXELS = 500.0  # pixels per metre of the synthetic pictures
@@ -188,19 +188,19 @@ class TestRobustPose(unittest.TestCase):
         self.assertLess(error(L), clean + 0.01)
 
 
-@local_only("a picture outside the repository, named by CORPORIS_POSE_PICTURE")
+@local_only("a picture outside the repository, named by OPENSCULPTBOY_POSE_PICTURE")
 @unittest.skipUnless(
-    os.environ.get("CORPORIS_POSE_PICTURE"),
-    "set CORPORIS_POSE_PICTURE to the floating figure with the raised right hand",
+    os.environ.get("OPENSCULPTBOY_POSE_PICTURE"),
+    "set OPENSCULPTBOY_POSE_PICTURE to the floating figure with the raised right hand",
 )
 class TestReferencePicture(unittest.TestCase):
     """The logo's reference picture, an AI drawing on which MediaPipe misplaces the head
     points: the head must look up toward the raised right hand (the picture's left)."""
 
     def test_head_looks_up_at_the_raised_hand(self):
-        from corporis.posing.landmarks import detect
+        from opensculptboy.posing.landmarks import detect
 
-        L = detect(pathlib.Path(os.environ["CORPORIS_POSE_PICTURE"]))
+        L = detect(pathlib.Path(os.environ["OPENSCULPTBOY_POSE_PICTURE"]))
         retarget = Retargeter(Skeleton(Character().build_model()))
         choice = retarget.head_fit(L)
         self.assertIn(choice.source, ("face", "picture"))

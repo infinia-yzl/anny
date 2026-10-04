@@ -1,4 +1,4 @@
-# Corporis
+# OpenSculptBoy
 # Apache License, Version 2.0
 """The retarget from landmarks: poses of the library come back from their own landmarks."""
 
@@ -9,9 +9,9 @@ import torch
 
 import anny
 import anny.poses
-from corporis.posing.refine import refine
-from corporis.posing.retarget import Retargeter
-from corporis.posing.skeleton import Skeleton
+from opensculptboy.posing.refine import refine
+from opensculptboy.posing.retarget import Retargeter
+from opensculptboy.posing.skeleton import Skeleton
 
 JOINTS = [
     j + s
