@@ -4,8 +4,19 @@
 Checks of the glTF export (opensculptboy.export.gltf): a NumPy reader evaluates the file as a glTF
 engine does (node transforms, animation keyframes, skinning and morph targets) and compares the
 result with Anny's own forward pass.
+
+``TestGltfReference`` guards the default GLB (base model guarantee 2): it exports the characters
+of ``test/data/gltf_reference.json`` again and compares each file with the structure and the
+accessor statistics recorded there. The reference was recorded with the exporter of #8, before
+the exporter moved onto ``GltfDocument``. A deliberate change of the GLB output records it again
+by hand (``test/data/`` is ignored by git, so the file is added with ``git add -f``)::
+
+    uv run python -c "from test.test_gltf_export import write_reference; write_reference()"
 """
 
+import copy
+import functools
+import hashlib
 import json
 import pathlib
 import tempfile
@@ -16,7 +27,215 @@ import torch
 
 from opensculptboy import Character, export_glb, read_character
 from opensculptboy.export.gltf import C3, C4
-from test.gltf_reader import GLB, evaluate, node_world_matrices
+from test.gltf_reader import (
+    GLB,
+    evaluate,
+    evaluate_nodes,
+    node_world_matrices,
+    structure_errors,
+)
+
+REFERENCE = pathlib.Path(__file__).resolve().parent / "data" / "gltf_reference.json"
+# Floats of the structure and the statistics match within this relative and absolute tolerance.
+REFERENCE_RTOL, REFERENCE_ATOL = 1e-6, 1e-7
+
+
+@functools.lru_cache(maxsize=None)
+def float64_model(face_shapes: bool = False):
+    """The float64 model that the characters of this module share (no local changes)."""
+    return Character().build_model(face_shapes=face_shapes, dtype=torch.float64)
+
+
+def _strip(value, keys):
+    """``value`` without the given keys in any of its nested dicts."""
+    if isinstance(value, dict):
+        return {k: _strip(v, keys) for k, v in value.items() if k not in keys}
+    if isinstance(value, list):
+        return [_strip(v, keys) for v in value]
+    return value
+
+
+def _rounded(value, digits: int = 10):
+    """``value`` with every float rounded to ``digits`` significant digits, to keep the file small."""
+    if isinstance(value, dict):
+        return {k: _rounded(v, digits) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_rounded(v, digits) for v in value]
+    if isinstance(value, float):
+        return float(f"{value:.{digits}g}")
+    return value
+
+
+def gltf_fingerprint(path) -> dict:
+    """
+    The structure of a GLB file and the statistics of its accessors.
+
+    The structure is the glTF JSON without the extras of the scenes (the character card), the
+    buffer views and every ``bufferView`` and ``byteOffset`` (the layout of the binary chunk),
+    with the anny version of the generator replaced by ``<anny>``. It keeps the count, type and
+    component type of each accessor, and the ``min`` and ``max`` of the accessors that carry
+    them. The statistics give, for each accessor, the sum of each component (``sum``), and
+    when it holds more than one element the sum of squares of its values (``sumsq``) and, unless
+    the structure has them, their minimum and maximum (``min``, ``max``); for a sparse accessor,
+    a hash of its index list (``indices``).
+    """
+    import anny
+
+    glb = GLB(path)
+    structure = _strip(copy.deepcopy(glb.json), ("bufferView", "byteOffset"))
+    for scene in structure["scenes"]:
+        scene.pop("extras", None)
+    structure.pop("bufferViews", None)
+    asset = structure["asset"]
+    asset["generator"] = asset["generator"].replace(anny.__version__, "<anny>")
+    stats = []
+    for i, accessor in enumerate(glb.json["accessors"]):
+        values = glb.accessor(i).astype(np.float64).reshape(accessor["count"], -1)
+        entry = {"sum": values.sum(axis=0).tolist()}
+        if accessor["count"] > 1:
+            entry["sumsq"] = float(np.square(values).sum())
+            if "min" not in accessor:
+                entry.update(min=float(values.min()), max=float(values.max()))
+        indices = glb.sparse_indices(i)
+        if indices is not None:
+            raw = np.asarray(indices, dtype="<i8").tobytes()
+            entry["indices"] = hashlib.sha256(raw).hexdigest()[:16]
+        stats.append(entry)
+    return {"structure": structure, "accessors": stats}
+
+
+def reference_cases() -> dict[str, dict]:
+    """
+    The characters and export options of the reference files: the default character, the test
+    character of ``TestGltfExport`` with the walk at 4 and 8 influences, and a character with
+    face shapes, facial actions and its own pose, exported with face-shape and facial-action
+    targets, unground and in another colour.
+    """
+    import anny.poses
+
+    test = Character(
+        name="test",
+        phenotype={"age": 0.3, "weight": 0.7},
+        facial_actions={"jawOpen": 0.25, "mouthSmileLeft": 0.5},
+    )
+    face_model = float64_model(face_shapes=True)
+    params = anny.poses.pose_parameters(face_model, "mh_thinking", grounded=False)
+    posed = Character(
+        name="posed face",
+        phenotype={"age": 0.2, "height": 0.6, "muscle": 0.7},
+        face_shapes={"head-fat": 0.3, "head-oval": 0.6, "nose-scale-horiz": 0.4},
+        facial_actions={"jawOpen": 0.4, "eyeBlinkLeft": 0.2, "browInnerUp": 0.5},
+        pose=Character.pose_from_parameters(face_model, params["pose_parameters"][:1]),
+    )
+    return {
+        "default": dict(character=Character(), face_shapes=False, options={}),
+        "walk_4": dict(
+            character=test,
+            face_shapes=False,
+            options=dict(animations=["walk"], max_influences=4),
+        ),
+        "walk_8": dict(
+            character=test,
+            face_shapes=False,
+            options=dict(animations=["walk"], max_influences=8),
+        ),
+        "posed_face": dict(
+            character=posed,
+            face_shapes=True,
+            options=dict(
+                morph_targets=[
+                    "head-scale-vert",
+                    "head-fat",
+                    "head-oval",
+                    "jawOpen",
+                    "eyeBlinkLeft",
+                ],
+                ground=False,
+                base_color=[0.5, 0.6, 0.7, 1.0],
+            ),
+        ),
+    }
+
+
+def export_case(case: dict, directory, name: str) -> pathlib.Path:
+    """Export one reference case with a float64 model; returns the path of the file."""
+    path = pathlib.Path(directory) / f"{name}.glb"
+    export_glb(
+        path, case["character"], float64_model(case["face_shapes"]), **case["options"]
+    )
+    return path
+
+
+def write_reference(path=REFERENCE) -> None:
+    """
+    Record the reference files with the current exporter (run by hand). Floats keep 7
+    significant digits, and a top-level part of the structure that equals the same part of an
+    earlier file is stored as ``{"$same_as": <that file>}``, so that the file stays small.
+    """
+    files, structures = {}, {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, case in reference_cases().items():
+            found = _rounded(gltf_fingerprint(export_case(case, tmp, name)), 7)
+            structure = {}
+            for key, value in found["structure"].items():
+                same = [
+                    other
+                    for other, earlier in structures.items()
+                    if earlier.get(key) == value
+                ]
+                large = len(json.dumps(value)) > 100
+                structure[key] = {"$same_as": same[0]} if same and large else value
+            structures[name] = found["structure"]
+            files[name] = dict(
+                character=case["character"].to_dict(),
+                face_shapes=case["face_shapes"],
+                options=json_value(case["options"]),
+                structure=structure,
+                accessors=found["accessors"],
+            )
+    reference = {
+        "format": "opensculptboy/gltf-reference@1",
+        "description": "GLB exports of fixed characters, recorded by write_reference in "
+        "test/test_gltf_export.py: the glTF JSON without the scene extras and the binary "
+        "layout, and the statistics of each accessor (see gltf_fingerprint). "
+        "TestGltfReference exports the characters again and compares.",
+        "files": files,
+    }
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(reference, separators=(",", ":")) + "\n")
+
+
+def recorded_structure(files: dict, name: str) -> dict:
+    """The structure of a recorded file, with its ``$same_as`` parts resolved."""
+    structure = {}
+    for key, value in files[name]["structure"].items():
+        while isinstance(value, dict) and "$same_as" in value:
+            value = files[value["$same_as"]]["structure"][key]
+        structure[key] = value
+    return structure
+
+
+def assert_close(test: unittest.TestCase, found, expected, where: str = "") -> None:
+    """Equal JSON values, with floats within the reference tolerance."""
+    if isinstance(expected, dict):
+        test.assertIsInstance(found, dict, where)
+        test.assertEqual(sorted(found), sorted(expected), where)
+        for key in expected:
+            assert_close(test, found[key], expected[key], f"{where}/{key}")
+    elif isinstance(expected, list):
+        test.assertIsInstance(found, list, where)
+        test.assertEqual(len(found), len(expected), where)
+        for i, (f, e) in enumerate(zip(found, expected)):
+            assert_close(test, f, e, f"{where}/{i}")
+    elif isinstance(expected, bool) or not isinstance(expected, (int, float)):
+        test.assertEqual(found, expected, where)
+    elif isinstance(expected, int) and isinstance(found, int):
+        test.assertEqual(found, expected, where)
+    else:
+        test.assertNotIsInstance(found, (bool, str, list, dict, type(None)), where)
+        tolerance = REFERENCE_ATOL + REFERENCE_RTOL * abs(expected)
+        test.assertLessEqual(abs(found - expected), tolerance, where)
 
 
 class TestGltfExport(unittest.TestCase):
@@ -28,7 +247,7 @@ class TestGltfExport(unittest.TestCase):
             phenotype={"age": 0.3, "weight": 0.7},
             facial_actions={"jawOpen": 0.25, "mouthSmileLeft": 0.5},
         )
-        cls.model = cls.character.build_model(dtype=torch.float64)
+        cls.model = float64_model()
         cls.paths = {}
         cls.summaries = {}
         for k in (4, 8):
@@ -142,6 +361,23 @@ class TestGltfExport(unittest.TestCase):
         self.assertEqual(weights["jawOpen"], 0.25)
         self.assertEqual(weights["mouthSmileLeft"], 0.5)
         self.assertEqual(read_character(self.paths[4]), self.character)
+        # a VRM file is a GLB container too
+        vrm = pathlib.Path(self.tmp.name) / "test.vrm"
+        vrm.write_bytes(self.paths[4].read_bytes())
+        self.assertEqual(read_character(vrm), self.character)
+
+    def test_files_are_sound(self):
+        for k in (4, 8):
+            glb = GLB(self.paths[k])
+            self.assertEqual(structure_errors(glb), [], f"{k} influences")
+            self.assertEqual(self.summaries[k]["bytes"], self.paths[k].stat().st_size)
+            # one skinned mesh node with one primitive: evaluate_nodes agrees with evaluate
+            nodes = evaluate_nodes(glb, "walk", 3)
+            self.assertEqual(len(nodes), 1)
+            (primitive,) = next(iter(nodes.values()))
+            vertices, source = evaluate(glb, "walk", 3)
+            np.testing.assert_array_equal(primitive.positions, vertices)
+            np.testing.assert_array_equal(primitive.anny_vertex, source)
 
     def test_skin_weights_sum_to_one(self):
         for k in (4, 8):
@@ -191,7 +427,7 @@ class TestGltfExport(unittest.TestCase):
 class TestGltfFaceShapes(unittest.TestCase):
     def test_face_shape_targets_are_exact_and_sparse(self):
         character = Character(phenotype={"age": 0.2}, face_shapes={})
-        model = character.build_model(face_shapes=True, dtype=torch.float64)
+        model = float64_model(face_shapes=True)
         names = [
             n for n in model.face_shape_labels if model.face_shape_ranges[n][0] < 0
         ][:3]
@@ -229,7 +465,7 @@ class TestGltfCharacterPose(unittest.TestCase):
     def test_pose_card_round_trip(self):
         import anny.poses
 
-        model = Character().build_model(dtype=torch.float64)
+        model = float64_model()
         params = anny.poses.pose_parameters(model, "mh_cheer")["pose_parameters"][:1]
         pose = Character.pose_from_parameters(model, params)
         again = Character(pose=pose).pose_parameters(model)
@@ -244,7 +480,7 @@ class TestGltfCharacterPose(unittest.TestCase):
         import anny.poses
 
         character = Character(name="posed", phenotype={"height": 0.7})
-        model = character.build_model(dtype=torch.float64)
+        model = float64_model()
         params = anny.poses.pose_parameters(model, "mh_thinking", grounded=False)
         character.pose = Character.pose_from_parameters(
             model, params["pose_parameters"][:1]
@@ -275,6 +511,34 @@ class TestGltfCharacterPose(unittest.TestCase):
         error = np.linalg.norm(vertices - expected, axis=1)
         self.assertLess(error.max(), 0.05)
         self.assertLess(np.median(error), 1e-3)
+
+
+class TestGltfReference(unittest.TestCase):
+    """Base model guarantee 2: the default GLB keeps the output of the exporter of #8."""
+
+    def test_exports_match_the_reference(self):
+        files = json.loads(REFERENCE.read_text())["files"]
+        self.assertEqual(sorted(files), ["default", "posed_face", "walk_4", "walk_8"])
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, recorded in files.items():
+                with self.subTest(name):
+                    case = dict(
+                        character=Character.from_dict(recorded["character"]),
+                        face_shapes=recorded["face_shapes"],
+                        options=recorded["options"],
+                    )
+                    found = gltf_fingerprint(export_case(case, tmp, name))
+                    expected = recorded_structure(files, name)
+                    assert_close(self, found["structure"], expected, name)
+                    assert_close(self, found["accessors"], recorded["accessors"], name)
+
+    def test_reference_is_small(self):
+        self.assertLess(REFERENCE.stat().st_size, 200_000)
+
+
+def json_value(value):
+    """``value`` as JSON reads it back (tuples become lists)."""
+    return json.loads(json.dumps(value))
 
 
 if __name__ == "__main__":
