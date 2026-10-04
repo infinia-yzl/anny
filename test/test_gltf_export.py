@@ -9,9 +9,9 @@ result with Anny's own forward pass.
 of ``test/data/gltf_reference.json`` again and compares each file with the structure and the
 accessor statistics recorded there. The reference was recorded with the exporter of #8, before
 the exporter moved onto ``GltfDocument``. A deliberate change of the GLB output records it again
-by hand::
+by hand (``test/data/`` is ignored by git, so the file is added with ``git add -f``)::
 
-    python -c "from test.test_gltf_export import write_reference; write_reference()"
+    uv run python -c "from test.test_gltf_export import write_reference; write_reference()"
 """
 
 import copy
@@ -27,7 +27,13 @@ import torch
 
 from opensculptboy import Character, export_glb, read_character
 from opensculptboy.export.gltf import C3, C4
-from test.gltf_reader import GLB, evaluate, node_world_matrices
+from test.gltf_reader import (
+    GLB,
+    evaluate,
+    evaluate_nodes,
+    node_world_matrices,
+    structure_errors,
+)
 
 REFERENCE = pathlib.Path(__file__).resolve().parent / "data" / "gltf_reference.json"
 # Floats of the structure and the statistics match within this relative and absolute tolerance.
@@ -355,6 +361,23 @@ class TestGltfExport(unittest.TestCase):
         self.assertEqual(weights["jawOpen"], 0.25)
         self.assertEqual(weights["mouthSmileLeft"], 0.5)
         self.assertEqual(read_character(self.paths[4]), self.character)
+        # a VRM file is a GLB container too
+        vrm = pathlib.Path(self.tmp.name) / "test.vrm"
+        vrm.write_bytes(self.paths[4].read_bytes())
+        self.assertEqual(read_character(vrm), self.character)
+
+    def test_files_are_sound(self):
+        for k in (4, 8):
+            glb = GLB(self.paths[k])
+            self.assertEqual(structure_errors(glb), [], f"{k} influences")
+            self.assertEqual(self.summaries[k]["bytes"], self.paths[k].stat().st_size)
+            # one skinned mesh node with one primitive: evaluate_nodes agrees with evaluate
+            nodes = evaluate_nodes(glb, "walk", 3)
+            self.assertEqual(len(nodes), 1)
+            (primitive,) = next(iter(nodes.values()))
+            vertices, source = evaluate(glb, "walk", 3)
+            np.testing.assert_array_equal(primitive.positions, vertices)
+            np.testing.assert_array_equal(primitive.anny_vertex, source)
 
     def test_skin_weights_sum_to_one(self):
         for k in (4, 8):

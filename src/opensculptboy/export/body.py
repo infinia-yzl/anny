@@ -3,11 +3,15 @@
 """
 The body mesh of an Anny character as glTF vertex data, shared by the GLB and VRM exporters.
 
-:func:`build_body` takes welded vertices in Anny's frame (the rest pose, or the T-pose bind
-mesh of a VRM file) and the offsets of the morph targets, and returns the glTF vertex data in
-an output frame: the vertices split at UV seams, normals from the welded mesh, UVs, the
-strongest skin weights and the target offsets. :func:`body_primitive` writes that data into a
-:class:`~opensculptboy.export.document.GltfDocument`.
+:func:`morph_target_rows` lays out the parameter rows of a character and its morph targets,
+and :func:`rest_rows` evaluates the rest mesh of each row. :func:`build_body` takes welded
+vertices in Anny's frame (the rest pose, or the T-pose bind mesh of a VRM file) and the offsets
+of the morph targets, and returns the glTF vertex data in an output frame: the vertices split
+at UV seams, normals from the welded mesh, UVs, the strongest skin weights and the target
+offsets. :func:`body_primitive` writes that data into a
+:class:`~opensculptboy.export.document.GltfDocument`; several primitives of one body (parts
+with their own materials) can share its vertex accessors and targets
+(:func:`body_attributes`, :func:`body_targets`).
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import dataclasses
 from typing import Sequence
 
 import numpy as np
+import torch
 
 from opensculptboy.export.document import (
     ARRAY_BUFFER,
@@ -50,6 +55,105 @@ class BodyMesh:
     dropped_weight: (
         float  # the largest skin weight left out by the truncation to k bones
     )
+
+
+@dataclasses.dataclass
+class MorphTarget:
+    """
+    A morph target of a character's body: one parameter of the model set to ``value``.
+
+    ``block`` is ``"facial_action"`` or ``"face_shape"`` and ``index`` the parameter's index in
+    ``model.facial_action_labels`` or ``model.face_shape_labels``; ``weight`` is the default
+    weight of the target in the file, from the character's own value.
+    """
+
+    name: str
+    block: str
+    index: int
+    value: float
+    weight: float
+
+
+def morph_target_rows(
+    model, character, names: Sequence[str]
+) -> tuple[list[MorphTarget], np.ndarray, np.ndarray]:
+    """
+    The morph targets of a character for parameter names, and the parameter rows that give
+    them: row 0 is the base mesh, row r + 1 the mesh of target r.
+
+    A facial action gives one target (weight 1 is the value 1). A face shape gives
+    ``<name>.pos`` at +1 and, when the shape runs below 0, ``<name>.neg`` at -1. The character's
+    values become the default weights; the parameters that are targets are 0 in the base row,
+    and the other face shapes and facial actions of the character stay baked into every row.
+
+    Returns:
+        The targets, the facial action rows (R + 1, A) and the face-shape rows (R + 1, F),
+        both float64.
+    """
+    facial_labels = list(model.facial_action_labels)
+    face_labels = list(model.face_shape_labels)
+    base_actions = np.array(
+        [character.facial_actions.get(n, 0.0) for n in facial_labels], dtype=np.float64
+    )
+    base_faces = np.array(
+        [character.face_shapes.get(n, 0.0) for n in face_labels], dtype=np.float64
+    )
+    targets: list[MorphTarget] = []
+    for name in names:
+        if name in facial_labels:
+            i = facial_labels.index(name)
+            targets.append(
+                MorphTarget(name, "facial_action", i, 1.0, float(base_actions[i]))
+            )
+            base_actions[i] = 0.0
+        else:
+            i = face_labels.index(name)
+            value = float(base_faces[i])
+            targets.append(
+                MorphTarget(f"{name}.pos", "face_shape", i, 1.0, max(value, 0.0))
+            )
+            if model.face_shape_ranges[name][0] < 0:
+                targets.append(
+                    MorphTarget(f"{name}.neg", "face_shape", i, -1.0, max(-value, 0.0))
+                )
+            base_faces[i] = 0.0
+    facial_rows = np.repeat(base_actions[None], len(targets) + 1, axis=0)
+    face_rows = np.repeat(base_faces[None], len(targets) + 1, axis=0)
+    for row, target in enumerate(targets, start=1):
+        rows = facial_rows if target.block == "facial_action" else face_rows
+        rows[row, target.index] = target.value
+    return targets, facial_rows, face_rows
+
+
+def rest_rows(
+    model, character, facial_rows, face_rows, chunk: int = 32
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Rest vertices (B, V, 3) and the rest bone poses (J, 4, 4) of the first row, both float64,
+    for rows of facial action values (B, A) and face-shape values (B, F), with the phenotype
+    and the local changes of the character. The rows run through the model ``chunk`` at a time.
+    """
+    dtype = model.template_vertices.dtype
+    facial_rows = torch.as_tensor(np.asarray(facial_rows), dtype=dtype)
+    face_rows = torch.as_tensor(np.asarray(face_rows), dtype=dtype)
+    kwargs = dict(
+        phenotype_kwargs=dict(character.phenotype) or None,
+        local_changes_kwargs=dict(character.local_changes) or None,
+    )
+    vertices, bone_poses = [], None
+    with torch.no_grad():
+        for start in range(0, len(facial_rows), chunk):
+            stop = start + chunk
+            call = dict(kwargs)
+            if model.facial_action_labels:
+                call["facial_actions"] = facial_rows[start:stop]
+            if model.face_shape_labels:
+                call["face_shape_kwargs"] = face_rows[start:stop]
+            out = model(**call)
+            vertices.append(out["rest_vertices"].double().cpu())
+            if bone_poses is None:
+                bone_poses = out["rest_bone_poses"][0].double().cpu().numpy()
+    return torch.cat(vertices).numpy(), bone_poses
 
 
 def triangulated_faces(model) -> tuple[np.ndarray, np.ndarray | None]:
@@ -114,6 +218,7 @@ def build_body(
     max_influences: int = 4,
     vertex_bone_weights: np.ndarray | None = None,
     vertex_bone_indices: np.ndarray | None = None,
+    normals: np.ndarray | None = None,
 ) -> BodyMesh:
     """
     glTF vertex data of a body mesh.
@@ -127,14 +232,23 @@ def build_body(
         max_influences: bones kept per vertex.
         vertex_bone_weights, vertex_bone_indices: (V, K) skin weights to use in place of the
             model's own (for example the VRM weights with the eyelids moved to the head).
+        normals: (V, 3) welded unit normals in Anny's frame, in place of the normals of
+            ``vertices`` (for example toon face normals).
 
     Returns:
-        A :class:`BodyMesh`; normals come from the welded ``vertices``.
+        A :class:`BodyMesh`; normals come from the welded ``vertices`` unless given.
     """
     vertices = np.asarray(vertices, dtype=np.float64)
     frame = np.asarray(frame, dtype=np.float64)
     triangles, uv_triangles = triangulated_faces(model)
-    normals = vertex_normals(vertices, triangles)
+    if normals is None:
+        normals = vertex_normals(vertices, triangles)
+    else:
+        normals = np.asarray(normals, dtype=np.float64)
+        if normals.shape != vertices.shape:
+            raise ValueError(
+                f"normals of shape {normals.shape} for vertices of shape {vertices.shape}."
+            )
     triangle_faces = np.arange(len(triangles))
     if uv_triangles is not None and model.texture_coordinates is not None:
         pairs = np.stack([triangles.reshape(-1), uv_triangles.reshape(-1)], axis=1)
@@ -169,23 +283,18 @@ def build_body(
     )
 
 
-def body_primitive(
+def body_attributes(
     doc: GltfDocument,
     body: BodyMesh,
-    material: int,
     translation: np.ndarray | None = None,
-    triangles: np.ndarray | None = None,
     anny_vertex: bool = True,
-    sparse_targets: bool = True,
     joint_type=None,
 ) -> dict:
     """
-    Write a body mesh into a document and return its glTF primitive.
-
-    ``translation`` is added to the positions (for example the ground and centring offset of a
-    VRM file). ``triangles`` selects a subset of ``body.triangles`` (a part of the body); all
-    vertices stay in every primitive, so the morph targets are the same in each. The
-    ``_ANNY_VERTEX`` attribute maps each vertex to its Anny vertex.
+    Write the vertex data of a body mesh into a document and return the attributes of its
+    primitives: positions (plus ``translation``), normals, UVs, ``_ANNY_VERTEX`` and the
+    JOINTS/WEIGHTS sets, 4 bones each. ``joint_type`` is the integer type of the joint indices;
+    by default uint8 when they all fit, uint16 otherwise.
     """
     positions = body.positions + (0.0 if translation is None else translation)
     attributes = {
@@ -212,19 +321,55 @@ def body_primitive(
             body.joints[:, cols].astype(joint_type), ARRAY_BUFFER
         )
         attributes[f"WEIGHTS_{s}"] = doc.accessor(body.weights[:, cols], ARRAY_BUFFER)
+    return attributes
+
+
+def body_targets(
+    doc: GltfDocument, body: BodyMesh, sparse_targets: bool = True
+) -> list[dict]:
+    """Write the morph targets of a body mesh into a document; returns the primitive targets."""
+    return [
+        {"POSITION": doc.morph_accessor(t, sparse=sparse_targets)} for t in body.targets
+    ]
+
+
+def body_primitive(
+    doc: GltfDocument,
+    body: BodyMesh,
+    material: int,
+    translation: np.ndarray | None = None,
+    triangles: np.ndarray | None = None,
+    anny_vertex: bool = True,
+    sparse_targets: bool = True,
+    joint_type=None,
+    attributes: dict | None = None,
+    targets: list[dict] | None = None,
+) -> dict:
+    """
+    Write a body mesh into a document and return its glTF primitive.
+
+    ``translation`` is added to the positions (for example the ground and centring offset of a
+    VRM file). ``triangles`` selects a subset of ``body.triangles`` (a part of the body); all
+    vertices stay in every primitive, so the morph targets are the same in each. The
+    ``_ANNY_VERTEX`` attribute maps each vertex to its Anny vertex. ``attributes`` and
+    ``targets`` from an earlier primitive of the same body (its ``"attributes"`` and
+    ``"targets"``, or :func:`body_attributes` and :func:`body_targets`) are shared instead of
+    written again; the accessors are written in the order attributes, indices, targets.
+    """
+    if attributes is None:
+        attributes = body_attributes(doc, body, translation, anny_vertex, joint_type)
     tris = body.triangles if triangles is None else triangles
     index_type = np.uint16 if len(body.source) < 65536 else np.uint32
     primitive = {
-        "attributes": attributes,
+        "attributes": dict(attributes),
         "indices": doc.accessor(
-            tris.reshape(-1).astype(index_type), ELEMENT_ARRAY_BUFFER
+            np.asarray(tris).reshape(-1).astype(index_type), ELEMENT_ARRAY_BUFFER
         ),
         "material": material,
         "mode": 4,
     }
-    if body.targets:
-        primitive["targets"] = [
-            {"POSITION": doc.morph_accessor(t, sparse=sparse_targets)}
-            for t in body.targets
-        ]
+    if targets is None and body.targets:
+        targets = body_targets(doc, body, sparse_targets)
+    if targets:
+        primitive["targets"] = [dict(t) for t in targets]
     return primitive
