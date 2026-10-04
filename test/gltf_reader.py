@@ -59,6 +59,20 @@ class GLB:
             array[idx] = self._view(s["values"]["bufferView"], dtype, s["count"], width)
         return array
 
+    def sparse_indices(self, index):
+        """The indices of the sparse elements of an accessor, or None for a dense accessor."""
+        a = self.json["accessors"][index]
+        if "sparse" not in a:
+            return None
+        s = a["sparse"]
+        return self._view(
+            s["indices"]["bufferView"],
+            _DTYPES[s["indices"]["componentType"]],
+            s["count"],
+            1,
+            s["indices"].get("byteOffset", 0),
+        ).copy()
+
 
 def trs_matrix(translation, rotation):
     x, y, z, w = rotation
