@@ -1,0 +1,11 @@
+{
+  "format": "opensculptboy/vrm-expressions@1",
+  "description": "VRM expressions as mixes of Anny's ARKit facial actions. presets: the VRM 1.0 presets (vrm0Preset names the VRM 0.x preset; null makes a 0.x custom group named vrm0Name). perfectSync: one custom per facial action, named in PascalCase. customs: further customs (versions limits them to some VRM versions). CONTRACT (PR 1): placeholder values; stream A3 sets the mixes, the override flags and the VSeeFace visemes.",
+  "presets": {
+    "aa": {"mix": {"jawOpen": 0.6}, "vrm0Preset": "a"},
+    "blink": {"mix": {"eyeBlinkLeft": 1.0, "eyeBlinkRight": 1.0}, "vrm0Preset": "blink"},
+    "neutral": {"mix": {}, "vrm0Preset": "neutral"}
+  },
+  "perfectSync": true,
+  "customs": {}
+}
