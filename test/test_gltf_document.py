@@ -352,6 +352,14 @@ class TestGltfDocument(unittest.TestCase):
         targets = self.glb.json["meshes"][0]["primitives"][0]["targets"]
         self.assertIn("sparse", accessors[targets[0]["POSITION"]])
         self.assertNotIn("sparse", accessors[targets[1]["POSITION"]])
+        # A dense target is a vertex attribute, so its buffer view names ARRAY_BUFFER; the
+        # buffer views of sparse indices and values must not name a target.
+        views = self.glb.json["bufferViews"]
+        dense_view = views[accessors[targets[1]["POSITION"]]["bufferView"]]
+        self.assertEqual(dense_view.get("target"), ARRAY_BUFFER)
+        sparse_part = accessors[targets[0]["POSITION"]]["sparse"]
+        for part in ("indices", "values"):
+            self.assertNotIn("target", views[sparse_part[part]["bufferView"]], part)
         positions, sparse, dense = self.inputs["a"]
         for weights in ([1.0, 0.0], [0.0, 1.0], [0.5, -0.7]):
             nodes = evaluate_nodes(self.glb, weights={"a": weights})
