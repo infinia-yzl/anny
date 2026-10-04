@@ -1,11 +1,80 @@
 {
   "format": "opensculptboy/vrm-expressions@1",
-  "description": "VRM expressions as mixes of Anny's ARKit facial actions. presets: the VRM 1.0 presets (vrm0Preset names the VRM 0.x preset; null makes a 0.x custom group named vrm0Name). perfectSync: one custom per facial action, named in PascalCase. customs: further customs (versions limits them to some VRM versions). CONTRACT (PR 1): placeholder values; stream A3 sets the mixes, the override flags and the VSeeFace visemes.",
+  "description": "VRM expressions as mixes of Anny's ARKit facial actions (model.facial_action_labels; Left and Right are the avatar's own sides). presets: the VRM 1.0 presets, in the order of the file; vrm0Preset names the VRM 0.x preset (null makes a 0.x custom group), and vrm0Name names the 0.x group. perfectSync: one custom per facial action, named in PascalCase (EyeBlinkLeft). customs: further customs; versions limits them to some VRM versions (the VSeeFace visemes exist in VRM 0.x files only). Every weight lies in [0, 1]. test/test_vrm_expressions.py measures the visemes on the mesh.",
   "presets": {
-    "aa": {"mix": {"jawOpen": 0.6}, "vrm0Preset": "a"},
-    "blink": {"mix": {"eyeBlinkLeft": 1.0, "eyeBlinkRight": 1.0}, "vrm0Preset": "blink"},
-    "neutral": {"mix": {}, "vrm0Preset": "neutral"}
+    "aa": {
+      "mix": {"jawOpen": 0.42, "mouthLowerDownLeft": 0.3, "mouthLowerDownRight": 0.3, "mouthUpperUpLeft": 0.15, "mouthUpperUpRight": 0.15, "mouthStretchLeft": 0.1, "mouthStretchRight": 0.1},
+      "vrm0Preset": "a", "vrm0Name": "A"
+    },
+    "ih": {
+      "mix": {"jawOpen": 0.06, "mouthStretchLeft": 0.35, "mouthStretchRight": 0.35, "mouthSmileLeft": 0.2, "mouthSmileRight": 0.2, "mouthUpperUpLeft": 0.15, "mouthUpperUpRight": 0.15},
+      "vrm0Preset": "i", "vrm0Name": "I"
+    },
+    "ou": {
+      "mix": {"jawOpen": 0.08, "mouthPucker": 0.8, "mouthFunnel": 0.25},
+      "vrm0Preset": "u", "vrm0Name": "U"
+    },
+    "ee": {
+      "mix": {"jawOpen": 0.12, "mouthStretchLeft": 0.3, "mouthStretchRight": 0.3, "mouthSmileLeft": 0.1, "mouthSmileRight": 0.1, "mouthLowerDownLeft": 0.3, "mouthLowerDownRight": 0.3, "mouthUpperUpLeft": 0.2, "mouthUpperUpRight": 0.2},
+      "vrm0Preset": "e", "vrm0Name": "E"
+    },
+    "oh": {
+      "mix": {"jawOpen": 0.25, "mouthFunnel": 0.6, "mouthPucker": 0.3},
+      "vrm0Preset": "o", "vrm0Name": "O"
+    },
+    "blink": {
+      "mix": {"eyeBlinkLeft": 1.0, "eyeBlinkRight": 1.0},
+      "vrm0Preset": "blink", "vrm0Name": "Blink"
+    },
+    "blinkLeft": {
+      "mix": {"eyeBlinkLeft": 1.0},
+      "vrm0Preset": "blink_l", "vrm0Name": "Blink_L"
+    },
+    "blinkRight": {
+      "mix": {"eyeBlinkRight": 1.0},
+      "vrm0Preset": "blink_r", "vrm0Name": "Blink_R"
+    },
+    "happy": {
+      "mix": {"mouthSmileLeft": 0.8, "mouthSmileRight": 0.8, "cheekSquintLeft": 0.6, "cheekSquintRight": 0.6, "eyeSquintLeft": 0.4, "eyeSquintRight": 0.4, "browInnerUp": 0.15},
+      "isBinary": false, "overrideBlink": "blend", "overrideMouth": "blend",
+      "vrm0Preset": "joy", "vrm0Name": "Joy"
+    },
+    "angry": {
+      "mix": {"browDownLeft": 0.9, "browDownRight": 0.9, "eyeSquintLeft": 0.35, "eyeSquintRight": 0.35, "noseSneerLeft": 0.4, "noseSneerRight": 0.4, "mouthFrownLeft": 0.5, "mouthFrownRight": 0.5, "mouthPressLeft": 0.2, "mouthPressRight": 0.2},
+      "isBinary": false, "overrideBlink": "blend", "overrideMouth": "blend",
+      "vrm0Preset": "angry", "vrm0Name": "Angry"
+    },
+    "sad": {
+      "mix": {"browInnerUp": 0.9, "browDownLeft": 0.25, "browDownRight": 0.25, "eyeBlinkLeft": 0.15, "eyeBlinkRight": 0.15, "mouthFrownLeft": 0.6, "mouthFrownRight": 0.6, "mouthShrugLower": 0.35},
+      "isBinary": false, "overrideBlink": "blend", "overrideMouth": "blend",
+      "vrm0Preset": "sorrow", "vrm0Name": "Sorrow"
+    },
+    "relaxed": {
+      "mix": {"mouthSmileLeft": 0.4, "mouthSmileRight": 0.4, "cheekSquintLeft": 0.2, "cheekSquintRight": 0.2, "eyeBlinkLeft": 0.35, "eyeBlinkRight": 0.35, "browInnerUp": 0.1},
+      "isBinary": false, "overrideBlink": "blend", "overrideMouth": "blend",
+      "vrm0Preset": "fun", "vrm0Name": "Fun"
+    },
+    "surprised": {
+      "mix": {"eyeWideLeft": 0.9, "eyeWideRight": 0.9, "browInnerUp": 0.8, "browOuterUpLeft": 0.8, "browOuterUpRight": 0.8, "jawOpen": 0.3, "mouthFunnel": 0.2},
+      "isBinary": false, "overrideBlink": "blend", "overrideMouth": "blend",
+      "vrm0Preset": null, "vrm0Name": "Surprised"
+    },
+    "neutral": {
+      "mix": {},
+      "vrm0Preset": "neutral", "vrm0Name": "Neutral"
+    }
   },
   "perfectSync": true,
-  "customs": {}
+  "customs": {
+    "SIL": {"mix": {}, "versions": ["0.x"]},
+    "PP": {"mix": {"mouthPressLeft": 0.25, "mouthPressRight": 0.25, "mouthRollUpper": 0.3, "mouthRollLower": 0.35, "mouthPucker": 0.15}, "versions": ["0.x"]},
+    "FF": {"mix": {"jawOpen": 0.06, "mouthRollLower": 0.6, "mouthUpperUpLeft": 0.25, "mouthUpperUpRight": 0.25}, "versions": ["0.x"]},
+    "TH": {"mix": {"jawOpen": 0.15, "tongueOut": 0.35, "mouthUpperUpLeft": 0.1, "mouthUpperUpRight": 0.1}, "versions": ["0.x"]},
+    "DD": {"mix": {"jawOpen": 0.18, "mouthLowerDownLeft": 0.15, "mouthLowerDownRight": 0.15, "mouthStretchLeft": 0.15, "mouthStretchRight": 0.15}, "versions": ["0.x"]},
+    "KK": {"mix": {"jawOpen": 0.25, "mouthStretchLeft": 0.25, "mouthStretchRight": 0.25, "mouthLowerDownLeft": 0.1, "mouthLowerDownRight": 0.1}, "versions": ["0.x"]},
+    "CH": {"mix": {"jawOpen": 0.15, "mouthFunnel": 0.5, "mouthPucker": 0.15, "mouthShrugUpper": 0.2}, "versions": ["0.x"]},
+    "SS": {"mix": {"jawOpen": 0.05, "mouthStretchLeft": 0.4, "mouthStretchRight": 0.4, "mouthUpperUpLeft": 0.15, "mouthUpperUpRight": 0.15, "mouthLowerDownLeft": 0.15, "mouthLowerDownRight": 0.15}, "versions": ["0.x"]},
+    "NN": {"mix": {"jawOpen": 0.14, "mouthStretchLeft": 0.1, "mouthStretchRight": 0.1, "mouthLowerDownLeft": 0.1, "mouthLowerDownRight": 0.1}, "versions": ["0.x"]},
+    "RR": {"mix": {"jawOpen": 0.12, "mouthFunnel": 0.3, "mouthPucker": 0.35}, "versions": ["0.x"]}
+  }
 }
