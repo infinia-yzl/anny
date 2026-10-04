@@ -22,8 +22,11 @@ The T-pose, in Anny's frame (s = +1 for the left side, -1 for the right side):
   wrist toward the middle finger, within the palm (see :func:`palm`); the metacarpals turn
   with the hand, so the knuckles keep their spread;
 - the bones of the four fingers point along (s, 0, 0) with the nails up; the thumb points
-  along (s, -1, 0) / sqrt(2), level and at 45 degrees toward the front; the last bone of each
-  finger turns with the bone before it, as Unity's humanoid does for the distal bones;
+  along (s, -1, 0) / sqrt(2), level and at 45 degrees toward the front, and turns about its
+  own axis so that its nail faces (-s, -1, 0) / sqrt(2), level and a quarter turn from the
+  nails of the other fingers (VRM T-pose definition 1.8: for the left thumb, between -X and +Z
+  of the file); the last bone of each finger turns with the bone before it, as Unity's
+  humanoid does for the distal bones;
 - the legs turn as one piece about the hip, so that the line from the hip (upperleg01) to the
   ankle (foot) is vertical, unless ``keep_leg_spread``;
 - the feet turn about the vertical axis so that they point along -Y (the line from the ankle
@@ -33,18 +36,25 @@ The T-pose, in Anny's frame (s = +1 for the left side, -1 for the right side):
 The arm and finger bones first turn with their parent and then by the smallest change that
 aims them at their target, so the joints straighten without twisting; the finger bones make
 that change about the normal of the palm and then about the knuckle axis (yaw, then pitch), so
-that their nails stay perpendicular to the palm. The hand, the legs and the feet take the turns
-above from their rest pose. The positions then follow from forward kinematics with absolute
-orientations (``pose_parameterization="world-orient"``): the head of every child bone is
-T_p B_p^-1 h, where p is its parent and h its rest head.
+that their nails stay perpendicular to the palm. The phalanges of the thumb then roll about
+its axis until its nail, carried from the rest pose (:func:`thumb_nail`), faces its target,
+and its metacarpal rolls by half as much (:data:`THUMB_METACARPAL_ROLL`). The hand, the legs
+and the feet take the turns above from their rest pose. The positions then follow from
+forward kinematics with absolute orientations (``pose_parameterization="world-orient"``): the
+head of every child bone is T_p B_p^-1 h, where p is its parent and h its rest head.
 
 The library's ``t_pose`` is not used: it turns the clavicles, and its ``local-ref`` identity is
 the reference pose of another body shape.
 
 :func:`rebind` offers two bind meshes. The forward bind is Anny's own skinning into the
 T-pose; the inverse bind is the mesh that the file's 4 weights skin back onto Anny's rest pose
-exactly. :func:`bind_error` measures both against Anny's posed meshes: on the arms-down poses
-(``relaxed``, ``walk``) the inverse bind lands about twice as close.
+exactly, positions and normals alike. :func:`bind_error` measures both against Anny's posed
+meshes with the file's weights: on the arms-down poses (``relaxed``, ``walk``) the inverse
+bind lands closer, by a third at the 99th percentile of the vertex distances (8.5 mm against
+12.5 mm on the default body) and by a third to a half at the largest distance (12 to 14 mm
+against 21 mm), and the 99th percentile of its normal angles stays at 14 to 18 degrees,
+against 30 for the forward bind. :func:`humanoid_error` measures the file as a VRM app
+drives it: the humanoid bones alone, and the roll constraints of the twist bones.
 """
 
 from __future__ import annotations
@@ -80,6 +90,19 @@ KEPT_BONES = (
 # metacarpal k - 1.
 FINGERS = (2, 3, 4, 5)
 _UP = np.array([0.0, 0.0, 1.0])
+# The normal of the left thumb nail in the rest frame of the last thumb bone (finger1-3.L):
+# the area-weighted normal of the faces that MakeHuman's fingernail mask
+# (``anny/data/mpfb2/textures/mpfb_fingernails.jpg``) covers and that finger1-3.L carries with
+# a weight above 0.9, measured on Anny's default body. The rest frames of the anny rig follow
+# the vertices of each bone (``"cached"`` orientations), so this direction holds the roll of
+# the nail on every body within about a degree. The right thumb mirrors it (x -> -x).
+THUMB_NAIL = (-0.177, 0.022, -0.984)
+# The share of the thumb's roll that its metacarpal (finger1-1) takes; the phalanges take the
+# whole roll. The roll (about 34 degrees on the default body) then spreads over the two joints
+# at the base of the thumb, and the web between the thumb and the index finger keeps more of
+# its shape in the inverse bind mesh: its most squeezed triangles keep 0.59 of their rest area
+# (1st percentile; 0.45 when the metacarpal takes the whole roll, 0.52 without any roll).
+THUMB_METACARPAL_ROLL = 0.5
 
 
 @dataclasses.dataclass(frozen=True)
@@ -92,10 +115,39 @@ class _Rule:
     target: tuple[float, float, float]
 
 
+def _sign(side: str) -> float:
+    return 1.0 if side == "L" else -1.0
+
+
+def thumb_direction(side: str) -> np.ndarray:
+    """The thumb's direction in the T-pose: (s, -1, 0) / sqrt(2), level and 45 degrees ahead."""
+    return np.array([_sign(side), -1.0, 0.0]) / np.sqrt(2.0)
+
+
+def thumb_nail_target(side: str) -> np.ndarray:
+    """
+    The direction that the thumb nail faces in the T-pose: (-s, -1, 0) / sqrt(2), level and
+    perpendicular to the thumb (in the file, between -X and +Z for the left thumb).
+    """
+    return np.array([-_sign(side), -1.0, 0.0]) / np.sqrt(2.0)
+
+
+def thumb_nail(rest_bone_poses: np.ndarray, labels, side: str) -> np.ndarray:
+    """
+    The unit normal of the thumb nail of one side at rest (Anny's frame), for rest bone poses
+    (J, 4, 4): :data:`THUMB_NAIL` in the rest frame of finger1-3.
+    """
+    local = np.array(THUMB_NAIL) * [_sign(side), 1.0, 1.0]
+    rotation = np.asarray(rest_bone_poses, dtype=np.float64)[
+        list(labels).index(f"finger1-3.{side}"), :3, :3
+    ]
+    return _unit(rotation @ local)
+
+
 def _side_rules(side: str, keep_leg_spread: bool) -> dict[str, _Rule]:
-    s = 1.0 if side == "L" else -1.0
+    s = _sign(side)
     along = (s, 0.0, 0.0)
-    thumb = (s / np.sqrt(2.0), -1.0 / np.sqrt(2.0), 0.0)
+    thumb = tuple(thumb_direction(side))
 
     def b(name):
         return f"{name}.{side}"
@@ -124,6 +176,12 @@ def _side_rules(side: str, keep_leg_spread: bool) -> dict[str, _Rule]:
 
 def _unit(v: np.ndarray) -> np.ndarray:
     return v / np.linalg.norm(v)
+
+
+def _unit_rows(v: np.ndarray) -> np.ndarray:
+    """The rows of ``v`` (..., 3) at unit length; zero rows stay zero."""
+    length = np.linalg.norm(v, axis=-1, keepdims=True)
+    return v / np.where(length > 0, length, 1.0)
 
 
 def _axis_angle(axis: np.ndarray, angle: float) -> np.ndarray:
@@ -229,7 +287,39 @@ def t_pose_turns(
             elif rule.kind == "hand":
                 along, back = palm(heads, labels, labels[j][-1])
                 turns[j] = _frame(target, _UP) @ _frame(along, back).T
+    for side in ("L", "R"):
+        # The thumb lies along its axis through the head of finger1-1, so a roll of its bones
+        # about that axis keeps its direction and its joints.
+        axis = thumb_direction(side)
+        angle = _thumb_roll(turns[index[f"finger1-3.{side}"]], B, labels, side)
+        top = index[f"finger1-1.{side}"]
+        for j in _subtree(parents, top):
+            share = THUMB_METACARPAL_ROLL if j == top else 1.0
+            turns[j] = _axis_angle(axis, share * angle) @ turns[j]
     return turns
+
+
+def _thumb_roll(turn: np.ndarray, rest_bone_poses, labels, side: str) -> float:
+    """
+    The roll about the thumb axis (radians) that brings the nail of the last thumb bone,
+    turned by ``turn`` from its rest pose, onto :func:`thumb_nail_target`. The last bone keeps
+    its rest bend, so the nail tilts a little toward the tip; the roll aligns the part of the
+    nail normal across the axis.
+    """
+    axis = thumb_direction(side)
+    nail = turn @ thumb_nail(rest_bone_poses, labels, side)
+    nail = nail - (nail @ axis) * axis
+    target = thumb_nail_target(side)
+    return float(np.arctan2(axis @ np.cross(nail, target), nail @ target))
+
+
+def _subtree(parents: list[int], top: int) -> list[int]:
+    """The bone ``top`` and all the bones below it."""
+    inside = {top}
+    for j in _parents_first(parents):
+        if parents[j] in inside:
+            inside.add(j)
+    return sorted(inside)
 
 
 def _frame(x: np.ndarray, z: np.ndarray) -> np.ndarray:
@@ -334,9 +424,11 @@ def skin(
 
 @dataclasses.dataclass
 class Rebind:
-    """A bind mesh, its morph targets and its skeleton, in Anny's frame."""
+    """A bind mesh, its normals, its morph targets and its skeleton, in Anny's frame."""
 
     vertices: np.ndarray  # (V, 3) float64: the bind mesh v'
+    # (V, 3) float64, unit length: the normals of the file (see :func:`rebind`)
+    normals: np.ndarray
     targets: np.ndarray  # (R, V, 3) float64: the target offsets, delta' = A_i delta
     bone_poses: np.ndarray  # (J, 4, 4) float64: T_j, the world matrices of the T-pose
     rest_bone_poses: np.ndarray  # (J, 4, 4) float64: B_j
@@ -393,6 +485,16 @@ def rebind(
       L_i^-1 delta_i, with L_i the linear part of N_i. Posed back to Anny's rest pose, the
       file then shows Anny's rest mesh and targets exactly.
 
+    The normals of the forward bind are those of the welded bind mesh. Those of the inverse
+    bind are Anny's rest normals n_i (area-weighted, of the welded rest mesh) carried by the
+    map of the targets, n'_i = L_i^-1 n_i, normalised. Engines skin a normal with the same
+    blended matrix as its vertex and normalise it, so the file posed at Anny's rest pose
+    shows Anny's rest normals exactly, and the arms-down poses stay close to them. Skinned
+    that way, the normals of the welded bind mesh would land more than 45 degrees off at the
+    armpits, the sides of the chest, the clavicles and the fingers, even at Anny's rest pose,
+    and the inverse transpose of the map (the geometric normal of the bind mesh, L_i^T n_i)
+    up to 5 degrees off.
+
     Args:
         model: the Anny model (its full skin weights drive the forward bind).
         rest_vertices: (V, 3) rest vertices of row 0 (no facial action, no face-shape target).
@@ -411,13 +513,18 @@ def rebind(
         A :class:`Rebind`; ``joint_positions`` are the heads of T_j, and ``offset`` centres
         the bind mesh (see :func:`centring_offset`).
     """
-    from opensculptboy.export.body import top_skin_weights
+    from opensculptboy.export.body import (
+        top_skin_weights,
+        triangulated_faces,
+        vertex_normals,
+    )
 
     if method not in ("forward", "inverse"):
         raise ValueError(f"Unknown bind method {method!r}.")
     B = np.asarray(rest_bone_poses, dtype=np.float64)
     vertices = np.asarray(rest_vertices, dtype=np.float64)
     offsets = np.asarray(target_offsets, dtype=np.float64).reshape(-1, *vertices.shape)
+    triangles, _ = triangulated_faces(model)
     T = (
         vrm_t_pose(model, torch.from_numpy(B), keep_leg_spread=keep_leg_spread)
         .cpu()
@@ -430,6 +537,7 @@ def rebind(
         M = blend(weights, indices, X)
         linear = M[:, :3, :3]
         bind = (linear @ vertices[..., None])[..., 0] + M[:, :3, 3]
+        normals = vertex_normals(bind, triangles)
     else:
         weights, indices, _ = top_skin_weights(
             file_weights, file_indices, max_influences
@@ -437,10 +545,14 @@ def rebind(
         N = blend(weights, indices, rigid_inverse(X))
         linear = np.linalg.inv(N[:, :3, :3])
         bind = (linear @ (vertices - N[:, :3, 3])[..., None])[..., 0]
+        normals = _unit_rows(
+            (linear @ vertex_normals(vertices, triangles)[..., None])[..., 0]
+        )
     targets = np.einsum("vab,rvb->rva", linear, offsets)
     joints = T[:, :3, 3].copy()
     return Rebind(
         vertices=bind,
+        normals=normals,
         targets=targets,
         bone_poses=T,
         rest_bone_poses=B.copy(),
@@ -475,6 +587,138 @@ def file_pose(
     return o @ G @ M @ rigid_inverse(rebind.bone_poses) @ G.T @ joints
 
 
+def default_twist(version: str) -> str:
+    """The twist mode of a VRM version by default: "constraint" for 1.0, "merge" for 0.x."""
+    from opensculptboy.export import vrm_tables
+
+    if version not in vrm_tables.VERSIONS:
+        raise ValueError(f"Unknown VRM version {version!r}; use '1.0' or '0.x'.")
+    return "constraint" if version == "1.0" else "merge"
+
+
+def _strongest_four(weights: np.ndarray, indices: np.ndarray):
+    """The strongest 4 bones of each vertex, renormalised in float64, as the VRM writer has."""
+    from opensculptboy.export.body import top_skin_weights
+
+    weights, indices, _ = top_skin_weights(weights, indices, 4)
+    weights = weights.astype(np.float64)
+    return weights / weights.sum(axis=1, keepdims=True), indices
+
+
+def file_skin_weights(
+    model, version: str = "1.0", twist: str | None = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    The (V, 4) skin weights (float64, rows summing to 1) and bone indices of a VRM file: those
+    of ``vrm_tables.vrm_skin_weights`` for ``twist`` (by default :func:`default_twist` of
+    ``version``), truncated to the strongest 4 bones and renormalised, as the VRM writer does.
+    """
+    from opensculptboy.export import vrm_tables
+
+    twist = twist or default_twist(version)
+    return _strongest_four(*vrm_tables.vrm_skin_weights(model, twist))
+
+
+def skin_normals(
+    normals: np.ndarray,
+    weights: np.ndarray,
+    indices: np.ndarray,
+    transforms: np.ndarray,
+) -> np.ndarray:
+    """
+    Normals (V, 3) skinned as engines skin them: the linear part of the blended matrix
+    sum_k w_ik M[j_ik] applied to n_i, then normalised. ``transforms`` are bone transforms
+    (J, 4, 4) or (F, J, 4, 4); returns (V, 3) or (F, V, 3).
+    """
+    normals = np.asarray(normals, dtype=np.float64)
+    transforms = np.asarray(transforms, dtype=np.float64)
+    weights = np.asarray(weights, dtype=np.float64)
+    indices = np.asarray(indices)
+    linear = np.zeros(transforms.shape[:-3] + (len(normals), 3, 3))
+    for k in range(weights.shape[1]):
+        linear += weights[:, k, None, None] * transforms[..., indices[:, k], :3, :3]
+    return _unit_rows((linear @ normals[..., None])[..., 0])
+
+
+def angles(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """The angles between the directions of two arrays (..., 3), in degrees."""
+    a, b = np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)
+    return np.degrees(
+        np.arctan2(np.linalg.norm(np.cross(a, b), axis=-1), np.sum(a * b, axis=-1))
+    )
+
+
+def roll_constraint(rotation: np.ndarray, axis, weight: float) -> np.ndarray:
+    """
+    The local rotation that a roll constraint (``VRMC_node_constraint``) gives its node, for
+    the local rotation (3, 3) of its source, with the rest rotations of both at the identity
+    (the normalised nodes of a VRM 1.0 file): the turn of the source about the unit ``axis``
+    left after the smallest turn that brings ``axis`` back onto itself, taken at ``weight``
+    (a slerp from the identity).
+    """
+    axis = _unit(np.asarray(axis, dtype=np.float64))
+    rotation = np.asarray(rotation, dtype=np.float64)
+    twist = _rotation_between(axis, rotation @ axis).T @ rotation
+    skew = twist - twist.T
+    sin = axis @ np.array([skew[2, 1], skew[0, 2], skew[1, 0]]) / 2.0
+    cos = (np.trace(twist) - 1.0) / 2.0
+    return _axis_angle(axis, weight * float(np.arctan2(sin, cos)))
+
+
+def _body_kwargs(phenotype_kwargs, local_changes_kwargs, face_shape_kwargs) -> dict:
+    kwargs = dict(
+        phenotype_kwargs=phenotype_kwargs, local_changes_kwargs=local_changes_kwargs
+    )
+    if face_shape_kwargs:
+        kwargs["face_shape_kwargs"] = face_shape_kwargs
+    return kwargs
+
+
+def _rest_body(model, kwargs: dict) -> tuple[np.ndarray, np.ndarray]:
+    """The rest vertices (V, 3) and rest bone poses (J, 4, 4) of a body, float64."""
+    with torch.no_grad():
+        rest = model(pose_parameterization="local-ref", **kwargs)
+    return (
+        rest["rest_vertices"][0].double().cpu().numpy(),
+        rest["rest_bone_poses"][0].double().cpu().numpy(),
+    )
+
+
+def _posed_body(
+    model, name: str, kwargs: dict, frame_step: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Anny's posed vertices (F, V, 3) and world bone poses (F, J, 4, 4) for an ``anny.poses``
+    entry (``local-ref``, without grounding), every ``frame_step``-th frame of a clip.
+    """
+    import anny.poses
+
+    params = anny.poses.pose_parameters(
+        model,
+        name,
+        phenotype_kwargs=kwargs.get("phenotype_kwargs"),
+        local_changes_kwargs=kwargs.get("local_changes_kwargs"),
+        grounded=False,
+    )["pose_parameters"][::frame_step]
+    with torch.no_grad():
+        posed = model(
+            pose_parameters=params, pose_parameterization="local-ref", **kwargs
+        )
+    return (
+        posed["vertices"].double().cpu().numpy(),
+        posed["bone_poses"].double().cpu().numpy(),
+    )
+
+
+def _distance_report(moved: np.ndarray, reference: np.ndarray) -> dict[str, float]:
+    distance = np.linalg.norm(moved - reference, axis=-1) * 1000.0
+    return dict(
+        max_mm=float(distance.max()),
+        p99_mm=float(np.percentile(distance, 99.0)),
+        mean_mm=float(distance.mean()),
+    )
+
+
 def bind_error(
     model,
     method: str = "forward",
@@ -486,80 +730,228 @@ def bind_error(
     file_indices: np.ndarray | None = None,
     keep_leg_spread: bool = False,
     frame_step: int = 1,
+    version: str = "1.0",
+    twist: str | None = None,
 ) -> dict[str, dict[str, float]]:
     """
     How far a VRM bind mesh, posed by the file's skin, lands from Anny's own posed mesh.
 
     For each pose or clip of ``anny.poses`` (every ``frame_step``-th frame of a clip), the bind
     mesh of ``method`` is skinned with the file's 4 weights through W_j T_j^-1, where W_j are
-    Anny's posed world bone poses (``local-ref``, not grounded), and compared with Anny's posed
-    vertices (all of Anny's weights, from the rest pose).
+    Anny's posed world bone poses (``local-ref``, without grounding), and compared with Anny's
+    posed vertices (all of Anny's weights, from the rest pose). The normals of the file,
+    skinned as engines skin them (:func:`skin_normals`), are compared with the area-weighted
+    normals of Anny's posed mesh.
 
     Args:
         model: the Anny model.
         method: the bind method of :func:`rebind`.
         pose_names: names of ``anny.poses`` entries.
         phenotype_kwargs, local_changes_kwargs, face_shape_kwargs: the body.
-        file_weights, file_indices: (V, 4) weights of the file; by default Anny's strongest 4
-            bones of each vertex, renormalised.
+        file_weights, file_indices: (V, K) weights of the file, of which the strongest 4 of
+            each vertex count; by default those of a VRM file of ``version`` and ``twist``
+            (:func:`file_skin_weights`: the eyelids moved to the head, the twist bones merged).
         keep_leg_spread: passed to :func:`vrm_t_pose`.
         frame_step: the step between the frames of a clip that are compared.
+        version, twist: the VRM version and twist mode of the default file weights.
 
     Returns:
-        ``{name: {"max_mm": ..., "p99_mm": ..., "mean_mm": ..., "frames": ...}}``, the vertex
-        distances over all compared frames, in millimetres.
+        ``{name: {"max_mm": ..., "p99_mm": ..., "mean_mm": ..., "normal_p99_deg": ...,
+        "normal_mean_deg": ..., "frames": ...}}``: the vertex distances in millimetres and the
+        normal angles in degrees, over all compared frames.
     """
-    import anny.poses
+    from opensculptboy.export.body import triangulated_faces, vertex_normals
 
-    from opensculptboy.export.body import top_skin_weights
-
-    kwargs = dict(
-        phenotype_kwargs=phenotype_kwargs, local_changes_kwargs=local_changes_kwargs
-    )
-    if face_shape_kwargs:
-        kwargs["face_shape_kwargs"] = face_shape_kwargs
-    with torch.no_grad():
-        rest = model(pose_parameterization="local-ref", **kwargs)
-    vertices = rest["rest_vertices"][0].double().cpu().numpy()
-    B = rest["rest_bone_poses"][0].double().cpu().numpy()
+    kwargs = _body_kwargs(phenotype_kwargs, local_changes_kwargs, face_shape_kwargs)
+    vertices, B = _rest_body(model, kwargs)
     if file_weights is None or file_indices is None:
-        file_weights, file_indices, _ = top_skin_weights(
-            model.vertex_bone_weights.detach().cpu().double().numpy(),
-            model.vertex_bone_indices.cpu().numpy(),
-            4,
-        )
+        weights, indices = file_skin_weights(model, version, twist)
+    else:
+        weights, indices = _strongest_four(file_weights, file_indices)
     rb = rebind(
         model,
         vertices,
         np.zeros((0, *vertices.shape)),
         B,
-        file_weights,
-        file_indices,
+        weights,
+        indices,
         method=method,
         keep_leg_spread=keep_leg_spread,
     )
+    triangles, _ = triangulated_faces(model)
     inverse_bind = rigid_inverse(rb.bone_poses)
     report = {}
     for name in pose_names:
-        params = anny.poses.pose_parameters(
-            model,
-            name,
-            phenotype_kwargs=phenotype_kwargs,
-            local_changes_kwargs=local_changes_kwargs,
-            grounded=False,
-        )["pose_parameters"][::frame_step]
-        with torch.no_grad():
-            posed = model(
-                pose_parameters=params, pose_parameterization="local-ref", **kwargs
-            )
-        reference = posed["vertices"].double().cpu().numpy()
-        W = posed["bone_poses"].double().cpu().numpy()
-        moved = skin(rb.vertices, file_weights, file_indices, W @ inverse_bind)
-        distance = np.linalg.norm(moved - reference, axis=-1) * 1000.0
+        reference, W = _posed_body(model, name, kwargs, frame_step)
+        transforms = W @ inverse_bind
+        moved = skin(rb.vertices, weights, indices, transforms)
+        normals = skin_normals(rb.normals, weights, indices, transforms)
+        normal_angles = np.stack(
+            [
+                angles(n, vertex_normals(v, triangles))
+                for n, v in zip(normals, reference)
+            ]
+        )
         report[name] = dict(
-            max_mm=float(distance.max()),
-            p99_mm=float(np.percentile(distance, 99.0)),
-            mean_mm=float(distance.mean()),
-            frames=int(len(params)),
+            **_distance_report(moved, reference),
+            normal_p99_deg=float(np.percentile(normal_angles, 99.0)),
+            normal_mean_deg=float(normal_angles.mean()),
+            frames=int(len(reference)),
         )
     return report
+
+
+def humanoid_error(
+    model,
+    version: str = "1.0",
+    twist: str | None = None,
+    method: str = "inverse",
+    pose_names=("relaxed", "walk"),
+    phenotype_kwargs=None,
+    local_changes_kwargs=None,
+    face_shape_kwargs=None,
+    keep_leg_spread: bool = False,
+    frame_step: int = 1,
+) -> dict[str, dict[str, dict[str, float]]]:
+    """
+    How far a VRM file lands from Anny's posed mesh when a VRM app turns its humanoid bones
+    alone.
+
+    The file (the bind of ``method``, the weights of :func:`file_skin_weights` and the node
+    hierarchy of ``vrm_tables.file_parents``, every node at rest at the identity rotation) is
+    posed in three ways for each frame of each ``anny.poses`` entry, with W_j Anny's posed
+    world bone poses:
+
+    - ``"every_node"``: every node turns as Anny's bone does, through W_j T_j^-1 (the error
+      of :func:`bind_error`);
+    - ``"humanoid"``: the humanoid bones of ``version`` take their local rotations in the
+      file's hierarchy from Anny's pose, the hips keep Anny's posed position, every other node
+      keeps its rest local rotation, and the twist bones follow the roll constraints of
+      ``vrm_tables.twist_constraints`` (:func:`roll_constraint`). The non-humanoid bones
+      between two humanoid bones (spine05, spine03, neck02 and neck03, shoulder01, the pelvis
+      bones and the metacarpals) then stay at rest, and so do the leaves (the toes, and the
+      twist bones without constraints, whose weights the file merges);
+    - ``"humanoid_folded"``: as ``"humanoid"``, but each humanoid bone takes its rotation
+      relative to its nearest humanoid ancestor, so that the humanoid bones keep Anny's world
+      rotations, as an app that retargets a motion onto the humanoid bones does: the turn of
+      each non-humanoid bone between two humanoid bones folds into the humanoid bone below
+      it. (Folding it into the humanoid bone above would turn the other branches of that
+      bone: spine05 hangs from the hips beside the legs.)
+
+    Returns:
+        ``{name: {variant: {"max_mm": ..., "p99_mm": ..., "mean_mm": ..., "frames": ...}}}``,
+        the vertex distances over all compared frames, in millimetres.
+    """
+    from opensculptboy.export import vrm_tables
+    from opensculptboy.export.body import ANNY_TO_GLTF
+
+    twist = twist or default_twist(version)
+    kwargs = _body_kwargs(phenotype_kwargs, local_changes_kwargs, face_shape_kwargs)
+    vertices, B = _rest_body(model, kwargs)
+    weights, indices = file_skin_weights(model, version, twist)
+    rb = rebind(
+        model,
+        vertices,
+        np.zeros((0, *vertices.shape)),
+        B,
+        weights,
+        indices,
+        method=method,
+        keep_leg_spread=keep_leg_spread,
+    )
+    labels = list(model.bone_labels)
+    parents = [int(p) for p in vrm_tables.file_parents(model, version, twist)]
+    order = _parents_first(parents)
+    humanoid = sorted(
+        labels.index(b) for b in vrm_tables.humanoid_bones(version).values()
+    )
+    ancestors = {}
+    for j in humanoid:
+        a = parents[j]
+        while a >= 0 and a not in humanoid:
+            a = parents[a]
+        ancestors[j] = a
+    references = {
+        "humanoid": {j: parents[j] for j in humanoid},
+        "humanoid_folded": ancestors,
+    }
+    # The roll axes of the file in Anny's frame; the sign of an axis does not change a roll.
+    constraints = [
+        (
+            labels.index(bone),
+            labels.index(source),
+            ANNY_TO_GLTF.T[:, "XYZ".index(axis)],
+            w,
+        )
+        for bone, source, axis, w in vrm_tables.twist_constraints(version, twist)
+    ]
+    joints = rb.joint_positions
+    inverse_bind = rigid_inverse(rb.bone_poses)
+    report = {}
+    for name in pose_names:
+        reference, W = _posed_body(model, name, kwargs, frame_step)
+        transforms = W @ inverse_bind
+        posed = {"every_node": transforms}
+        for variant, refs in references.items():
+            posed[variant] = np.stack(
+                [
+                    _humanoid_drive(
+                        t[:, :3, :3],
+                        w[:, :3, 3],
+                        joints,
+                        parents,
+                        order,
+                        refs,
+                        constraints,
+                    )
+                    for t, w in zip(transforms, W)
+                ]
+            )
+        report[name] = {
+            variant: dict(
+                **_distance_report(skin(rb.vertices, weights, indices, m), reference),
+                frames=int(len(reference)),
+            )
+            for variant, m in posed.items()
+        }
+    return report
+
+
+def _humanoid_drive(
+    rotations: np.ndarray,
+    heads: np.ndarray,
+    joints: np.ndarray,
+    parents: list[int],
+    order: list[int],
+    references: dict[int, int],
+    constraints,
+) -> np.ndarray:
+    """
+    The skin matrices (J, 4, 4) of a file whose humanoid bones turn alone (Anny's frame).
+
+    ``rotations`` (J, 3, 3) are the world rotations of the file's nodes in the full pose and
+    ``heads`` (J, 3) their posed positions; ``joints`` (J, 3) are the joints of the bind
+    pose. Each humanoid bone j (the keys of ``references``) takes the rotation of j relative
+    to the node ``references[j]`` (-1: relative to the world); the constraints set the twist
+    bones; every other node keeps the identity. The nodes without a parent keep their posed
+    position.
+    """
+    count = len(parents)
+    local = np.tile(np.eye(3), (count, 1, 1))
+    for j, r in references.items():
+        local[j] = rotations[j] if r < 0 else rotations[r].T @ rotations[j]
+    for bone, source, axis, weight in constraints:
+        local[bone] = roll_constraint(local[source], axis, weight)
+    world = np.empty((count, 3, 3))
+    position = np.empty((count, 3))
+    for j in order:
+        p = parents[j]
+        if p < 0:
+            world[j], position[j] = local[j], heads[j]
+        else:
+            world[j] = world[p] @ local[j]
+            position[j] = position[p] + world[p] @ (joints[j] - joints[p])
+    matrices = np.tile(np.eye(4), (count, 1, 1))
+    matrices[:, :3, :3] = world
+    matrices[:, :3, 3] = position - (world @ joints[..., None])[..., 0]
+    return matrices
