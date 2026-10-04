@@ -21,12 +21,12 @@ The T-pose, in Anny's frame (s = +1 for the left side, -1 for the right side):
   faces down (-Z), the back of the hand up (+Z), and the hand points along (s, 0, 0) from the
   wrist toward the middle finger, within the palm (see :func:`palm`); the metacarpals turn
   with the hand, so the knuckles keep their spread;
-- the bones of the four fingers point along (s, 0, 0) with the nails up; the thumb points
-  along (s, -1, 0) / sqrt(2), level and at 45 degrees toward the front, and turns about its
-  own axis so that its nail faces (-s, -1, 0) / sqrt(2), level and a quarter turn from the
-  nails of the other fingers (VRM T-pose definition 1.8: for the left thumb, between -X and +Z
-  of the file); the last bone of each finger turns with the bone before it, as Unity's
-  humanoid does for the distal bones;
+- the bones of the four fingers point along (s, 0, 0) with the nails up, and the last bone of
+  each of them turns with the bone before it, as Unity's humanoid does for the distal bones;
+- the thumb points along (s, -1, 0) / sqrt(2), level and at 45 degrees toward the front, and
+  its last bone (finger1-3, which carries the nail) turns about the thumb's axis so that the
+  nail faces (-s, -1, 0) / sqrt(2), level and a quarter turn from the nails of the other
+  fingers (VRM T-pose definition 1.8: for the left thumb, between -X and +Z of the file);
 - the legs turn as one piece about the hip, so that the line from the hip (upperleg01) to the
   ankle (foot) is vertical, unless ``keep_leg_spread``;
 - the feet turn about the vertical axis so that they point along -Y (the line from the ankle
@@ -36,10 +36,11 @@ The T-pose, in Anny's frame (s = +1 for the left side, -1 for the right side):
 The arm and finger bones first turn with their parent and then by the smallest change that
 aims them at their target, so the joints straighten without twisting; the finger bones make
 that change about the normal of the palm and then about the knuckle axis (yaw, then pitch), so
-that their nails stay perpendicular to the palm. The phalanges of the thumb then roll about
-its axis until its nail, carried from the rest pose (:func:`thumb_nail`), faces its target,
-and its metacarpal rolls by half as much (:data:`THUMB_METACARPAL_ROLL`). The hand, the legs
-and the feet take the turns above from their rest pose. The positions then follow from
+that their nails stay perpendicular to the palm. The last bone of the thumb then rolls about
+the thumb's axis until its nail, carried from the rest pose (:func:`thumb_nail`), faces its
+target; the two bones at the base of the thumb keep their aim without a roll, so that the web
+between the thumb and the index finger keeps its shape (:data:`THUMB_ROLL`). The hand, the
+legs and the feet take the turns above from their rest pose. The positions then follow from
 forward kinematics with absolute orientations (``pose_parameterization="world-orient"``): the
 head of every child bone is T_p B_p^-1 h, where p is its parent and h its rest head.
 
@@ -53,7 +54,7 @@ meshes with the file's weights: on the arms-down poses (``relaxed``, ``walk``) t
 bind lands closer, by a third at the 99th percentile of the vertex distances (8.5 mm against
 12.5 mm on the default body) and by a third to a half at the largest distance (12 to 14 mm
 against 21 mm), and the 99th percentile of its normal angles stays at 14 to 18 degrees,
-against 30 for the forward bind. :func:`humanoid_error` measures the file as a VRM app
+against 28 to 29 for the forward bind. :func:`humanoid_error` measures the file as a VRM app
 drives it: the humanoid bones alone, and the roll constraints of the twist bones.
 """
 
@@ -94,15 +95,39 @@ _UP = np.array([0.0, 0.0, 1.0])
 # the area-weighted normal of the faces that MakeHuman's fingernail mask
 # (``anny/data/mpfb2/textures/mpfb_fingernails.jpg``) covers and that finger1-3.L carries with
 # a weight above 0.9, measured on Anny's default body. The rest frames of the anny rig follow
-# the vertices of each bone (``"cached"`` orientations), so this direction holds the roll of
-# the nail on every body within about a degree. The right thumb mirrors it (x -> -x).
+# the vertices of each bone (``"cached"`` orientations), so this direction follows the nail of
+# other bodies closely, though not exactly. Over the 64 corners of the six default phenotypes,
+# the nail of the rest mesh lies up to 6.1 degrees from it (3.3 at the median), and the nail of
+# the T-posed mesh rolls up to 4.05 degrees off its target (on the corners at age 0; 1.2 at
+# age 1, 0.6 on the default body). The right thumb mirrors it (x -> -x).
 THUMB_NAIL = (-0.177, 0.022, -0.984)
-# The share of the thumb's roll that its metacarpal (finger1-1) takes; the phalanges take the
-# whole roll. The roll (about 34 degrees on the default body) then spreads over the two joints
-# at the base of the thumb, and the web between the thumb and the index finger keeps more of
-# its shape in the inverse bind mesh: its most squeezed triangles keep 0.59 of their rest area
-# (1st percentile; 0.45 when the metacarpal takes the whole roll, 0.52 without any roll).
-THUMB_METACARPAL_ROLL = 0.5
+# The share of the thumb's roll (34 degrees on the default body, 30 to 44 over the corners of
+# the phenotype space) that each thumb bone takes about the thumb's axis. The last bone
+# (finger1-3) carries the nail and takes the whole roll; the two bones at the base of the thumb
+# keep their aim. The web between the thumb and the index finger blends these two bones with
+# the index metacarpal (metacarpal1), which turns with the hand, so a roll of either of them
+# creases the web. Measured on the default body, for the inverse and then the forward bind,
+# over the 1712 edges of the skin of each hand that the thumb bones, metacarpal1 and the wrist
+# carry (the largest dihedral angle between the two triangles of an edge; 96.6 degrees on the
+# rest mesh), and over the 247 triangles of the web (those that finger1-1 carries: their area
+# against the rest mesh, at the 1st percentile and at least):
+#
+# - with the whole roll on finger1-2 and finger1-3 and half of it on finger1-1, the web folds
+#   back onto itself (179.6 and 179.5 degrees) and keeps 0.37 and 0.34 of its area (0.21 and
+#   0.16 at least);
+# - with the roll on finger1-3 alone, as without any roll, the hand bends by 96.6 and 103.0
+#   degrees at most, and the web keeps 0.49 and 0.39 of its area (0.40 and 0.28 at least);
+# - each degree of roll of finger1-2 adds about 1.5 degrees to the sharpest crease. A share of
+#   0.2 keeps the default body and the fixture body of the tests below 120 degrees (118.6 at
+#   most), and on the 64 corners of the six default phenotypes every share above 0.05 folds
+#   edges that the bind without a roll keeps open (over both hands and both binds, 8 edges at
+#   0.1 and 72 at 0.2). A share of 0.05 turns finger1-2 by less than 2 degrees, too little to
+#   matter, so it takes none of the roll; a share of finger1-1 adds to the crease as well.
+#
+# The roll of finger1-3 twists the joint between the phalanges: the triangles that blend
+# finger1-2 and finger1-3 keep 0.87 of their rest area or more in the forward bind, and 0.91 or
+# more in the inverse bind.
+THUMB_ROLL = {"finger1-1": 0.0, "finger1-2": 0.0, "finger1-3": 1.0}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -289,12 +314,12 @@ def t_pose_turns(
                 turns[j] = _frame(target, _UP) @ _frame(along, back).T
     for side in ("L", "R"):
         # The thumb lies along its axis through the head of finger1-1, so a roll of its bones
-        # about that axis keeps its direction and its joints.
+        # about that axis keeps its direction and its joints. Each thumb bone takes its share
+        # of the roll that brings the nail of finger1-3 onto its target.
         axis = thumb_direction(side)
         angle = _thumb_roll(turns[index[f"finger1-3.{side}"]], B, labels, side)
-        top = index[f"finger1-1.{side}"]
-        for j in _subtree(parents, top):
-            share = THUMB_METACARPAL_ROLL if j == top else 1.0
+        for name, share in THUMB_ROLL.items():
+            j = index[f"{name}.{side}"]
             turns[j] = _axis_angle(axis, share * angle) @ turns[j]
     return turns
 
@@ -311,15 +336,6 @@ def _thumb_roll(turn: np.ndarray, rest_bone_poses, labels, side: str) -> float:
     nail = nail - (nail @ axis) * axis
     target = thumb_nail_target(side)
     return float(np.arctan2(axis @ np.cross(nail, target), nail @ target))
-
-
-def _subtree(parents: list[int], top: int) -> list[int]:
-    """The bone ``top`` and all the bones below it."""
-    inside = {top}
-    for j in _parents_first(parents):
-        if parents[j] in inside:
-            inside.add(j)
-    return sorted(inside)
 
 
 def _frame(x: np.ndarray, z: np.ndarray) -> np.ndarray:
@@ -685,24 +701,33 @@ def _rest_body(model, kwargs: dict) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _posed_body(
-    model, name: str, kwargs: dict, frame_step: int
+    model, pose, kwargs: dict, frame_step: int
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Anny's posed vertices (F, V, 3) and world bone poses (F, J, 4, 4) for an ``anny.poses``
-    entry (``local-ref``, without grounding), every ``frame_step``-th frame of a clip.
+    Anny's posed vertices (F, V, 3) and world bone poses (F, J, 4, 4) for ``pose``: the name of
+    an ``anny.poses`` entry (``local-ref``, without grounding), every ``frame_step``-th frame of
+    a clip, or world bone poses (F, J, 4, 4) of the body.
     """
     import anny.poses
 
-    params = anny.poses.pose_parameters(
-        model,
-        name,
-        phenotype_kwargs=kwargs.get("phenotype_kwargs"),
-        local_changes_kwargs=kwargs.get("local_changes_kwargs"),
-        grounded=False,
-    )["pose_parameters"][::frame_step]
+    if isinstance(pose, str):
+        params = anny.poses.pose_parameters(
+            model,
+            pose,
+            phenotype_kwargs=kwargs.get("phenotype_kwargs"),
+            local_changes_kwargs=kwargs.get("local_changes_kwargs"),
+            grounded=False,
+        )["pose_parameters"][::frame_step]
+        parameterization = "local-ref"
+    else:
+        params = torch.as_tensor(
+            np.asarray(pose).reshape(-1, *np.shape(pose)[-3:]),
+            dtype=model.template_vertices.dtype,
+        )
+        parameterization = "world"
     with torch.no_grad():
         posed = model(
-            pose_parameters=params, pose_parameterization="local-ref", **kwargs
+            pose_parameters=params, pose_parameterization=parameterization, **kwargs
         )
     return (
         posed["vertices"].double().cpu().numpy(),
@@ -812,6 +837,9 @@ def humanoid_error(
     face_shape_kwargs=None,
     keep_leg_spread: bool = False,
     frame_step: int = 1,
+    poses=None,
+    constraints=None,
+    region: np.ndarray | None = None,
 ) -> dict[str, dict[str, dict[str, float]]]:
     """
     How far a VRM file lands from Anny's posed mesh when a VRM app turns its humanoid bones
@@ -819,24 +847,35 @@ def humanoid_error(
 
     The file (the bind of ``method``, the weights of :func:`file_skin_weights` and the node
     hierarchy of ``vrm_tables.file_parents``, every node at rest at the identity rotation) is
-    posed in three ways for each frame of each ``anny.poses`` entry, with W_j Anny's posed
-    world bone poses:
+    posed in three ways for each frame of each ``anny.poses`` entry of ``pose_names`` and of
+    each entry of ``poses``, with W_j Anny's posed world bone poses:
 
     - ``"every_node"``: every node turns as Anny's bone does, through W_j T_j^-1 (the error
       of :func:`bind_error`);
     - ``"humanoid"``: the humanoid bones of ``version`` take their local rotations in the
       file's hierarchy from Anny's pose, the hips keep Anny's posed position, every other node
       keeps its rest local rotation, and the twist bones follow the roll constraints of
-      ``vrm_tables.twist_constraints`` (:func:`roll_constraint`). The non-humanoid bones
-      between two humanoid bones (spine05, spine03, neck02 and neck03, shoulder01, the pelvis
-      bones and the metacarpals) then stay at rest, and so do the leaves (the toes, and the
-      twist bones without constraints, whose weights the file merges);
+      ``constraints`` (:func:`roll_constraint`). The non-humanoid bones between two humanoid
+      bones (spine05, spine03, neck02 and neck03, shoulder01, the pelvis bones and the
+      metacarpals) then stay at rest, and so do the leaves (the toes, and the twist bones
+      without constraints, whose weights the file merges);
     - ``"humanoid_folded"``: as ``"humanoid"``, but each humanoid bone takes its rotation
       relative to its nearest humanoid ancestor, so that the humanoid bones keep Anny's world
       rotations, as an app that retargets a motion onto the humanoid bones does: the turn of
       each non-humanoid bone between two humanoid bones folds into the humanoid bone below
       it. (Folding it into the humanoid bone above would turn the other branches of that
       bone: spine05 hangs from the hips beside the legs.)
+
+    Args:
+        pose_names: names of ``anny.poses`` entries (``local-ref``, without grounding).
+        poses: other poses, ``{name: W}`` with W Anny's world bone poses (F, J, 4, 4) of the
+            body (``pose_parameterization="world"``), such as a library pose with a turn added.
+        constraints: the roll constraints that the app applies, as
+            ``vrm_tables.twist_constraints`` gives them (constrained bone, source bone, roll
+            axis of the VRM 1.0 file, weight): by default those of the file, and ``[]`` for an
+            app that ignores ``VRMC_node_constraint``.
+        region: a (V,) boolean mask of the vertices whose distances count; all by default.
+        The other arguments are those of :func:`bind_error`.
 
     Returns:
         ``{name: {variant: {"max_mm": ..., "p99_mm": ..., "mean_mm": ..., "frames": ...}}}``,
@@ -875,6 +914,8 @@ def humanoid_error(
         "humanoid": {j: parents[j] for j in humanoid},
         "humanoid_folded": ancestors,
     }
+    if constraints is None:
+        constraints = vrm_tables.twist_constraints(version, twist)
     # The roll axes of the file in Anny's frame; the sign of an axis does not change a roll.
     constraints = [
         (
@@ -883,13 +924,18 @@ def humanoid_error(
             ANNY_TO_GLTF.T[:, "XYZ".index(axis)],
             w,
         )
-        for bone, source, axis, w in vrm_tables.twist_constraints(version, twist)
+        for bone, source, axis, w in constraints
     ]
     joints = rb.joint_positions
     inverse_bind = rigid_inverse(rb.bone_poses)
+    keep = slice(None) if region is None else np.asarray(region, dtype=bool)
+    bind, weights, indices = rb.vertices[keep], weights[keep], indices[keep]
     report = {}
-    for name in pose_names:
-        reference, W = _posed_body(model, name, kwargs, frame_step)
+    entries = {name: name for name in pose_names}
+    entries.update(poses or {})
+    for name, pose in entries.items():
+        reference, W = _posed_body(model, pose, kwargs, frame_step)
+        reference = reference[:, keep]
         transforms = W @ inverse_bind
         posed = {"every_node": transforms}
         for variant, refs in references.items():
@@ -909,7 +955,7 @@ def humanoid_error(
             )
         report[name] = {
             variant: dict(
-                **_distance_report(skin(rb.vertices, weights, indices, m), reference),
+                **_distance_report(skin(bind, weights, indices, m), reference),
                 frames=int(len(reference)),
             )
             for variant, m in posed.items()
