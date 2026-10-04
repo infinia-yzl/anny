@@ -17,8 +17,9 @@ the hand would then turn by its own roll and again by the half roll of the twist
 it, so the file hangs the hand from the forearm, beside its twist bone, which becomes a leaf
 (:func:`file_parents`).
 
-The shin twist bones get no constraint: the T-posed shin runs 5 to 6 degrees off the
-vertical (8 to 10 degrees with ``keep_leg_spread``), so a roll about Y would swing the
+The shin twist bones get no constraint: the T-posed shin runs off the vertical, by 5 degrees
+on the default body and 3 to 8 degrees over the corners of the phenotypes (8, and 5 to 14
+degrees, with ``keep_leg_spread``), so a roll about Y would swing the
 vertices of the lower shin off the limb, by up to 5 to 12 mm, whenever the foot turns. Like
 the twist bones of the upper arms and the thighs, they hang from their limb bone (the shin,
 the upper arm and the thigh), which carries the roll of the knee, the shoulder or the hip in

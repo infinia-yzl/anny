@@ -519,6 +519,31 @@ class TestVrmTPose(unittest.TestCase):
                     self.assertGreater(np.percentile(kept, 1), 0.35)
                     self.assertGreater(kept.min(), 0.25)
 
+    def test_base_thumb_bones_take_no_roll(self):
+        # finger1-1 and finger1-2 keep the turn of the aim alone, and finger1-3 takes the whole
+        # roll. test_thumb_web catches a roll of the base bones on the default and fixture
+        # bodies only from a share of about 0.25, but over the 64 corners of the six default
+        # phenotypes a share of 0.1 on finger1-2 already folds 8 edges of the web, 0.2 folds 72,
+        # and 0.3 on finger1-1 folds 10, which the bind without a roll keeps open.
+        unrolled = dict.fromkeys(tpose.THUMB_ROLL, 0.0)
+        for body in self.bodies:
+            B = torch.from_numpy(self.rest[body][2])
+            with mock.patch.dict(tpose.THUMB_ROLL, unrolled):
+                aim = tpose.vrm_t_pose(self.model, B).numpy()
+            T = self.poses[body]
+            for side in SIDES:
+                for i in (1, 2):
+                    j = self.bone(f"finger1-{i}.{side}")
+                    with self.subTest(body=body, bone=f"finger1-{i}.{side}"):
+                        np.testing.assert_allclose(T[j], aim[j], atol=1e-9)
+                j = self.bone(f"finger1-3.{side}")
+                with self.subTest(body=body, bone=f"finger1-3.{side}"):
+                    turn = T[j, :3, :3] @ aim[j, :3, :3].T
+                    roll = np.degrees(
+                        np.arccos(np.clip((np.trace(turn) - 1) / 2, -1, 1))
+                    )
+                    self.assertGreater(roll, 20.0)
+
     def test_thumbs(self):
         for body in self.bodies:
             for side, s in SIDES.items():
