@@ -1262,6 +1262,8 @@ def export_vrm(
         BudgetError: for a file over its budget with ``budget="strict"``, before anything
             is written.
     """
+    if budget not in budgets.MODES:
+        raise ValueError(f"Unknown budget mode {budget!r}; use one of {budgets.MODES}.")
     spec = vrm_spec(
         character,
         model,

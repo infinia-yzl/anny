@@ -116,6 +116,10 @@ class Character:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Character":
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"A character card must be a JSON object (got {type(data).__name__})."
+            )
         schema = data.get("schema", SCHEMA_VERSION)
         if schema != SCHEMA_VERSION:
             raise ValueError(

@@ -61,8 +61,17 @@ REFERENCE_RTOL, REFERENCE_ATOL = 1e-6, 1e-7
 # sum, because a morph-target offset carries the rounding noise of whole positions. Between
 # exports with the AVX-512, AVX2 and SSE kernels of MKL, and against a float64 export, the
 # floats of the structure move by at most a fifth of their tolerance and the fingerprints by
-# at most 7e-5 of their scale.
+# at most 7e-5 of their scale. These bounds guard global changes alone, since a moved row or
+# vertex stays within them; so the test also exports the case with a float64 model and compares
+# the two files value by value (FLOAT32_VALUE_ATOL), which finds a change confined to the
+# float32 path row by row, while the float64 cases pin the code that both paths share.
 FLOAT32_RTOL, FLOAT32_ATOL, FLOAT32_SCALE_RTOL = 1e-4, 1e-6, 1e-3
+# The largest difference between a value of the float32 export and the same value of the float64
+# export, by attribute: about ten times the measured differences (4.8e-5 on the normals of small
+# triangles, 4.2e-7 on the inverse bind matrices, 1.8e-7 m on the positions and 6.5e-8 m on the
+# morph targets, with the AVX-512 and the SSE kernels).
+FLOAT32_VALUE_ATOL = {"NORMAL": 5e-4}
+FLOAT32_VALUE_ATOL_OTHER = 5e-6
 
 
 @functools.lru_cache(maxsize=None)
@@ -327,6 +336,37 @@ def reference_cases() -> dict[str, dict]:
         ),
         "head_dense": dict(character=head, face_shapes=False, options={}),
     }
+
+
+def assert_float32_matches_float64(
+    test: unittest.TestCase, path32, path64, where: str
+) -> None:
+    """
+    The export of a case with the float32 model equals its export with a float64 model: the
+    same accessors, integer values and sparse indices equal, and each float value within
+    FLOAT32_VALUE_ATOL of its attribute.
+    """
+    a, b = GLB(path32), GLB(path64)
+    test.assertEqual(len(a.json["accessors"]), len(b.json["accessors"]), where)
+    names = {}
+    for mesh in a.json["meshes"]:
+        for primitive in mesh["primitives"]:
+            names.update({i: k for k, i in primitive["attributes"].items()})
+            for target in primitive.get("targets", []):
+                names.update({i: k for k, i in target.items()})
+    exact = exact_accessors(a.json)
+    for i in range(len(a.json["accessors"])):
+        here = f"{where}/accessors/{i} ({names.get(i, 'other')})"
+        x, y = a.accessor(i), b.accessor(i)
+        test.assertEqual(x.shape, y.shape, here)
+        if i in exact:
+            test.assertTrue(np.array_equal(x, y), here)
+        else:
+            atol = FLOAT32_VALUE_ATOL.get(names.get(i), FLOAT32_VALUE_ATOL_OTHER)
+            np.testing.assert_allclose(x, y, rtol=0, atol=atol, err_msg=here)
+        sparse = a.sparse_indices(i)
+        if sparse is not None:
+            test.assertTrue(np.array_equal(sparse, b.sparse_indices(i)), here)
 
 
 def export_case(case: dict, directory, name: str) -> pathlib.Path:
@@ -827,6 +867,10 @@ class TestGltfReference(unittest.TestCase):
                             atol=REFERENCE_ATOL,
                             scales=fingerprint_scales(path),
                         )
+                        twin = export_case(
+                            dict(case, model="float64"), tmp, name + "_float64"
+                        )
+                        assert_float32_matches_float64(self, path, twin, name)
                     else:
                         rtol, atol = REFERENCE_RTOL, REFERENCE_ATOL
                         tolerance = dict(rtol=rtol, atol=atol)

@@ -297,8 +297,9 @@ def main(argv=None) -> int:
     r.add_argument(
         "--twist",
         choices=("constraint", "merge"),
-        help="the forearm and leg twist bones: roll constraints (VRM 1.0 only, and its "
-        "default) or their weights merged into the limb bones (the VRM 0.x default)",
+        help="the forearm twist bones: roll constraints from the wrists (VRM 1.0 only, and "
+        "its default) or their weights merged into the forearm bones (the VRM 0.x default); "
+        "the upper arm, thigh and shin twist weights always merge",
     )
     r.add_argument(
         "--bind",

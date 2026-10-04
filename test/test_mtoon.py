@@ -886,8 +886,9 @@ class TestVrm0(unittest.TestCase, MaterialAssertions):
         self.assertEqual(mtoon.representable(material), (material, []))
 
     def test_matcap_note(self):
-        # MToon 0.x adds the matcap unlit and unmasked (MToonCore.cginc lines 232-242), so a
-        # matcap that MToon 1.0 mixes with the lighting or masks looks different in 0.x apps.
+        # MToon 0.x adds the matcap unlit and unmasked (MToonCore.cginc lines 232-234 mask and
+        # light the parametric rim alone, and lines 243-244 add _SphereAdd raw), so a matcap
+        # that MToon 1.0 mixes with the lighting or masks looks different in 0.x apps.
         cases = {
             "lit": (dict(matcap_texture=3), True),
             "masked": (

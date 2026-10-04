@@ -608,8 +608,9 @@ def representable(material: ToonMaterial) -> tuple[ToonMaterial, list[str]]:
 
     - a matcap texture with a rim lighting mix above 0 or a rim multiply texture: MToon 0.x adds
       the matcap unlit and unmasked, since _RimLightingMix and _RimTexture apply to the
-      parametric rim alone and _SphereAdd is added raw (MToonCore.cginc lines 232-242), where
-      MToon 1.0 multiplies the matcap by the rim mask and mixes in the lighting;
+      parametric rim alone (MToonCore.cginc lines 232-234) and _SphereAdd is added raw (lines
+      243-244), where MToon 1.0 multiplies the matcap by the rim mask and mixes in the
+      lighting;
     - a non-black emissive colour (three-vrm decodes _EmissionColor with the 2.2 gamma curve,
       UniVRM's 1.0 migration reads it as linear);
     - an outline width texture (R channel in 0.x, G in 1.0);

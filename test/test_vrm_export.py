@@ -743,6 +743,16 @@ class TestVrmExtension(unittest.TestCase):
                 )
             with self.assertRaisesRegex(ValueError, "Unknown twist mode"):
                 vrm.vrm_spec(vrm_fixtures.CHARACTER, twist="spin", author="a")
+            with (
+                tempfile.TemporaryDirectory() as tmp,
+                self.assertRaisesRegex(ValueError, "Unknown budget mode"),
+            ):
+                vrm.export_vrm(
+                    pathlib.Path(tmp) / "a.vrm",
+                    vrm_fixtures.CHARACTER,
+                    author="a",
+                    budget="strct",
+                )
         # The extras and the summary record the twist mode in use.
         for version in VERSIONS:
             with self.subTest(version=version):
@@ -1125,6 +1135,7 @@ class TestCommandLine(unittest.TestCase):
             for file, data in files.items():
                 (tmp / file).write_text(json.dumps(data))
             (tmp / "broken.json").write_text("{")
+            (tmp / "list.json").write_text("[]")
             (tmp / "wide.png").write_bytes(_png(40, 20))
             vrm_file = ["export", str(tmp / "a.vrm")]
             glb_file = ["export", str(tmp / "a.glb")]
@@ -1143,6 +1154,7 @@ class TestCommandLine(unittest.TestCase):
                 (by_a + ["--character", str(tmp / "rig.json")], "'anny' rig"),
                 (by_a + ["--character", str(tmp / "smpl.json")], "non-commercial"),
                 (by_a + ["--character", str(tmp / "broken.json")], "--character"),
+                (by_a + ["--character", str(tmp / "list.json")], "JSON object"),
                 (by_a + ["--vrm-version", "0", "--twist", "constraint"], "roll"),
                 (glb_file + ["--character", str(tmp / "no.json")], "--character"),
             ):
