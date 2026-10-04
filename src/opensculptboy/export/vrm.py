@@ -93,7 +93,7 @@ FRAMES = {
 # default body, measured with the file's weights by :func:`opensculptboy.export.tpose.bind_error`,
 # the inverse bind lands a third closer to Anny's own posed mesh than the forward bind: p99 8.5 mm
 # against 12.5 mm, a maximum of 11.6 to 14.3 mm against 21 mm, and normals within 14 to 18
-# degrees at p99 against 30 degrees.
+# degrees at p99 against 28 to 29 degrees.
 DEFAULT_BIND = "inverse"
 # The linear base colour of the skin (the colour of the GLB export), until the styles of PR 2.
 SKIN_COLOUR = (0.80, 0.62, 0.52, 1.0)
