@@ -1,7 +1,7 @@
-# Corporis
+# OpenSculptBoy
 # Apache License, Version 2.0
 """
-Checks of the glTF export (corporis.export.gltf): a NumPy reader evaluates the file as a glTF
+Checks of the glTF export (opensculptboy.export.gltf): a NumPy reader evaluates the file as a glTF
 engine does (node transforms, animation keyframes, skinning and morph targets) and compares the
 result with Anny's own forward pass.
 """
@@ -15,8 +15,8 @@ import unittest
 import numpy as np
 import torch
 
-from corporis import Character, export_glb, read_character
-from corporis.export.gltf import C3, C4
+from opensculptboy import Character, export_glb, read_character
+from opensculptboy.export.gltf import C3, C4
 
 _DTYPES = {5126: np.float32, 5121: np.uint8, 5123: np.uint16, 5125: np.uint32}
 _WIDTHS = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}

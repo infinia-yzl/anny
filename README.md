@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="docs/figures/corporis_banner.svg" alt="Corporis: open humanoid characters for free, unlimited creativity, built on the Anny body model" width="900" style="display:block;width:100%;max-width:900px;margin:auto"/>
+  <img src="docs/figures/opensculptboy_banner.svg" alt="OpenSculptBoy: open humanoid characters for free, unlimited creativity, built on the Anny body model" width="900" style="display:block;width:100%;max-width:900px;margin:auto"/>
 </p>
 
-# Corporis
+# OpenSculptBoy
 
 [![Tests](https://github.com/infinia-yzl/anny/actions/workflows/tests.yml/badge.svg)](https://github.com/infinia-yzl/anny/actions/workflows/tests.yml)
 
-**Corporis is an open toolkit for humanoid 3D characters: a differentiable body model in PyTorch, a web viewer and a glTF export for game engines. It is built on [Anny](https://github.com/naver/anny) by NAVER LABS Europe.**
+**OpenSculptBoy is an open toolkit for humanoid 3D characters: a differentiable body model in PyTorch, a web viewer and a glTF export for game engines. It is built on [Anny](https://github.com/naver/anny) by NAVER LABS Europe.**
 
 <p align="center">
-  <img src="docs/figures/anny_teaser.jpg" alt="Renders of the Anny body model, the foundation of Corporis" width="900" style="display:block;width:100%;max-width:900px;margin:auto"/>
+  <img src="docs/figures/anny_teaser.jpg" alt="Renders of the Anny body model, the foundation of OpenSculptBoy" width="900" style="display:block;width:100%;max-width:900px;margin:auto"/>
 </p>
 
 > ## Built and maintained by AI agents
@@ -18,24 +18,26 @@
 
 ### Credits
 
-Corporis builds on:
-- **[Anny](https://github.com/naver/anny)** by Romain Brégier, Guénolé Fiche, Laura Bravo-Sánchez, Thomas Lucas, Matthieu Armando, Philippe Weinzaepfel, Grégory Rogez and Fabien Baradel at [NAVER LABS Europe](https://europe.naverlabs.com/). The body model, its parameters, the topologies, the rigs and the `anny` package come from Anny (Apache License 2.0, Copyright (c) 2025 NAVER Corp.). If you use Corporis in research, please cite the Anny paper (see [Citation](#citation)).
+OpenSculptBoy builds on:
+- **[Anny](https://github.com/naver/anny)** by Romain Brégier, Guénolé Fiche, Laura Bravo-Sánchez, Thomas Lucas, Matthieu Armando, Philippe Weinzaepfel, Grégory Rogez and Fabien Baradel at [NAVER LABS Europe](https://europe.naverlabs.com/). The body model, its parameters, the topologies, the rigs and the `anny` package come from Anny (Apache License 2.0, Copyright (c) 2025 NAVER Corp.). If you use OpenSculptBoy in research, please cite the Anny paper (see [Citation](#citation)).
 - **[MakeHuman](https://static.makehumancommunity.org/)** and **[MPFB2](https://github.com/makehumancommunity/mpfb2/)**, whose CC0 assets (targets, rigs, poses and the face units of Mika Suominen) are the base of Anny.
 - **[SOMA-X](https://github.com/NVlabs/SOMA-X)** (NVIDIA), for the `soma` rig and topology.
 - **[ICT-FaceKit](https://github.com/USC-ICT/ICT-FaceKit)**, MediaPipe, and the datasets listed in [LICENSE_THINGS](LICENSE_THINGS) and `src/anny/data/faces/SOURCES.md`, for the face shapes.
 
-These authors have not reviewed or endorsed Corporis.
+These authors have not reviewed or endorsed OpenSculptBoy.
 
 ### About the names
 
-The `corporis` distribution holds two packages: `anny` (`src/anny`), the upstream body model, which keeps its name so that upstream updates merge cleanly, and `corporis` (`src/corporis`), with the glTF export and the `corporis` command.
+OpenSculptBoy follows the naming of [OpenTierBoy](https://github.com/infinia-yzl/opentierboy), the author's open-source tier list maker: "Open" for open source, the craft, and "Boy" for the helper at the artist's side, like a sculptor's studio assistant.
+
+The `opensculptboy` distribution holds two packages: `anny` (`src/anny`), the upstream body model, which keeps its name so that upstream updates merge cleanly, and `opensculptboy` (`src/opensculptboy`), with the glTF export and the `opensculptboy` command.
 
 ### Features
 - Anny's parametric body model: full body, hand and head, with 9 shape parameters (`model.phenotype_labels`).
 - 103 face shapes with a random face sampler, 25 procedural hairstyles, 50 poses and 7 clips, and soft-tissue correctives.
 - A web viewer with a character editor.
 - Export to glTF 2.0 (`.glb`) with the skeleton, the skin weights, facial morph targets and animations (see [Export to glTF](#export-to-gltf)).
-- Planned: **Corpi**, a desktop companion.
+- Planned: a desktop companion.
 - Apache License 2.0, with CC0 and other permissive data (see [LICENSE_THINGS](LICENSE_THINGS)).
 
 ### Upstream news (Anny)
@@ -47,16 +49,16 @@ The `corporis` distribution holds two packages: `anny` (`src/anny`), the upstrea
 
 ## Installation
 
-Install Corporis from this repository. It adds the viewer, the face shapes, the hair, the poses and the correctives to Anny:
+Install OpenSculptBoy from this repository. It adds the viewer, the face shapes, the hair, the poses and the correctives to Anny:
 
 ```bash
-pip install "corporis @ git+https://github.com/infinia-yzl/anny.git"                 # the model, the export and the corporis command
-pip install "corporis[examples] @ git+https://github.com/infinia-yzl/anny.git"       # with the examples and tutorials
-pip install "corporis[smpl,examples] @ git+https://github.com/infinia-yzl/anny.git"  # with the SMPL and SMPL-X wrappers (non-commercial data, see Disclaimer)
+pip install "opensculptboy @ git+https://github.com/infinia-yzl/anny.git"                 # the model, the export and the opensculptboy command
+pip install "opensculptboy[examples] @ git+https://github.com/infinia-yzl/anny.git"       # with the examples and tutorials
+pip install "opensculptboy[smpl,examples] @ git+https://github.com/infinia-yzl/anny.git"  # with the SMPL and SMPL-X wrappers (non-commercial data, see Disclaimer)
 uv sync --extra examples                                                             # in a clone of this repository
 ```
 
-Corporis is not on PyPI yet. Uninstall the upstream `anny` distribution first (`pip uninstall anny`), because both distributions install the `anny` package. The SMPL and SMPL-X topologies download non-commercial data on first use.
+OpenSculptBoy is not on PyPI yet. Uninstall the upstream `anny` distribution first (`pip uninstall anny`), because both distributions install the `anny` package. The SMPL and SMPL-X topologies download non-commercial data on first use.
 
 ## Quickstart example
 ```python
@@ -154,10 +156,10 @@ After a change to the page alone, `node viewer/build.mjs --reuse-data` rebuilds 
 
 ## Export to glTF
 
-`corporis.export_glb` writes a character as a binary glTF 2.0 file (`.glb`), the open format that Blender, Godot, Unity, Unreal Engine and three.js import:
+`opensculptboy.export_glb` writes a character as a binary glTF 2.0 file (`.glb`), the open format that Blender, Godot, Unity, Unreal Engine and three.js import:
 
 ```python
-from corporis import Character, export_glb, read_character
+from opensculptboy import Character, export_glb, read_character
 
 character = Character(name="ada", phenotype={"muscle": 0.7, "weight": 0.6}, facial_actions={"mouthSmileLeft": 0.4})
 export_glb("ada.glb", character, animations=["walk", "wave", "seated"])
@@ -167,10 +169,10 @@ read_character("ada.glb")  # the same Character, from the extras of the file
 The same export from the command line, with a character card (JSON):
 
 ```bash
-corporis character > ada.json                  # a card with the default settings; edit its values
-corporis export ada.glb --character ada.json --animation walk --animation wave
-corporis export ada.glb --morph-targets all    # the facial actions and all 113 face shapes
-corporis names poses                           # the 50 poses and 7 clips of the library
+opensculptboy character > ada.json                # a card with the default settings; edit its values
+opensculptboy export ada.glb --character ada.json --animation walk --animation wave
+opensculptboy export ada.glb --morph-targets all  # the facial actions and all 113 face shapes
+opensculptboy names poses                         # the 50 poses and 7 clips of the library
 ```
 
 The file holds:
@@ -247,7 +249,7 @@ The code of Anny, Copyright (c) 2025 NAVER Corp., and the modifications in this 
 - **Model numbers only.** Sizes, volumes and masses describe a 3D model. Do not rely on them for medical, safety-critical, legal or identity decisions.
 - **Third-party assets.** Bundled and downloaded data keep their own licences (see [LICENSE_THINGS](LICENSE_THINGS)), and the SMPL and SMPL-X data is for non-commercial use only. Check that the licences fit your use.
 - **Your content.** You are responsible for the characters, images and products that you create, and for following the laws that apply to you.
-- **No affiliation.** Corporis is not affiliated with, endorsed by or sponsored by NAVER, MakeHuman, NVIDIA, Anthropic or the other parties named here. Their names and marks belong to their owners.
+- **No affiliation.** OpenSculptBoy is not affiliated with, endorsed by or sponsored by NAVER, MakeHuman, NVIDIA, Anthropic or the other parties named here. Their names and marks belong to their owners.
 - **Not legal advice.** This section does not change the [Apache License 2.0](LICENSE), and the license text applies where the two differ. Some rights cannot be excluded by contract in some countries.
 
 ## Citation

@@ -1,11 +1,11 @@
-# Corporis
+# OpenSculptBoy
 # Apache License, Version 2.0
 """
-Write the Corporis logo and banner: a character traced from the model floats upward with the
+Write the OpenSculptBoy logo and banner: a character traced from the model floats upward with the
 head back, reaching for the sky with the right hand.
 
-- docs/figures/corporis_logo.svg: the mark alone, square, on a transparent background
-- docs/figures/corporis_banner.svg: the mark beside the name and the tagline
+- docs/figures/opensculptboy_logo.svg: the mark alone, square, on a transparent background
+- docs/figures/opensculptboy_banner.svg: the mark beside the name and the tagline
 
     uv run --extra examples python scripts/make_banner.py
 
@@ -297,7 +297,7 @@ def svg(width, height, body, desc, background=None):
     lines = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">',
-        '  <title id="title">Corporis</title>',
+        '  <title id="title">OpenSculptBoy</title>',
         f'  <desc id="desc">{desc}</desc>',
     ]
     if background:
@@ -323,7 +323,7 @@ def banner_text(x, centre):
     sans = "font-family=\"'Helvetica Neue', Arial, sans-serif\""
     return [
         f'  <text x="{x:.1f}" y="{baseline:.1f}" fill="#f4efe9" {serif} '
-        f'font-size="{name}" letter-spacing="-1">Corporis</text>',
+        f'font-size="{name}" letter-spacing="-1">OpenSculptBoy</text>',
         f'  <text x="{x + inset:.1f}" y="{baseline + second:.1f}" fill="#aab2bc" {sans} '
         f'font-size="{tagline}" letter-spacing="0.3">'
         "Open humanoid characters for free, unlimited creativity</text>",
@@ -336,14 +336,14 @@ def banner_text(x, centre):
 def main():
     xy, faces = Poser().picture(POSE)
     desc = (
-        "Corporis: a humanoid character traced from the Anny body model floats upward "
+        "OpenSculptBoy: a humanoid character traced from the Anny body model floats upward "
         "with the head back, reaching for the sky with the right hand."
     )
     logo = outline(fit(xy, (40, 40, 432, 432)), faces)
     logo_svg = svg(
         512, 512, [f'  <path fill="{SKIN}" fill-rule="evenodd" d="{logo}"/>'], desc
     )
-    (FIGURES / "corporis_logo.svg").write_text(logo_svg)
+    (FIGURES / "opensculptboy_logo.svg").write_text(logo_svg)
 
     mark = fit(xy, (34, 34, 170, 172))
     body = [f'  <path fill="{SKIN}" fill-rule="evenodd" d="{outline(mark, faces)}"/>']
@@ -351,10 +351,10 @@ def main():
         float(mark[:, 0].max()) + 40, (mark[:, 1].min() + mark[:, 1].max()) / 2
     )
     banner_svg = svg(900, 240, body, desc, background="#101317")
-    (FIGURES / "corporis_banner.svg").write_text(banner_svg)
+    (FIGURES / "opensculptboy_banner.svg").write_text(banner_svg)
     for name, text in (
-        ("corporis_logo.svg", logo_svg),
-        ("corporis_banner.svg", banner_svg),
+        ("opensculptboy_logo.svg", logo_svg),
+        ("opensculptboy_banner.svg", banner_svg),
     ):
         print(f"{FIGURES / name} {len(text) / 1024:.0f} KB")
 

@@ -1,4 +1,4 @@
-# Corporis
+# OpenSculptBoy
 # Apache License, Version 2.0
 """
 The vectorised parse of the MakeHuman target files (``load_blend_shape``) gives exactly the

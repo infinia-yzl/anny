@@ -7,16 +7,16 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-# Corporis, an independent fork of Anny (NAVER LABS Europe). The distribution is "corporis"; it
-# installs the "anny" package (the body model, kept close to upstream) and the "corporis" package.
-name = "corporis"
+# OpenSculptBoy, an independent fork of Anny (NAVER LABS Europe). The distribution is "opensculptboy"; it
+# installs the "anny" package (the body model, kept close to upstream) and the "opensculptboy" package.
+name = "opensculptboy"
 dynamic = ["version"]
 authors = [
     # author of Anny, the upstream body model
     { name = "Romain Brégier", email = "romain.bregier@naverlabs.com" }
 ]
 maintainers = [
-    # maintainer of the Corporis fork; its additions are written by AI coding agents (see README)
+    # maintainer of the OpenSculptBoy fork; its additions are written by AI coding agents (see README)
     { name = "infinia-yzl" }
 ]
 description="Humanoid 3D characters built on the Anny body model, with a web viewer and glTF export."
@@ -41,7 +41,7 @@ Homepage = "https://github.com/infinia-yzl/anny"
 Upstream = "https://github.com/naver/anny"
 
 [project.scripts]
-corporis = "corporis.cli:main"
+opensculptboy = "opensculptboy.cli:main"
 
 [tool.setuptools_scm]
 
