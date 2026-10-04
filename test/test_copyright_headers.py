@@ -11,6 +11,11 @@ HEADER_LINES = [
     "# Copyright (C) 2025 NAVER Corp.",
     "# Apache License, Version 2.0",
 ]
+# Files that the OpenSculptBoy fork adds carry its own header, since NAVER did not write them.
+OPENSCULPTBOY_HEADER_LINES = [
+    "# OpenSculptBoy",
+    "# Apache License, Version 2.0",
+]
 
 # Repository root (this file lives in <root>/test/).
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -37,6 +42,8 @@ def _has_header(text: str) -> bool:
         if stripped and not stripped.startswith("#"):
             break
         if lines[i : i + 3] == HEADER_LINES:
+            return True
+        if lines[i : i + 2] == OPENSCULPTBOY_HEADER_LINES:
             return True
     return False
 

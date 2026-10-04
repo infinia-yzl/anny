@@ -4,7 +4,14 @@ This file provides guidance to AI Agents when working with code in this reposito
 
 ## Project Overview
 
-**Anny** is a differentiable human body mesh model in PyTorch that covers all ages (infants to elders) with a common topology and parameter space. Based on MakeHuman assets, it provides full-body, hand, and face models.
+**Anny** is a differentiable, parametric body mesh model in PyTorch with a common topology and parameter space. Based on MakeHuman assets, it provides full-body, hand, and face models.
+
+This repository is **OpenSculptBoy**, an independent fork of Anny (NAVER LABS Europe) that adds the web viewer, face shapes, hair, poses and correctives. The README states that AI agents write and maintain the additions under one human author, and it carries the credits and the no-warranty disclaimer; keep those sections accurate when you change the project. The Python distribution is `opensculptboy` (`pyproject.toml`) and holds two packages: `anny` (`src/anny`, the body model, kept close to upstream so that merges stay clean: `git fetch upstream main`, remote `upstream` is `https://github.com/naver/anny`) and `opensculptboy` (`src/opensculptboy`, this project's additions on top of the model: `Character`, the glTF export and the `opensculptboy` command). Put new features that only use the model's public API in `opensculptboy`, and change `src/anny` only where the model itself must change. Use "OpenSculptBoy" for the project and "Anny" for the model and the `anny` package, and never present the fork as an official NAVER release. In the README, the viewer and other user-facing text, present the models as humanoid 3D characters for free, unlimited creativity: never as humans, and never by human age. The `age` parameter keeps its name in the API and appears as "Form" in the viewer, with the ends "Compact" and "Elongated".
+
+### Conventions
+
+- Write Markdown docs with one line per paragraph or list item. Never hard-wrap prose; editors and GitHub wrap it for display.
+- Bring upstream updates in their own pull request: a branch from `main` with `git merge upstream/main`, merged with a merge commit (never squashed or rebased), so that git keeps tracking which upstream commits the fork has. Keep upstream commits out of feature pull requests.
 
 ## Commands
 
@@ -14,14 +21,37 @@ uv sync --extra examples  # full install with demo dependencies
 ```
 
 ### Testing
+
+The checks come in three tiers, and `scripts/check.sh` runs each of them. GitHub Actions (`.github/workflows/lint.yml`, `viewer.yml` and `tests.yml`) calls the same script, so a local run of a tier matches CI.
+
+| Tier | Where | Command | Runs |
+|---|---|---|---|
+| quick | locally, while working | `scripts/check.sh quick test.test_gltf_export ...` | lint (`uv lock --check`, ruff at the version pinned in the `dev` extra, copyright headers), then the test modules you name, with the CI settings |
+| ci | GitHub Actions on every pull request and push to `main`; locally before a push | `scripts/check.sh ci` | lint; the viewer type-check and stale-page check; the whole suite with `OPENSCULPTBOY_CI=1` and `OPENSCULPTBOY_SKIP_NONCOMMERCIAL=1`; the wheel installed into a fresh environment with CPU torch |
+| full | locally only | `scripts/check.sh full` | the ci tier, with the local-only tests and the non-commercial data tests where their tools and data are present |
+
+Rules for agents:
+- While working, run `scripts/check.sh quick` with the test modules your change touches. Before a push, run `scripts/check.sh ci`, or at least the jobs your change touches (`scripts/check.sh lint|viewer|tests|package`).
+- `OPENSCULPTBOY_CI=1` skips the tests marked `@local_only(reason)` (`test/markers.py`). Mark a new test `local_only` when it needs something CI lacks: Playwright with the built page (`test_hair_page`), the viewer data build (`test_viewer_body`, `test_hair_parity`, `TestPageSolver`), or licensed files (`test_smpl`).
+- `OPENSCULPTBOY_SKIP_NONCOMMERCIAL=1` makes the download of the non-commercial SMPL and SMPL-X data raise `unittest.SkipTest` (`test/__init__.py`), so CI never fetches it. Put each topology of a loop in its own `subTest`, so that the smpl and smplx cases skip alone.
+- CI runs each workflow only when its files change (GitHub `paths:` filters): `lint.yml` on every push; `tests.yml` (the suite and the package) for changes to `src/`, `test/`, `viewer/src/`, `pyproject.toml`, `uv.lock`, `scripts/check.sh` or the workflow; `viewer.yml` for changes to `viewer/`. Draft pull requests skip the tests and the package; marking a pull request ready for review runs them. A change to the docs alone runs lint only. The repository is public, so GitHub-hosted runners cost nothing; the filters save runner time. When you add a directory that the tests read, add it to the paths of `tests.yml`.
+- A change to `viewer/src` or `viewer/shell.html` needs the rebuilt page committed (`cd viewer && node build.mjs --reuse-data`); the viewer job fails on a stale `viewer/dist/anny_viewer.html`.
+- NAVER's cluster workflow (`.github/workflows/tests.yml`, `.github/scripts/ci-install.sh`) is deleted in this fork. When an upstream merge touches those files, keep them deleted.
+
 ```bash
-uv run python -m unittest discover     # run all tests
-uv run python -m unittest test.test_various  # run a single test file
+uv run --extra dev --extra examples python -m unittest test.test_various  # a single test file, as in the quick tier
 ```
 
 ### Documentation
 ```bash
 bash build_doc.bash  # build HTML docs from the jupytext py:percent tutorials in tutorials/*.py
+```
+
+### Export (OpenSculptBoy)
+```bash
+uv run opensculptboy character > card.json                                  # a character card with the default settings
+uv run opensculptboy export out.glb --character card.json --animation walk  # glTF 2.0 binary; --morph-targets all, --influences 8
+uv run python -m unittest test.test_gltf_export                             # evaluates the file as an engine does and compares it with Anny
 ```
 
 ### Face calibration
@@ -63,16 +93,10 @@ uv run --with playwright python -m anny.viewer.benchmark   # uploads, draws and 
 ### Entry Points
 
 `src/anny/__init__.py` exports the public API:
-- `Anny(...)` — the model class, for full-body and part models alike; calling
-  `anny.Anny(...)` builds a model and `isinstance(model, Anny)` holds for any Anny model.
-  Accepts `rig`, `topology`, `local_changes`, `facial_actions`, `face_shapes`, `phenotypes`,
-  `extrapolate_phenotypes`, `pose_parameterization`, and `skinning_method`.
+- `Anny(...)` — the model class, for full-body and part models alike; calling `anny.Anny(...)` builds a model and `isinstance(model, Anny)` holds for any Anny model. Accepts `rig`, `topology`, `local_changes`, `facial_actions`, `face_shapes`, `phenotypes`, `extrapolate_phenotypes`, `pose_parameterization`, and `skinning_method`.
 - `AnnyInverter`, `KeypointsRegressor`, `Anthropometry` — see Key Subsystems.
-- `create_fullbody_model(...)` — deprecated legacy full-body factory. It preserves the old
-  default rig preset (`rig="default"`) and old full-body defaults; prefer `Anny(...)`.
-- `create_hand_model()` / `create_head_model()` — deprecated part-model factories; use
-  `Anny(rig="anny-hand.R", topology="hand.R")` or
-  `Anny(rig="makehuman-head", topology="head")` instead.
+- `create_fullbody_model(...)` — deprecated legacy full-body factory. It preserves the old default rig preset (`rig="default"`) and old full-body defaults; prefer `Anny(...)`.
+- `create_hand_model()` / `create_head_model()` — deprecated part-model factories; use `Anny(rig="anny-hand.R", topology="hand.R")` or `Anny(rig="makehuman-head", topology="head")` instead.
 
 ### Core Class Hierarchy
 
@@ -104,6 +128,7 @@ uv run --with playwright python -m anny.viewer.benchmark   # uploads, draws and 
 | Pose library | `poses/` | 50 poses and 7 clips as `local-ref` parameters (`data/poses/`), grounding, stool; `poses/authoring/` builds the library on the authoring rig |
 | Correctives | `correctives/` | `SoftTissueCorrectives` (hinge and cone drivers, shapes scaled with the local size; `data/correctives/`); `correctives/authoring/` holds the simulation, the fit and `evaluate` |
 | Hair | `hair/` | `StrandBinding` ties strands to the skin at roots and tips; `chart.py` holds the scalp chart (hairline, fade) and the 8-bit curve codec; `layout.py` loads the scalp layout (`data/hair/scalp_layout.safetensors`: guide and render roots in progressive order, their weights, the simulated guides); `styles.py` loads the 25 styles (`data/hair/styles/*.json` and `styles.safetensors`) and repeats the page's passes A and B and its density volume in NumPy; `dynamics.py` repeats the page's solver; `hair/authoring/` builds the layout, grows the styles (`groom.py`, `presets.py`), the brows and lashes, benchmarks the page, renders the review grid and compares the hairline with photos (`photos.py`); `anatomy.py` gives the landmarks and the outer ears that place the hairline |
+| glTF export | `opensculptboy/export/gltf.py` | `export_glb(path, character, model, animations, morph_targets, max_influences)`: the rest mesh (split at UV seams, `_ANNY_VERTEX` maps back to Anny's vertices), the rig as joints with inverse bind matrices, the strongest 4 or 8 skin weights, morph targets as exact differences of rest meshes (facial actions; face shapes as `.pos`/`.neg`; sparse when few vertices move), and `anny.poses` entries as animations. Anny's Z-up, -Y-facing frame maps to glTF's Y-up, +Z-facing frame by C = (x, y, z) -> (x, z, -y): positions C p, joint matrices C M C^T. The `Character` settings travel in the scene extras (`read_character`) |
 | Viewer data | `viewer/` | `python -m anny.viewer build` writes the page data to `viewer/build/` and runs the node build of `viewer/` |
 | Face shapes | `models/face_shapes.py`, `faces/` | 103 named, symmetric face-shape parameters and 10 detail shapes from ICT-FaceKit (`Anny(face_shapes=...)`, `face_shape_kwargs`), scaled per group with the size of the head; craniofacial landmarks and the measurements of 3D Facial Norms and ANSUR II (`faces/measurements.py`); a face-shape distribution calibrated against measured faces (`faces/distribution.py`); `faces/authoring/` fetches the sources, fits the ICT-FaceKit identity space, calibrates the distribution and benchmarks against FairFace photos |
 
@@ -113,46 +138,11 @@ Phenotypes are blended linearly between discrete anchor states defined in `src/a
 
 ### Face Shapes
 
-`Anny(face_shapes="all")` (or a list of names) adds the face-shape block: each parameter of
-`data/faces/face_shapes.json` sums the left and right MakeHuman targets of the head, forehead, brows,
-eyes, nose, cheeks, mouth, chin and ears into rows `face_shape:{name}.pos` and `.neg`; +1 applies the
-positive targets, -1 the negative ones, and the head archetypes and `chin-triangle` run from 0 to 1.
-The `detail` parameters (`source: "ict"` in the spec) come from `data/faces/detail_shapes.safetensors`:
-the symmetric principal components of the residuals of the ICT-FaceKit fits, written by
-`python -m anny.faces.authoring.detail`. The model cache key carries a digest of both files
-(`face_shape_data_digest`), and the calibration widens the slider ranges to hold the calibrated
-distribution. The rows of a group scale with the size of that part of the head (`Anny.face_shape_scales`),
-measured on the craniofacial landmarks of `data/keypoints/craniofacial.json`, which `ModelData`
-stores for the template and every blend shape. The `anny` and `soma` rig caches carry the face rows;
-`scripts/precompute_rig_caches.py --append` adds rows for new blend shapes and leaves the others
-bit for bit. `anny.faces.distribution.FaceShapeDistribution` samples face values for given phenotypes
-from `data/shape_calibration/face_prior.safetensors`, built by `python -m anny.faces.authoring.calibrate`
-(sources and licences in `data/faces/SOURCES.md`): the covariance of the ICT fits with one variance
-factor per group of at most 1 (no detail shapes below 18 years, and `head-age` held at 0), around
-anny's default face for each age. Only the skull-size shapes (`MEAN_SHAPES`) move the mean, by MAP
-fits to the head measurements of each anchor; the facial features stay at anny's default face,
-because means that also moved them met the nose, lip and face-depth targets through big noses,
-forward chins and thin lips, which looked old and harsh. Check changes to the calibration by
-rendering random faces in the viewer as well as by the measurement check: fits that meet the
-numbers can still give implausible faces. Judge each random face by whether it passes as a normal
-person of that age, and show the calibrated mean in the grid, since the default face hides a shift
-of the mean: `python -m anny.faces.authoring.review` renders that grid from the viewer page.
-`test.test_faces_calibration.TestPlausibleFaces` guards these choices and the facial spread of the
-approved prior (`APPROVED_FACIAL_SPREAD`); when a change breaks one of its tests, review the grid
-with the user before updating the test.
+`Anny(face_shapes="all")` (or a list of names) adds the face-shape block: each parameter of `data/faces/face_shapes.json` sums the left and right MakeHuman targets of the head, forehead, brows, eyes, nose, cheeks, mouth, chin and ears into rows `face_shape:{name}.pos` and `.neg`; +1 applies the positive targets, -1 the negative ones, and the head archetypes and `chin-triangle` run from 0 to 1. The `detail` parameters (`source: "ict"` in the spec) come from `data/faces/detail_shapes.safetensors`: the symmetric principal components of the residuals of the ICT-FaceKit fits, written by `python -m anny.faces.authoring.detail`. The model cache key carries a digest of both files (`face_shape_data_digest`), and the calibration widens the slider ranges to hold the calibrated distribution. The rows of a group scale with the size of that part of the head (`Anny.face_shape_scales`), measured on the craniofacial landmarks of `data/keypoints/craniofacial.json`, which `ModelData` stores for the template and every blend shape. The `anny` and `soma` rig caches carry the face rows; `scripts/precompute_rig_caches.py --append` adds rows for new blend shapes and leaves the others bit for bit. `anny.faces.distribution.FaceShapeDistribution` samples face values for given phenotypes from `data/shape_calibration/face_prior.safetensors`, built by `python -m anny.faces.authoring.calibrate` (sources and licences in `data/faces/SOURCES.md`): the covariance of the ICT fits with one variance factor per group of at most 1 (no detail shapes below 18 years, and `head-age` held at 0), around anny's default face for each age. Only the skull-size shapes (`MEAN_SHAPES`) move the mean, by MAP fits to the head measurements of each anchor; the facial features stay at anny's default face, because means that also moved them met the nose, lip and face-depth targets through big noses, forward chins and thin lips, which looked old and harsh. Check changes to the calibration by rendering random faces in the viewer as well as by the measurement check: fits that meet the numbers can still give implausible faces. Judge each random face by whether it passes as a normal person of that age, and show the calibrated mean in the grid, since the default face hides a shift of the mean: `python -m anny.faces.authoring.review` renders that grid from the viewer page. `test.test_faces_calibration.TestPlausibleFaces` guards these choices and the facial spread of the approved prior (`APPROVED_FACIAL_SPREAD`); when a change breaks one of its tests, review the grid with the user before updating the test.
 
 ### Hairline
 
-Every style shares anny's default hairline (`HAIRLINE_PHI` and `HAIRLINE_EL` in `hair/chart.py`: the minimum elevation
-of hair against the azimuth about the cranium centre), and the style fields count degrees above it. The hairline rests
-on anny's landmarks (`hair/authoring/anatomy.py`: the craniofacial landmarks and the outer ears, which MakeHuman's
-ear-translation targets move in full): the sideburn comes down in front of the ear to the tragion, and the hair meets
-the ear about 2 mm from its front and its top. `test.test_hair_styles.TestHairlineAnatomy` checks both, and the layout
-leaves out the ears (`on_ear`). The front and the temples rest on `python -m anny.hair.authoring.photos`, which
-measures the hair edge (forehead, pupils, temples, sideburns) on FairFace photos and on anny's portraits with
-MediaPipe; the visible edge lies below the natural hairline wherever a fringe falls, so the hairline sits near the
-photos' upper quartile. A change to the table needs `python -m anny.hair.authoring.layout`, then `presets` and the
-viewer build; check it with the anatomy tests, the photo benchmark and the review grid.
+Every style shares anny's default hairline (`HAIRLINE_PHI` and `HAIRLINE_EL` in `hair/chart.py`: the minimum elevation of hair against the azimuth about the cranium centre), and the style fields count degrees above it. The hairline rests on anny's landmarks (`hair/authoring/anatomy.py`: the craniofacial landmarks and the outer ears, which MakeHuman's ear-translation targets move in full): the sideburn comes down in front of the ear to the tragion, and the hair meets the ear about 2 mm from its front and its top. `test.test_hair_styles.TestHairlineAnatomy` checks both, and the layout leaves out the ears (`on_ear`). The front and the temples rest on `python -m anny.hair.authoring.photos`, which measures the hair edge (forehead, pupils, temples, sideburns) on FairFace photos and on anny's portraits with MediaPipe; the visible edge lies below the natural hairline wherever a fringe falls, so the hairline sits near the photos' upper quartile. A change to the table needs `python -m anny.hair.authoring.layout`, then `presets` and the viewer build; check it with the anatomy tests, the photo benchmark and the review grid.
 
 ### Pose Parameterization
 
@@ -164,23 +154,7 @@ The pose, corrective and hair authoring code (`*/authoring/`) works on the autho
 
 ### Web Viewer
 
-`viewer/` is a node project (TypeScript, three.js, esbuild). `src/anny_shape.ts` and `src/subdivision.ts` repeat anny's coefficient maths and the subdivision, and `test/test_viewer_parity.py` checks them against Python. `src/body.ts` rebuilds the fine body for any slider setting, `src/shading.ts` holds the shaders, and `src/main.ts` holds the renderer. `main.ts` hands the interface an `App` object (`src/ui/app.ts`) and calls back through `HOOKS`; the typed modules of `src/ui/` build the interface: `index.ts` (the top bar, the view bar, undo, the shortcuts, the name of the bone under the pointer), `segments.ts` (the Character segment on the left and the Stage segment on the right, each an icon rail and an inspector, bottom sheets on a phone), `character_ui.ts` (Characters, Body, Face, Hair, Skin & eyes), `stage_ui.ts` (Pose, Scene with the frame rate limit), `rig_ui.ts` (the Rig section: the one place for the bones and the skin weights, with the view of the rig, the chosen bone and the list of the bones), `controls.ts` (the slider with its typed value and reset), `camera_nav.ts` (pan within a box around the figure, the floor limit, the height rail, the double-click focus, the angles, the film offset that centres the figure between the inspectors), `stats.ts` (the performance card) and `icons.ts`. `npm run build` writes the single-file page `viewer/dist/anny_viewer.html`; `npx tsc --noEmit` type-checks. The page keeps one `<canvas>` (the screenshot tools select it), so the graphs of the interface are SVG, and `?shot` hides the whole interface. The skeleton (`SKEL` in `main.ts`) and the weight view (`WEIGHTS`: the body's geometry and skin with a material that colours the weights, and the chosen bone that both views share; `setRigView` picks the view) draw into a multisampled overlay (`OVL`) that blends over the canvas after the display pass, so the tone mapping and the accumulation leave them alone; the frame rate limit (`FPS` in `main.ts`) skips display frames in the loop, and the dynamic resolution judges slow frames against it.
-The Body section holds the sliders of `anny.viewer.build.SLIDERS`: anny's six default phenotypes and the three race
-phenotypes, whose values mix by their shares (the build uses `phenotypes="all"`, and 136 components reproduce the
-blend shapes exactly). The Characters section of the Character segment holds presets (`CHARACTERS` in `src/main.ts`) that
-set the phenotype sliders, the face and the colours, as a character creator's presets do; the colour looks set the
-colours only. Random face draws with `sampleFace` (`src/anny_shape.ts`) at the spread of the exported prior, and
-`test/test_viewer_parity.py` checks it against Python.
-The hair lives in `src/hair/`: `data.ts` decodes the scalp layout and the styles and builds the density volume,
-`glsl.ts` holds pass A (the guides follow the body, the pose and the physics) and pass B (the render strands, into a
-float texture that the ribbons read), `gpu.ts` holds the `Hair` class, `sim.ts` the solver and `colliders.ts` its
-capsules. Each piece of data lives at the level where it changes (layout, style, body, pose), and every style control is
-a uniform or an instance count. `Hair.setLod` draws a prefix of the render roots; `main.ts` sets it from the size of the
-head on screen (`updateHairLod`). Moving frames render at the scale of `DYN` in `main.ts` (the dynamic resolution),
-and the build puts the vertices of the corrective shapes first (`HOT` in `build.mjs`), so a frame of a clip uploads one
-small range. `python -m anny.viewer.benchmark` counts the uploads, draw calls and vertices of a moving frame, and the
-Performance card (the chart button of the top bar, the `` ` `` key or `?stats=1`) shows the frame rate, the CPU and GPU time of a frame, the draw calls, the memory and the load times, and runs a 10-second benchmark (`window.frameStats`, `window.__benchmark`). `test/test_hair_parity.py`, `test/test_hair_page.py` and `test/test_hair_dynamics.py`
-check the page's hair against `anny.hair.styles` and `anny.hair.dynamics`.
+`viewer/` is a node project (TypeScript, three.js, esbuild). `src/anny_shape.ts` and `src/subdivision.ts` repeat anny's coefficient maths and the subdivision, and `test/test_viewer_parity.py` checks them against Python. `src/body.ts` rebuilds the fine body for any slider setting, `src/shading.ts` holds the shaders, and `src/main.ts` holds the renderer. `main.ts` hands the interface an `App` object (`src/ui/app.ts`) and calls back through `HOOKS`; the typed modules of `src/ui/` build the interface: `index.ts` (the top bar, the view bar, undo, the shortcuts, the name of the bone under the pointer), `segments.ts` (the Character segment on the left and the Stage segment on the right, each an icon rail and an inspector, bottom sheets on a phone), `character_ui.ts` (Characters, Body, Face, Hair, Skin & eyes), `stage_ui.ts` (Pose, Scene with the frame rate limit), `rig_ui.ts` (the Rig section: the one place for the bones and the skin weights, with the view of the rig, the chosen bone and the list of the bones), `controls.ts` (the slider with its typed value and reset), `camera_nav.ts` (pan within a box around the figure, the floor limit, the height rail, the double-click focus, the angles, the film offset that centres the figure between the inspectors), `stats.ts` (the performance card) and `icons.ts`. `npm run build` writes the single-file page `viewer/dist/anny_viewer.html`; `npx tsc --noEmit` type-checks. The page keeps one `<canvas>` (the screenshot tools select it), so the graphs of the interface are SVG, and `?shot` hides the whole interface. The skeleton (`SKEL` in `main.ts`) and the weight view (`WEIGHTS`: the body's geometry and skin with a material that colours the weights, and the chosen bone that both views share; `setRigView` picks the view) draw into a multisampled overlay (`OVL`) that blends over the canvas after the display pass, so the tone mapping and the accumulation leave them alone; the frame rate limit (`FPS` in `main.ts`) skips display frames in the loop, and the dynamic resolution judges slow frames against it. The Body section holds the sliders of `anny.viewer.build.SLIDERS`: anny's six default phenotypes and the three race phenotypes, whose values mix by their shares (the build uses `phenotypes="all"`, and 136 components reproduce the blend shapes exactly). The Characters section of the Character segment holds presets (`CHARACTERS` in `src/main.ts`) that set the phenotype sliders, the face and the colours, as a character creator's presets do; the colour looks set the colours only. Random face draws with `sampleFace` (`src/anny_shape.ts`) at the spread of the exported prior, and `test/test_viewer_parity.py` checks it against Python. The hair lives in `src/hair/`: `data.ts` decodes the scalp layout and the styles and builds the density volume, `glsl.ts` holds pass A (the guides follow the body, the pose and the physics) and pass B (the render strands, into a float texture that the ribbons read), `gpu.ts` holds the `Hair` class, `sim.ts` the solver and `colliders.ts` its capsules. Each piece of data lives at the level where it changes (layout, style, body, pose), and every style control is a uniform or an instance count. `Hair.setLod` draws a prefix of the render roots; `main.ts` sets it from the size of the head on screen (`updateHairLod`). Moving frames render at the scale of `DYN` in `main.ts` (the dynamic resolution), and the build puts the vertices of the corrective shapes first (`HOT` in `build.mjs`), so a frame of a clip uploads one small range. `python -m anny.viewer.benchmark` counts the uploads, draw calls and vertices of a moving frame, and the Performance card (the chart button of the top bar, the `` ` `` key or `?stats=1`) shows the frame rate, the CPU and GPU time of a frame, the draw calls, the memory and the load times, and runs a 10-second benchmark (`window.frameStats`, `window.__benchmark`). `test/test_hair_parity.py`, `test/test_hair_page.py` and `test/test_hair_dynamics.py` check the page's hair against `anny.hair.styles` and `anny.hair.dynamics`.
 
 ### Dependencies
 

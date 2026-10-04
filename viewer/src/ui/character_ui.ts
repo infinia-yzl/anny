@@ -11,13 +11,6 @@ import { copyText, download, h, iconButton, slug } from './dom.ts';
 import { icon } from './icons.ts';
 import { toast } from './toast.ts';
 
-// anny's age slider in years (anny.shape_distribution: the morphological age mapping of the calibration)
-const AGE_A = [0, 0.05, 0.215, 0.415, 0.67, 0.77, 0.83, 1], AGE_Y = [0, 1, 4, 11, 16, 18, 64, 110];
-export function ageYears(v: number) {
-  let i = 0; while (i < AGE_A.length - 2 && v > AGE_A[i + 1]) i++;
-  return AGE_Y[i] + (AGE_Y[i + 1] - AGE_Y[i]) * (v - AGE_A[i]) / (AGE_A[i + 1] - AGE_A[i]);
-}
-const yearsText = (v: number) => { const y = ageYears(v); return y < 2 ? `${Math.round(y * 12)} mo` : `${Math.round(y)} y`; };
 const RACE_COLOURS: Record<string, string> = { african: '#b8845a', asian: '#d9b77e', caucasian: '#e6c9b4' };
 const HAIR_FAMILIES: [string, string][] = [['short', 'Short'], ['medium', 'Medium'], ['long', 'Long'], ['tied', 'Tied']];
 const HAIR_SLIDERS = [
@@ -87,7 +80,7 @@ export function characterSections(ed: Editor) {
       const b = h('button.card', { type: 'button', 'aria-pressed': 'false', dataset: { name: c.name } },
         h('span.avatar', { style: { '--a': rgb(sk), '--b': c.hair.color, '--c': c.eyes.color }, 'aria-hidden': 'true' }),
         h('span.card-text', {}, h('span.card-name', { text: c.name }),
-          h('span.card-meta', { text: [spec?.label, c.phenotype?.age !== undefined ? yearsText(c.phenotype.age) : ''].filter(Boolean).join(' · ') })));
+          h('span.card-meta', { text: spec?.label || '' })));
       b.addEventListener('click', () => { ed.commit(c.name, JSON.parse(JSON.stringify(c))); ed.origin = c.name; });
       cards.append(b);
       return b;
@@ -155,7 +148,7 @@ export function characterSections(ed: Editor) {
       if (s.race && s === races[0]) list.append(h('h3.sub', { text: 'Ethnicity' }), h('p.note', { text: 'The three values mix by their shares, shown in the bar. Eurasian is Asian and Caucasian at equal values.' }), shares);
       const sl = slider({
         id: 'ed-b-' + s.name, label: s.label, min: 0, max: 1, def: 0.5, ends: s.ends,
-        readout: s.race ? (v) => `${Math.round(100 * app.raceShare({ ...app.look().phenotype, [s.name]: v }, s.name))} %` : s.name === 'age' ? yearsText : undefined,
+        readout: s.race ? (v) => `${Math.round(100 * app.raceShare({ ...app.look().phenotype, [s.name]: v }, s.name))} %` : undefined,
         onStart: () => ed.begin(s.label), onEnd: () => ed.end(),
         onInput: (v) => ed.queue((n) => { n.phenotype[s.name] = v; }),
       });

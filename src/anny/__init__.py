@@ -10,13 +10,9 @@ from anny.models import (
 from anny.anthropometry import Anthropometry
 from anny.anny_inverter import AnnyInverter
 from anny.keypoints import KeypointsRegressor
-import importlib.metadata
+from anny._version import distribution_version
 
-try:
-    __version__ = importlib.metadata.version("anny")
-except importlib.metadata.PackageNotFoundError:
-    # The source directory was imported without installing the package.
-    __version__ = "0.0.0+unknown"
+__version__ = distribution_version()
 
 __all__ = [
     "Anny",

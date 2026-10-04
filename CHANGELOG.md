@@ -6,73 +6,42 @@ All notable changes to this project.
 
 Highlights:
 
-- **Web viewer.** `viewer/dist/anny_viewer.html` renders anny in the browser with skin,
-  eye and hair shading. Its Character panel holds anny's phenotype sliders, with the three
-  race phenotypes for any mix of ethnicities, and every part of the page follows them: the
-  fine body, the skeleton, the eyes, the hair and the corrective shapes. Character presets
-  (Asian and Eurasian women and men) set the body, the face and the colours at once.
-  `python -m anny.viewer build` rebuilds the page.
-- **Poses, soft tissue and hair for anny.** These parts come from the `3D Model`
-  experiment, and they follow the phenotype sliders.
-- **Face and head shapes.** `Anny(face_shapes="all")` adds 103 named, symmetric shapes of the
-  head and the face and 10 detail shapes from the 3D faces of ICT-FaceKit (`face_shape_kwargs`),
-  scaled with the size of the head. A face-shape distribution draws plausible faces for any age,
-  gender and ethnicity around anny's own face: the ICT-FaceKit faces give its spread, and the
-  head measurements of ANSUR II, 3D Facial Norms and the CDC charts give the size of the skull.
-  The viewer's Character panel gains a Face section with a Random face button, and
-  `test.test_faces_calibration.TestPlausibleFaces` guards the approved random faces. Fitted to
-  1,107 FairFace photos, the face shapes halve anny's landmark error.
+- **OpenSculptBoy.** This fork of Anny is now an independent project named OpenSculptBoy, with the `opensculptboy` distribution (the `anny` and `opensculptboy` packages). The README credits Anny, states that AI agents write the additions and carries a no-warranty disclaimer.
+- **glTF export.** `opensculptboy.export_glb` and `opensculptboy export` write a character as a binary glTF 2.0 file with the skeleton, the skin weights (4 or 8 bones per vertex), the 52 ARKit facial actions and the face shapes as morph targets, and the poses and clips as animations. The settings of the character travel in the file's extras (`opensculptboy.read_character`).
+- **Web viewer.** `viewer/dist/anny_viewer.html` renders anny in the browser with skin, eye and hair shading. Its Character panel holds anny's phenotype sliders, with the three race phenotypes for any mix of ethnicities, and every part of the page follows them: the fine body, the skeleton, the eyes, the hair and the corrective shapes. Character presets (Asian and Eurasian women and men) set the body, the face and the colours at once. `python -m anny.viewer build` rebuilds the page.
+- **Poses, soft tissue and hair for anny.** These parts come from the `3D Model` experiment, and they follow the phenotype sliders.
+- **Face and head shapes.** `Anny(face_shapes="all")` adds 103 named, symmetric shapes of the head and the face and 10 detail shapes from the 3D faces of ICT-FaceKit (`face_shape_kwargs`), scaled with the size of the head. A face-shape distribution draws plausible faces for any age, gender and ethnicity around anny's own face: the ICT-FaceKit faces give its spread, and the head measurements of ANSUR II, 3D Facial Norms and the CDC charts give the size of the skull. The viewer's Character panel gains a Face section with a Random face button, and `test.test_faces_calibration.TestPlausibleFaces` guards the approved random faces. Fitted to 1,107 FairFace photos, the face shapes halve anny's landmark error.
 
 ### Added
 
-- `Anny(face_shapes=..., scale_face_shapes=True)` and `forward(face_shape_kwargs=...)`: the
-  face-shape parameters of `data/faces/face_shapes.json` (`scripts/make_face_shape_spec.py`),
-  with `face_shape_labels`, `face_shape_groups`, `face_shape_ranges` and `face_shape_scales`.
-  The `detail` parameters come from `data/faces/detail_shapes.safetensors`
-  (`python -m anny.faces.authoring.detail`).
-- `anny.faces.measurements`: 51 craniofacial landmarks (`data/keypoints/craniofacial.json`,
-  also through `KeypointsRegressor.craniofacial`), the 34 measurements of the 3D Facial Norms
-  database and the head and face measurements of ANSUR II (`CraniofacialMeasurements`), and
-  `Anny.rest_craniofacial_landmarks` on every topology.
-- `anny.faces.distribution.FaceShapeDistribution`: face values for given phenotypes, from
-  `data/shape_calibration/face_prior.safetensors`.
-- `anny.faces.authoring`: the sources (ANSUR II, 3D Facial Norms, CDC growth charts,
-  ICT-FaceKit, FairFace, MediaPipe; all free without an account, see `data/faces/SOURCES.md`),
-  the landmark placement, the fits to the ICT-FaceKit identity space, the calibration and the
-  benchmark against FairFace photographs.
-- `scripts/precompute_rig_caches.py --append`: rows for new blend shapes, leaving the existing
-  rows bit for bit.
+- The `opensculptboy` package: `Character` (the settings of one character, as a JSON card), `opensculptboy.export.gltf` (`export_glb`, `read_character`) and the `opensculptboy` command (`character`, `export`, `names`, `viewer`). `test/test_gltf_export.py` evaluates the exported files as a glTF engine does and compares them with Anny.
+- `Anny(face_shapes=..., scale_face_shapes=True)` and `forward(face_shape_kwargs=...)`: the face-shape parameters of `data/faces/face_shapes.json` (`scripts/make_face_shape_spec.py`), with `face_shape_labels`, `face_shape_groups`, `face_shape_ranges` and `face_shape_scales`. The `detail` parameters come from `data/faces/detail_shapes.safetensors` (`python -m anny.faces.authoring.detail`).
+- `anny.faces.measurements`: 51 craniofacial landmarks (`data/keypoints/craniofacial.json`, also through `KeypointsRegressor.craniofacial`), the 34 measurements of the 3D Facial Norms database and the head and face measurements of ANSUR II (`CraniofacialMeasurements`), and `Anny.rest_craniofacial_landmarks` on every topology.
+- `anny.faces.distribution.FaceShapeDistribution`: face values for given phenotypes, from `data/shape_calibration/face_prior.safetensors`.
+- `anny.faces.authoring`: the sources (ANSUR II, 3D Facial Norms, CDC growth charts, ICT-FaceKit, FairFace, MediaPipe; all free without an account, see `data/faces/SOURCES.md`), the landmark placement, the fits to the ICT-FaceKit identity space, the calibration and the benchmark against FairFace photographs.
+- `scripts/precompute_rig_caches.py --append`: rows for new blend shapes, leaving the existing rows bit for bit.
 - The `faces` extra (`mediapipe`, `pyarrow`, `playwright`) for the face calibration.
 
-- `anny.poses`: a library of 50 poses and 7 clips for the `anny` rig, as `local-ref` pose
-  parameters, with grounding on the floor and a stool for the seated poses.
-  `anny.poses.authoring` holds the tools that build it, including the MakeHuman BVH import.
-- `anny.correctives.SoftTissueCorrectives`: corrective shapes at the shoulders, the elbows,
-  the hips and the knees, scaled with the size of the body around each shape.
-  `anny.correctives.authoring` holds the soft-tissue simulation (TetGen and projective
-  dynamics), the fit of the shapes and `evaluate`, which compares plain skinning and the
-  shapes with a full simulation on any setting of the sliders.
-- `anny.hair.StrandBinding`: strands tied to the skin at their roots and, with
-  `tips=True`, at their tips. `anny.hair.authoring` grows the groom, the brows and the
-  lashes.
-- `anny.utils.subdivision`: Catmull-Clark subdivision as sparse linear operators, and
-  `MixedSubdivision`, which adds one level on a region such as the head.
-- `anny.viewer`: the data build of the page (fine body, detail layers, bakes, compressed
-  shape space, poses, correctives and hair) and its command line.
-- The `viewer` extra (`scipy`, `tetgen`, `embreex`) for the viewer build and the authoring
-  tools.
+- `anny.poses`: a library of 50 poses and 7 clips for the `anny` rig, as `local-ref` pose parameters, with grounding on the floor and a stool for the seated poses. `anny.poses.authoring` holds the tools that build it, including the MakeHuman BVH import.
+- `anny.correctives.SoftTissueCorrectives`: corrective shapes at the shoulders, the elbows, the hips and the knees, scaled with the size of the body around each shape. `anny.correctives.authoring` holds the soft-tissue simulation (TetGen and projective dynamics), the fit of the shapes and `evaluate`, which compares plain skinning and the shapes with a full simulation on any setting of the sliders.
+- `anny.hair.StrandBinding`: strands tied to the skin at their roots and, with `tips=True`, at their tips. `anny.hair.authoring` grows the groom, the brows and the lashes.
+- `anny.utils.subdivision`: Catmull-Clark subdivision as sparse linear operators, and `MixedSubdivision`, which adds one level on a region such as the head.
+- `anny.viewer`: the data build of the page (fine body, detail layers, bakes, compressed shape space, poses, correctives and hair) and its command line.
+- The `viewer` extra (`scipy`, `tetgen`, `embreex`) for the viewer build and the authoring tools.
 
 ### Changed
 
-- `CURRENT_DATA_VERSION` is 12: the model data stores the craniofacial landmarks, and the
-  MakeHuman data gains the face-shape rows.
+- CI runs on GitHub-hosted runners, in three workflows (`.github/workflows/lint.yml`, `viewer.yml`, `tests.yml`), each through `scripts/check.sh`, which also runs the same tiers locally. Each workflow runs only when its files change, and draft pull requests skip the tests. The workflow of NAVER's cluster is removed. `test/markers.py` marks the local-only tests, and CI never downloads the non-commercial SMPL and SMPL-X data.
+- The MakeHuman target files are parsed in one vectorised pass per file (`load_blend_shape`), with the same values as the former parse line by line. A cold model build takes about 19 s instead of about 2 minutes, and existing model caches stay valid.
+- The distribution is named `opensculptboy`; `import anny` is unchanged. `anny.__version__` reads the version of the `opensculptboy` distribution, or of `anny` when upstream Anny is installed.
+- The viewer shows the `age` parameter as Form (Compact to Elongated).
+- The viewer page is titled "OpenSculptBoy Viewer", and its saved pictures are named `opensculptboy-<look>.png`.
+- The logo (`docs/figures/opensculptboy_logo.svg`) and the banner show a character traced from the model, floating upward and reaching for the sky with the right hand. `scripts/make_banner.py` poses the model and writes both files.
+- `CURRENT_DATA_VERSION` is 12: the model data stores the craniofacial landmarks, and the MakeHuman data gains the face-shape rows.
 
 ### Removed
 
-- The `3D Model` experiment. Its parts now live in `anny.utils.subdivision`, `anny.poses`,
-  `anny.correctives`, `anny.hair`, `anny.viewer` and `viewer/`. Git history keeps the folder at
-  commit `b10538d`, including the CC0 pose packs that `anny.poses.authoring` rebuilds the
-  pose library from.
+- The `3D Model` experiment. Its parts now live in `anny.utils.subdivision`, `anny.poses`, `anny.correctives`, `anny.hair`, `anny.viewer` and `viewer/`. Git history keeps the folder at commit `b10538d`, including the CC0 pose packs that `anny.poses.authoring` rebuilds the pose library from.
 
 ## v0.6.1 - 2026-09-28
 

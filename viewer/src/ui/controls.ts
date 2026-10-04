@@ -18,7 +18,7 @@ export interface SliderOptions {
   ends?: string[];
   title?: string;
   digits?: number;
-  // a readable form of the value (years, per cent, degrees), shown next to the number
+  // a readable form of the value (per cent, degrees), shown next to the number
   readout?: (v: number) => string;
   // a custom track (a colour gradient): no fill from the default
   track?: boolean;

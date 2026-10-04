@@ -141,7 +141,7 @@ export function initUI(app: App): UI {
     app.renderPass();
     app.canvas.toBlob((b) => {
       if (!b) { toast('The picture could not be made', 'error'); return; }
-      const name = `anny-${slug(app.look().name)}.png`;
+      const name = `opensculptboy-${slug(app.look().name)}.png`;
       if (!hosted) { download(name, b); toast('Image saved'); return; }
       const url = URL.createObjectURL(b);
       const close = iconButton('close', 'Close', { key: 'Esc', tip: 'left', on: () => shotDlg.close() });
@@ -169,7 +169,7 @@ export function initUI(app: App): UI {
     { label: 'Help and shortcuts', icon: 'help', on: () => help.showModal() },
   ]);
   const top = h('header.topbar', {},
-    h('div.brand', {}, h('span.brand-mark', { text: 'anny' }), h('span.brand-name', { text: 'Viewer' })), identity,
+    h('div.brand', {}, h('span.brand-mark', { text: 'OpenSculptBoy' }), h('span.brand-name', { text: 'Viewer' })), identity,
     h('div.actions', {}, undoB, redoB, h('span.sep'), diceB, saveB, statsB, fullB, helpB, moreB));
   statsB.setAttribute('aria-pressed', 'false');
   stats.onToggle = (on) => statsB.setAttribute('aria-pressed', String(on));

@@ -90,7 +90,8 @@ class TestFaceShapes(unittest.TestCase):
             if model.face_shape_ranges[name][0] < 0:
                 self.assertGreater(moved[i].max().item(), 1e-4, name)
             else:
-                self.assertEqual(moved[i].max().item(), 0.0, name)
+                # rounding noise of the batched product (about 1e-16 on some CPUs) is no movement
+                self.assertLess(moved[i].max().item(), 1e-9, name)
 
     def test_symmetry(self):
         model = self.model
@@ -172,12 +173,13 @@ class TestFaceShapes(unittest.TestCase):
 
     def test_other_topologies(self):
         for kwargs in (dict(topology="smplx"), dict(rig="soma", topology="soma")):
-            model = anny.Anny(face_shapes=["nose-scale-horiz"], **kwargs).to(
-                dtype=torch.float64
-            )
-            a = model()["rest_vertices"]
-            b = model(face_shape_kwargs={"nose-scale-horiz": 1.0})["rest_vertices"]
-            self.assertGreater((a - b).norm(dim=-1).max().item(), 1e-3, kwargs)
+            with self.subTest(**kwargs):
+                model = anny.Anny(face_shapes=["nose-scale-horiz"], **kwargs).to(
+                    dtype=torch.float64
+                )
+                a = model()["rest_vertices"]
+                b = model(face_shape_kwargs={"nose-scale-horiz": 1.0})["rest_vertices"]
+                self.assertGreater((a - b).norm(dim=-1).max().item(), 1e-3, kwargs)
 
 
 if __name__ == "__main__":

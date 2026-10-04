@@ -47,7 +47,7 @@ export function helpSheet() {
   const close = iconButton('close', 'Close', { key: 'Esc', tip: 'left' });
   const dlg = h('dialog.help', { 'aria-labelledby': 'help-title' },
     h('header.help-head', {}, h('h2', { id: 'help-title', text: 'Anny Viewer' }), close),
-    h('p.help-lead', { text: 'Anny is a differentiable human body model for every age, built on the MakeHuman assets. This page renders anny live in your browser: skin with subsurface scattering, eyes with a refractive cornea, and up to 64,000 hair strands that follow the body and its motion.' }),
+    h('p.help-lead', { text: 'OpenSculptBoy characters are humanoid 3D models built on the Anny body model. This page renders them live, with skin, eye and hair shading.' }),
     h('div.help-grid', {}, ...SHORTCUTS.map(([title, rows]) => h('section', {}, h('h3', { text: title }),
       h('dl', {}, ...rows.flatMap(([k, v]) => [h('dt', {}, ...k.split(', ').map((x, i) => [i ? ', ' : '', h('kbd', { text: x })]).flat()), h('dd', { text: v })]))))),
   ) as HTMLDialogElement;

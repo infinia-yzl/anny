@@ -79,7 +79,7 @@ export function download(name: string, blob: Blob) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-export function slug(s: string) { return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'anny'; }
+export function slug(s: string) { return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'opensculptboy'; }
 
 // copy text: the clipboard where the page may use it, else false (the caller shows the text to copy by hand)
 export async function copyText(text: string): Promise<boolean> {

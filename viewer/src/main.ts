@@ -784,6 +784,10 @@ function makeStrandMesh(hair: Hair, p, defines) {
 const BODY: any = { ready: false, anny: null as AnnyBody | null, geo: null, values: null, face: null, faceSliders: [], sliders: [], lastMs: 0, lastTotalMs: 0, lastTiming: {} };
 // anny's race phenotypes: their values mix by their shares
 const RACES = ['african', 'asian', 'caucasian'];
+// The characters are humanoid 3D models: the `age` parameter blends the proportions of the mesh, from compact to
+// elongated, and the page shows it as Form, without any notion of age.
+const SLIDER_LABELS: Record<string, string> = { age: 'Form' };
+const SLIDER_ENDS: Record<string, string[]> = { age: ['Compact', 'Elongated'] };
 function raceShare(phenotype: any, name: string) {
   const v = (k: string) => phenotype[k] ?? PHENOTYPE_DEFAULT;
   const sum = RACES.reduce((a, k) => a + v(k), 0);
@@ -829,8 +833,8 @@ function initBody(meta: any, B: any, geo: any) {
   }, at.position.array, at.normal.array, at.nsmooth.array);
   body.detailStep = B.head_detail.info.step || 1e-5;
   BODY.anny = body; BODY.geo = geo;
-  BODY.sliders = sm.sliders.map((name: string) => ({ name, label: name.charAt(0).toUpperCase() + name.slice(1),
-    race: RACES.includes(name), ends: RACES.includes(name) ? [] : sliderEnds(sm.tables, name) }));
+  BODY.sliders = sm.sliders.map((name: string) => ({ name, label: SLIDER_LABELS[name] || name.charAt(0).toUpperCase() + name.slice(1),
+    race: RACES.includes(name), ends: RACES.includes(name) ? [] : SLIDER_ENDS[name] || sliderEnds(sm.tables, name) }));
   BODY.face = face || null;
   BODY.faceSliders = face ? face.tables.names.map((name: string, i: number) => ({ name, group: face.tables.groups[i],
     label: faceLabel(name, face.tables.groups[i]), range: face.tables.ranges[i], ends: (face.tables.ends || [])[i] || ['', ''] })) : [];

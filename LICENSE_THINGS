@@ -1,0 +1,43 @@
+Third-party licences and attributions
+
+The code of this repository is licensed under the Apache License, Version 2.0 (see LICENSE).
+The data and tools below keep their own licences, which are stated by each source. The last
+entry is not part of the package and is not licensed for commercial use.
+
+Data bundled in the package (src/anny/data)
+
+  mpfb2/                     MakeHuman assets adapted from MPFB2 (https://github.com/makehumancommunity/mpfb2/).
+                             CC0 1.0 Universal. Full text in src/anny/data/mpfb2/LICENSE.md.
+  faceunits01/               Face Units asset pack by Mika Suominen (MakeHuman community).
+                             CC0 1.0 Universal.
+  poses/                     Poses and clips built from the MakeHuman community pose packs
+                             (makehuman_system_poses_cc0, poses01_cc0 to poses05_cc0). CC0 1.0 Universal.
+                             Credits per pose in src/anny/data/poses/library.json.
+  soma/                      Topology and rig adapted from SOMA-X (https://github.com/NVlabs/SOMA-X).
+                             Apache License, Version 2.0.
+  faces/, keypoints/,
+  shape_calibration/         Derived values only. No source data is redistributed. Sources and their
+                             licences are listed in src/anny/data/faces/SOURCES.md:
+                               ICT-FaceKit (https://github.com/USC-ICT/ICT-FaceKit), MIT licence.
+                                 Li, R., Bladin, K., Zhao, Y., et al. Learning Formation of Physically-Based
+                                 Face Attributes. CVPR 2020.
+                               ANSUR II, 2012 Anthropometric Survey of U.S. Army Personnel. Public release.
+                               3D Facial Norms, FaceBase (www.facebase.org). Funded by NIDCR (U01-DE020078).
+                                 Weinberg, S. M., et al. Cleft Palate-Craniofacial Journal 53(6), 2016.
+                               CDC growth charts. Public domain.
+                               FairFace (https://github.com/joojs/fairface), CC BY 4.0. Kärkkäinen, K., and
+                                 Joo, J. FairFace: Face Attribute Dataset for Balanced Race, Gender, and Age.
+                                 WACV 2021. Used for the benchmark of face proportions only.
+                               MediaPipe Face Landmarker and canonical face model, Apache License, Version 2.0.
+
+Tools and libraries used at authoring time only (not part of the package)
+
+  MediaPipe models (face landmarks, image segmenter), Apache License, Version 2.0.
+
+Not part of the package
+
+  SMPL and SMPL-X conversion data. It is downloaded on request
+  (anny.paths.download_noncommercial_data) when a model uses the "smpl" or "smplx" topology or
+  the SMPL and SMPLX wrapper classes. It is licensed for non-commercial use only. See the
+  LICENSE.txt and NOTICE.txt files inside the downloaded archive. The "anny", "makehuman" and
+  "soma" topologies do not fetch it.

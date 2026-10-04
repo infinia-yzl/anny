@@ -1,29 +1,46 @@
-<!-- <h1 style="text-align: center;">Anny Body</h1> -->
-
 <p align="center">
-  <img src="docs/figures/anny_banner.svg" alt="Anny — A human model for every body" width="900" align="top" style="display:block;width:100%;max-width:900px;margin:auto"/>
-  <img src="docs/figures/anny_teaser.jpg" alt="Anny" width="900" align="top" style="display:block;width:100%;max-width:900px;margin:auto"/>
+  <img src="docs/figures/opensculptboy_banner.svg" alt="OpenSculptBoy: open humanoid characters for free, unlimited creativity, built on the Anny body model" width="900" style="display:block;width:100%;max-width:900px;margin:auto"/>
 </p>
 
-Anny is a differentiable human body mesh model written in PyTorch.
-Anny models a large variety of human body shapes, from infants to elders, using a common topology and parameter space.
+# OpenSculptBoy
 
+[![Tests](https://github.com/infinia-yzl/anny/actions/workflows/tests.yml/badge.svg)](https://github.com/infinia-yzl/anny/actions/workflows/tests.yml)
+
+**OpenSculptBoy is an open toolkit for humanoid 3D characters: a differentiable body model in PyTorch, a web viewer and a glTF export for game engines. It is built on [Anny](https://github.com/naver/anny) by NAVER LABS Europe.**
 
 <p align="center">
-  <a href="https://pypi.org/project/anny/"><img src="https://img.shields.io/pypi/v/anny?color=3776AB" alt="PyPI version"/></a>
-  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-2E7D32" alt="License"/></a>
-  <a href="https://arxiv.org/abs/2511.03589"><img src="https://img.shields.io/badge/arXiv-2511.03589-B31B1B" alt="arXiv"/></a>
-  <a href="http://anny-demo.europe.naverlabs.com/"><img src="https://img.shields.io/badge/Demo-7C3AED" alt="Demo"/></a>
-  <a href="https://europe.naverlabs.com/blog/anny-a-free-to-use-3d-human-parametric-model-for-all-ages/"><img src="https://img.shields.io/badge/Blogpost-C75B12" alt="Blogpost"/></a>
+  <img src="docs/figures/anny_teaser.jpg" alt="Renders of the Anny body model, the foundation of OpenSculptBoy" width="900" style="display:block;width:100%;max-width:900px;margin:auto"/>
 </p>
+
+> ## Built and maintained by AI agents
+>
+> AI coding agents ([Claude Code](https://claude.com/claude-code)) write and maintain everything that this repository adds to Anny. One human author ([infinia-yzl](https://github.com/infinia-yzl)) sets the goals and publishes the repository. The author has not read every line, and agents make mistakes, so review and test the code before you rely on it. The project comes **without any warranty** (see [Disclaimer](#disclaimer-and-no-warranty)).
+
+### Credits
+
+OpenSculptBoy builds on:
+- **[Anny](https://github.com/naver/anny)** by Romain Brégier, Guénolé Fiche, Laura Bravo-Sánchez, Thomas Lucas, Matthieu Armando, Philippe Weinzaepfel, Grégory Rogez and Fabien Baradel at [NAVER LABS Europe](https://europe.naverlabs.com/). The body model, its parameters, the topologies, the rigs and the `anny` package come from Anny (Apache License 2.0, Copyright (c) 2025 NAVER Corp.). If you use OpenSculptBoy in research, please cite the Anny paper (see [Citation](#citation)).
+- **[MakeHuman](https://static.makehumancommunity.org/)** and **[MPFB2](https://github.com/makehumancommunity/mpfb2/)**, whose CC0 assets (targets, rigs, poses and the face units of Mika Suominen) are the base of Anny.
+- **[SOMA-X](https://github.com/NVlabs/SOMA-X)** (NVIDIA), for the `soma` rig and topology.
+- **[ICT-FaceKit](https://github.com/USC-ICT/ICT-FaceKit)**, MediaPipe, and the datasets listed in [LICENSE_THINGS](LICENSE_THINGS) and `src/anny/data/faces/SOURCES.md`, for the face shapes.
+
+These authors have not reviewed or endorsed OpenSculptBoy.
+
+### About the names
+
+OpenSculptBoy follows the naming of [OpenTierBoy](https://github.com/infinia-yzl/opentierboy), the author's open-source tier list maker: "Open" for open source, the craft, and "Boy" for the helper at the artist's side, like a sculptor's studio assistant.
+
+The `opensculptboy` distribution holds two packages: `anny` (`src/anny`), the upstream body model, which keeps its name so that upstream updates merge cleanly, and `opensculptboy` (`src/opensculptboy`), with the glTF export and the `opensculptboy` command.
 
 ### Features
-- Anny is based on the tremendous work of the [MakeHuman](https://static.makehumancommunity.org/) community, which offers plenty of opportunities for extensions.
-- We provide both full body and part-specific models for hands and faces.
-- Anny is open-source and free.
-- A web viewer renders anny live in the browser, with face shapes, hairstyles, poses and a character editor.
+- Anny's parametric body model: full body, hand and head, with 9 shape parameters (`model.phenotype_labels`).
+- 103 face shapes with a random face sampler, 25 procedural hairstyles, 50 poses and 7 clips, and soft-tissue correctives.
+- A web viewer with a character editor.
+- Export to glTF 2.0 (`.glb`) with the skeleton, the skin weights, facial morph targets and animations (see [Export to glTF](#export-to-gltf)).
+- Planned: a desktop companion.
+- Apache License 2.0, with CC0 and other permissive data (see [LICENSE_THINGS](LICENSE_THINGS)).
 
-### News
+### Upstream news (Anny)
  - **2026-08-06**: v0.6: New "anny" rig, facial actions, improved SOMA compatibility, API refactoring, and better torch.compile support. See [CHANGELOG.md](CHANGELOG.md) for more details.
  - **2026-06-03**: v0.5: code refactoring (one can now use `anny.Anny` syntax). Support for ["soma"](https://github.com/NVlabs/SOMA-X) rig and topology. SMPLX wrapper with "anny" topology support.
  - **2026-02-04**: v0.3: "smplx" topology available for interoperability with [SMPL-X](https://smpl-x.is.tue.mpg.de/) (non-commercial use only). Nipple blend shapes excluded from default settings (use `local_changes="all"` for backward compatibility).
@@ -32,13 +49,16 @@ Anny models a large variety of human body shapes, from infants to elders, using 
 
 ## Installation
 
+Install OpenSculptBoy from this repository. It adds the viewer, the face shapes, the hair, the poses and the correctives to Anny:
+
 ```bash
-pip install anny[smpl,examples] # Full install (non-free dependencies).
-pip install anny[examples] # Free install.
-pip install anny # Minimal install.
-# Note that the free install may download non-commercial only assets when needed.
-pip install anny[examples]@git+https://github.com/naver/anny.git # latest sources.
+pip install "opensculptboy @ git+https://github.com/infinia-yzl/anny.git"                 # the model, the export and the opensculptboy command
+pip install "opensculptboy[examples] @ git+https://github.com/infinia-yzl/anny.git"       # with the examples and tutorials
+pip install "opensculptboy[smpl,examples] @ git+https://github.com/infinia-yzl/anny.git"  # with the SMPL and SMPL-X wrappers (non-commercial data, see Disclaimer)
+uv sync --extra examples                                                             # in a clone of this repository
 ```
+
+OpenSculptBoy is not on PyPI yet. Uninstall the upstream `anny` distribution first (`pip uninstall anny`), because both distributions install the `anny` package. The SMPL and SMPL-X topologies download non-commercial data on first use.
 
 ## Quickstart example
 ```python
@@ -83,19 +103,19 @@ python -m anny.examples.interactive_demo
 
 ### Poses, soft tissue and hair
 
-Anny ships a pose library, corrective shapes for the joints and hair that follows the body. All of them follow the phenotype sliders:
-- `anny.poses` holds 50 poses and 7 animation clips for the `anny` rig as `local-ref` pose parameters. The root offset scales with the hip height of the body, the lowest point of the posed body stands on the floor, and the seated poses come with a stool that fits the body (`anny.poses.names()` lists the entries).
-- `anny.correctives.SoftTissueCorrectives(model)` adds corrective shapes at the shoulders, the elbows, the hips and the knees. A soft-tissue simulation made the shapes on the default body, and each shape scales with the size of the body around it.
-- `anny.hair.StrandBinding` ties hair strands to the skin at their roots and at their tips, so a groom made on one body follows every setting of the sliders.
-- `anny.hair.styles` holds 25 procedural hairstyles: short barber cuts (buzz, crew, low taper fade, mid fade, textured and French crops, curly top, side part, quiff, pixie), medium and long cuts (curtains, mullet, wolf cut, bobs, lob, long layers, long straight and wavy) and tied styles (ponytails and buns). Each style is a JSON spec and about 1,700 guide curves on a scalp layout that all styles share; `strands()` builds the render strands from the guides, with the length, curl, volume, density and fade of the style as parameters. `anny.hair.dynamics.HairSim` is the solver of the hair's physics.
-- The hairline that every style shares rests on anny's own landmarks and on photographs. The sideburns come down in front of the ears to the tragion, and the hair meets the ears about 2 mm from their front and their top. `python -m anny.hair.authoring.photos` measures the hair edge of each style on the forehead, at the temples and at the sideburns, and compares it with FairFace photos (`uv sync --extra faces`).
-- `anny.utils.subdivision` holds Catmull-Clark subdivision as sparse linear operators, with a mixed subdivision that adds one level on the head.
+All of these follow the phenotype sliders:
+- `anny.poses` holds 50 poses and 7 animation clips for the `anny` rig, standing on the floor, with a stool for the seated poses (`anny.poses.names()` lists them).
+- `anny.correctives.SoftTissueCorrectives(model)` adds corrective shapes at the shoulders, the elbows, the hips and the knees.
+- `anny.hair.StrandBinding` ties hair strands to the skin, so a groom follows every body.
+- `anny.hair.styles` holds 25 procedural hairstyles, from buzz cuts to long hair and buns, with length, curl, volume, density and fade parameters. `anny.hair.dynamics.HairSim` simulates the hair.
+- `python -m anny.hair.authoring.photos` compares the shared hairline with photos (`uv sync --extra faces`).
+- `anny.utils.subdivision` holds Catmull-Clark subdivision as sparse linear operators.
 
 ```python
 import anny, anny.poses
 from anny.correctives import SoftTissueCorrectives
 model = anny.Anny()
-phenotype = {"age": 0.3}
+phenotype = {"weight": 0.3, "muscle": 0.7}
 posed = anny.poses.pose_parameters(model, "seated", phenotype_kwargs=phenotype)
 output = model(pose_parameters=posed["pose_parameters"], phenotype_kwargs=phenotype)
 output = SoftTissueCorrectives(model)(output)  # corrected output["vertices"]
@@ -103,43 +123,72 @@ output = SoftTissueCorrectives(model)(output)  # corrected output["vertices"]
 
 ### Face and head shapes
 
-`anny.Anny(face_shapes="all")` adds 103 named, symmetric shapes of the head and the face, built from the MakeHuman face targets: head archetypes (oval, round, square and others), and the size, the position and the form of the eyes, the brows, the nose, the cheeks, the mouth, the chin and the ears. Ten detail shapes complete them: they are the symmetric principal components of what the named shapes miss of the 3D faces of ICT-FaceKit. Each group of shapes scales with the size of the matching part of the head, so the shapes stay in proportion on a child. `anny.faces.distribution.FaceShapeDistribution` draws face values for any age, gender, weight and muscle, from a distribution calibrated against measured faces, and `anny.faces.measurements` measures heads as the 3D Facial Norms database and the ANSUR II survey do:
+`anny.Anny(face_shapes="all")` adds 103 named, symmetric shapes of the head and the face from the MakeHuman targets, and 10 detail shapes from the 3D faces of ICT-FaceKit. The shapes scale with the size of the head. `FaceShapeDistribution` draws random faces, and `CraniofacialMeasurements` measures the head mesh:
 
 ```python
 import anny, torch
 from anny.faces.distribution import FaceShapeDistribution
 from anny.faces.measurements import CraniofacialMeasurements
 model = anny.Anny(face_shapes="all")
-phenotype = {"age": torch.full((4,), 0.8), "gender": torch.tensor([0.0, 0.0, 1.0, 1.0])}
+phenotype = {"weight": torch.full((4,), 0.6), "gender": torch.tensor([0.0, 0.0, 1.0, 1.0])}
 faces = FaceShapeDistribution(model).sample(phenotype)
 output = model(phenotype_kwargs=phenotype, face_shape_kwargs=faces)
 lengths = CraniofacialMeasurements(model)(output)["headlength"]  # mm
 ```
 
-The distribution takes the spread of faces from fits of anny to the ICT-FaceKit identity space, and random faces vary around anny's own face for each age. Only the size of the skull follows the measurements of ANSUR II, 3D Facial Norms and the CDC growth charts: means that also moved the facial features met the measurements through big noses, forward chins and thin lips, and those faces looked old and harsh. So the facial measurements keep the gaps of anny's own faces (0.9 to 1.9 SD for adults), and `sample()` draws at 0.6 of the calibrated spread, where every random face passes as a normal person of that age. Fitted to the landmarks of 1,107 FairFace photos, the face shapes halve anny's landmark error. The calibration uses only free sources that download without an account: the ICT-FaceKit identity space, ANSUR II, the 3D Facial Norms summary statistics, the CDC growth charts, and FairFace photographs with MediaPipe for the benchmark (see `src/anny/data/faces/SOURCES.md` and `python -m anny.faces.authoring.benchmark`).
+The distribution of random faces comes from fits of the face shapes to the ICT-FaceKit identity space, and it varies around anny's own face. `src/anny/data/faces/SOURCES.md` lists the data behind it and their licences, and `python -m anny.faces.authoring.benchmark` rebuilds its checks.
 
 ### Web viewer
 
-`viewer/dist/anny_viewer.html` renders anny in a browser with WebGL2, from one file. It carries skin shading with subsurface scattering, eyes with a refractive cornea and hair of up to 64,000 strands. To rebuild the page (node 22 or later is needed):
+`viewer/dist/anny_viewer.html` renders the characters in a browser with WebGL2, from one file, with skin, eye and hair shading. To rebuild the page (node 22 or later):
 
 ```bash
 uv sync --extra viewer
 uv run python -m anny.viewer build
 ```
 
-The page has two segments, and each has an icon rail and an inspector:
-- The **Character** segment on the left edits who the figure is. *Characters* holds presets (Asian and Eurasian women and men) that set the body, the face, the hair and the colours, colour looks, and the preset text (copy, paste, download or open a JSON file). *Body* holds anny's phenotype sliders, which run from 0 to 1 with anny's default at 0.5, with the age in years and the height of the body; the three race phenotypes mix by their shares (Eurasian is Asian and Caucasian at equal values). *Face* holds the 103 face shapes in groups, with a search field and a Random face button that draws from the calibrated distribution. *Hair* holds the 25 styles of `anny.hair.styles` by length, with their sliders (length, curl, volume, density and, on the fades, the height of the fade), the side of the part and the colour. *Skin & eyes* holds the tone, the undertone and the eye colour.
-- The **Stage** segment on the right controls how the figure is shown. *Pose* plays the poses and clips of `anny.poses` with a timeline and the soft-tissue correctives. *Rig* is the one place for the bones and the skin weights (see below). *Scene* holds the four lighting presets, a rotation of the lights, the exposure, three quality presets (Auto, Sharp and Fast), a frame rate limit (the display's rate, 60, 30 or 20 frames per second) that saves energy while the figure or the camera moves, and the display switches: hair, hair physics and turntable.
+- The **Character** segment on the left holds presets, the body sliders (the `age` parameter appears as *Form*), the 103 face shapes with a Random face button, 25 hairstyles, and the skin and eye colours.
+- The **Stage** segment on the right holds the poses and clips, the rig and skin-weight views, and the lighting and quality settings.
+- The camera orbits with a drag and zooms with the wheel. The `?` key lists every shortcut.
+- The **Performance** card (the `` ` `` key or `?stats=1`) shows the frame times and runs a 10-second benchmark.
 
-Every slider shows its value in a field that takes a typed value, a mark at its default and a reset button. Undo and redo cover every edit of the look (Ctrl+Z and Ctrl+Shift+Z). The top bar also randomises the character, its body, face, hair or colours, and it saves the picture as a PNG file.
+After a change to the page alone, `node viewer/build.mjs --reuse-data` rebuilds it in seconds. `node viewer/build.mjs --parts <dir>` writes the model data in separate files for hosts that limit the size of a file.
 
-The camera orbits with a drag, moves with a right-drag, Shift+drag or two fingers, and zooms toward the pointer. A double-click focuses on the nearest joint, such as a hand or a foot. The height rail at the side of the view moves the camera up and down the body and flies to the head, the chest, the hips, the knees or the feet. The view bar holds the framings (full body, upper body and face), the angles (front, three-quarter, side and back), the turntable and the refinement of the picture. The *Rig* section (the `R` key) shows the rig in one of three ways: off, the skeleton (Shift+B), or the skin weights with the skeleton (Shift+W). The skeleton draws the 104 bones in front of the body, the figure's left side in teal and its right side in orange, and names the bone under the pointer. The skin weights colour the body by the bones that move it: a colour per bone, blended where bones share a vertex, or the weight of the chosen bone from blue (0) to red (1). The pointer on a bone chooses it, a click keeps it, and the section lists every bone by part of the body with a search. Its card gives the vertices the bone weighs on and the skin it leads. The figure stays centred in the space between the inspectors, and the camera stays above the floor. The `?` key opens a sheet of every keyboard shortcut.
+## Export to glTF
 
-The GPU builds the hair strands from the guides of the style, so a slider moves the hair at once and a still picture costs no hair work. The hair's physics moves 384 guides with the dynamic follow-the-leader method of Müller et al. (2012) and the shape constraints of Han and Harada (2012), against capsules on the head, the neck, the chest and the shoulders. The groom keeps its shape while the head rests, since only the change of gravity in the head's frame acts on it, and the solver sleeps once the hair comes to rest.
+`opensculptboy.export_glb` writes a character as a binary glTF 2.0 file (`.glb`), the open format that Blender, Godot, Unity, Unreal Engine and three.js import:
 
-While the figure or the camera moves, the page draws at a lower resolution when frames come slower than 48 per second (or 80 % of the frame rate limit), and it draws fewer, wider strands when the head is small on screen. It refines the still picture at full resolution. The **Performance** card (the chart button, the `` ` `` key or `?stats=1`) shows the frame rate with a graph of the frame times, the CPU and GPU time of a frame (the GPU time where the browser supports timer queries), the render scale, the refinement, the draw calls and triangles, the GPU memory, the work of the hair, the device and the load times. It runs a 10-second benchmark, and it collapses to a small HUD.
+```python
+from opensculptboy import Character, export_glb, read_character
 
-The build caches its slow stages, such as the bakes and the hair groom, under the cache directory (see [Caching](#caching)). After a change to the page alone, `node viewer/build.mjs --reuse-data` rebuilds it in seconds with the model data of the last build. For hosts that limit the size of a file, `node viewer/build.mjs --parts <dir>` also writes the page with its model data in separate text files that the page fetches next to itself. The viewer grew from an earlier stand-alone experiment, the `3D Model` folder, which git history keeps at commit `b10538d`.
+character = Character(name="ada", phenotype={"muscle": 0.7, "weight": 0.6}, facial_actions={"mouthSmileLeft": 0.4})
+export_glb("ada.glb", character, animations=["walk", "wave", "seated"])
+read_character("ada.glb")  # the same Character, from the extras of the file
+```
+
+The same export from the command line, with a character card (JSON):
+
+```bash
+opensculptboy character > ada.json                # a card with the default settings; edit its values
+opensculptboy export ada.glb --character ada.json --animation walk --animation wave
+opensculptboy export ada.glb --morph-targets all  # the facial actions and all 113 face shapes
+opensculptboy names poses                         # the 50 poses and 7 clips of the library
+```
+
+The file holds:
+- The mesh in the rest pose of the character (13,718 Anny vertices, split into 14,898 at the UV seams), with normals and UVs, standing on the floor.
+- The 104 bones of the `anny` rig as a skeleton, with the skin weights of the 4 strongest bones of each vertex (`--influences 8` adds a second set).
+- Morph targets named after the 52 ARKit facial actions (`jawOpen`, `eyeBlinkLeft`, ...), and on request the face shapes (`<name>.pos` and `<name>.neg`). Sparse storage keeps them small.
+- One animation for each pose or clip of `anny.poses` that you name.
+- The settings of the character in the scene `extras`, and the Anny vertex of each glTF vertex in the `_ANNY_VERTEX` attribute.
+
+The phenotype, the local changes and the face shapes that are not morph targets are baked into the mesh and the skeleton. Axes: metres, Y up, the figure faces +Z.
+
+Accuracy, measured against Anny's own output on the walk, run, arms-crossed and seated animations of a default character: with 4 bones per vertex, 99 % of the vertices lie within 4 mm and the worst within 17 mm, because Anny uses up to 9 bones per vertex; with 8 bones per vertex, every vertex lies within 0.2 mm. The morph targets match Anny exactly. `test/test_gltf_export.py` evaluates the file as an engine does and checks it against Anny.
+
+Tested so far: the [Khronos glTF validator](https://github.com/KhronosGroup/glTF-Validator) reports no errors and no warnings, and three.js (r186, `GLTFLoader`) draws the skeleton, the morph targets and the animations. Blender, Godot, Unity and Unreal Engine have not been tested yet.
+
+Not in the file yet: textures (the material is a plain skin colour), the hair, the soft-tissue correctives (the export uses plain skinning) and the eyes' shading.
 
 ## Technical details
 
@@ -171,9 +220,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full list of changes.
 
 ### Caching
 
-Anny parses MakeHuman assets and caches pre-computed blend shape data to avoid recomputation on subsequent runs.
-The first instantiation of a model can take a few minutes. 
-By default the cache is stored in `~/.cache/anny/`. To use a different location, set the `ANNY_CACHE_DIR` environment variable:
+Anny parses MakeHuman assets and caches pre-computed blend shape data to avoid recomputation on subsequent runs. The first instantiation of a model can take a few minutes. By default the cache is stored in `~/.cache/anny/`. To use a different location, set the `ANNY_CACHE_DIR` environment variable:
 
 ```bash
 export ANNY_CACHE_DIR=/path/to/cache
@@ -182,19 +229,32 @@ export ANNY_CACHE_DIR=/path/to/cache
 
 ## License
 
-The code of Anny, Copyright (c) 2025 NAVER Corp., is licensed under the Apache License, Version 2.0 (see [LICENSE](LICENSE)).
+The code of Anny, Copyright (c) 2025 NAVER Corp., and the modifications in this repository are licensed under the Apache License, Version 2.0 (see [LICENSE](LICENSE), [NOTICE](NOTICE) and [LICENSE_THINGS](LICENSE_THINGS)).
 
 **data/mpfb2**: *Anny* relies on [MakeHuman](https://static.makehumancommunity.org/) assets adapted from [MPFB2](https://github.com/makehumancommunity/mpfb2/) that are licensed under the [CC0 1.0 Universal](src/anny/data/mpfb2/LICENSE.md) License.
 
 **data/faceunits01**: Facial actions of *Anny* rely on [Face Units asset pack](https://static.makehumancommunity.org/assets/assetpacks/index.html#functional-asset-packs) by Mika Suominen, licensed under the [CC0 1.0 Universal](src/anny/data/mpfb2/LICENSE.md) License.
 
-**data/faces, data/keypoints/mediapipe.json, data/shape_calibration/face_prior.safetensors**: the face-shape distribution derives from the [ICT-FaceKit](https://github.com/USC-ICT/ICT-FaceKit) identity space (MIT licence), the ANSUR II survey (public release), the [3D Facial Norms](https://www.facebase.org/resources/human/facial_norms/) summary statistics (FaceBase; acknowledgement in `src/anny/data/faces/SOURCES.md`) and the CDC growth charts (public domain). The MediaPipe landmarks on anny derive from MediaPipe's canonical face model (Apache 2.0). No source data is redistributed.
+**data/faces, data/keypoints/mediapipe.json, data/shape_calibration/face_prior.safetensors**: the face-shape distribution derives from the [ICT-FaceKit](https://github.com/USC-ICT/ICT-FaceKit) identity space (MIT licence) and public measurement datasets; `src/anny/data/faces/SOURCES.md` lists each source, its licence and its acknowledgement. The MediaPipe landmarks on anny derive from MediaPipe's canonical face model (Apache 2.0). No source data is redistributed.
 
 **data/soma**: *Anny* provide a "soma" topology adapted from [SOMA-X](https://github.com/NVlabs/SOMA-X) which is licenced under the [Apache 2.0](https://github.com/NVlabs/SOMA-X/blob/main/LICENSE) license.
 
 **smplx**: A "smplx" topology can be downloaded for non-commercial use only, allowing interoperability with [SMPL-X](https://smpl-x.is.tue.mpg.de/). See LICENSE.txt and NOTICE.txt files in http://download.europe.naverlabs.com/humans/Anny/noncommercial.zip for more information.
 
+## Disclaimer and no warranty
+
+- **No warranty.** The software, the data, the viewer and the documentation are provided "AS IS", without warranty of any kind, either express or implied, including any warranty of title, non-infringement, merchantability, fitness for a particular purpose, accuracy, security or uninterrupted operation (Apache License 2.0, section 7).
+- **No liability.** To the fullest extent that the law allows, the author of this repository, the AI agents that helped to write it, and the authors of the upstream works named in [Credits](#credits) are not liable for any damage, loss or claim that arises from the use of, or the inability to use, this project. That covers direct, indirect, incidental, special and consequential damages, including lost data, lost profit and business interruption (Apache License 2.0, section 8).
+- **AI-written work.** The author does not guarantee that the code, the data or the documentation is correct, original, secure or free of third-party rights. Review and test them for your own purpose.
+- **Model numbers only.** Sizes, volumes and masses describe a 3D model. Do not rely on them for medical, safety-critical, legal or identity decisions.
+- **Third-party assets.** Bundled and downloaded data keep their own licences (see [LICENSE_THINGS](LICENSE_THINGS)), and the SMPL and SMPL-X data is for non-commercial use only. Check that the licences fit your use.
+- **Your content.** You are responsible for the characters, images and products that you create, and for following the laws that apply to you.
+- **No affiliation.** OpenSculptBoy is not affiliated with, endorsed by or sponsored by NAVER, MakeHuman, NVIDIA, Anthropic or the other parties named here. Their names and marks belong to their owners.
+- **Not legal advice.** This section does not change the [Apache License 2.0](LICENSE), and the license text applies where the two differ. Some rights cannot be excluded by contract in some countries.
+
 ## Citation
+
+If you use the body model in research, please cite the Anny paper:
 
 ```bibtex
 @inproceedings{anny,
