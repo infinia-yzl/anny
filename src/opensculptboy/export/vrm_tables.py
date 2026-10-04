@@ -7,22 +7,30 @@ the eyeball vertices, the VRM skin weights, the expressions (``data/vrm/expressi
 and the look-at ranges.
 
 VRM apps turn the humanoid bones alone; every other node of the file keeps its rest place
-under its parent. The twist bones of the forearms and the shins split the turn of a joint
-over the length of a limb, so VRM 1.0 turns them with roll constraints
-(``VRMC_node_constraint``): each follows half of the roll of the hand or the foot below it.
-Every node of a VRM file rests at the identity rotation (normalised joints), so the roll axis
-of a constraint is the axis of the limb in the T-pose: X for the arms and Y for the legs (the
-file is Y up). In the rig the hand hangs from the forearm twist bone and the foot from the
-shin twist bone; the hand would then turn by its own roll and again by the half roll of the
-twist bone above it, so the file hangs the hand from the forearm and the foot from the shin,
-beside their twist bones, which become leaves (:func:`file_parents`).
+under its parent. The twist bones of the forearms split the turn of the wrist over the length
+of the forearm, so VRM 1.0 turns them with roll constraints (``VRMC_node_constraint``): each
+follows half of the roll of the hand below it. Every node of a VRM file rests at the identity
+rotation (normalised joints), so the roll axis of a constraint must be one of the axes X, Y
+and Z of the file, and it must run along the limb in the T-pose: the forearms lie along X in
+the T-pose to within a rounding error. In the rig the hand hangs from the forearm twist bone;
+the hand would then turn by its own roll and again by the half roll of the twist bone above
+it, so the file hangs the hand from the forearm, beside its twist bone, which becomes a leaf
+(:func:`file_parents`).
 
-The twist bones of the upper arms and the thighs need no constraint: they hang from the
-upper arm and the thigh, which carry the roll of the shoulder and the hip in every humanoid
-pose, and they follow them without a turn of their own. Their skin weights therefore move to
-those bones in every VRM file (:func:`vrm_skin_weights`). This changes nothing in the
-skinning of the file, and it frees an influence on the vertices that both bones weigh (about
-350 per limb), so the truncation to 4 bones drops a fifth less weight.
+The shin twist bones get no constraint: the T-posed shin runs 5 to 6 degrees off the
+vertical (8 to 10 degrees with ``keep_leg_spread``), so a roll about Y would swing the
+vertices of the lower shin off the limb, by up to 5 to 12 mm, whenever the foot turns. Like
+the twist bones of the upper arms and the thighs, they hang from their limb bone (the shin,
+the upper arm and the thigh), which carries the roll of the knee, the shoulder or the hip in
+every humanoid pose, and they follow it without a turn of their own. Their skin weights
+therefore move to those bones in every VRM file (:func:`vrm_skin_weights`). This changes
+nothing in the skinning of the file, and it frees an influence on the vertices that both
+bones weigh (250 to 400 per limb), so the truncation to 4 bones drops about a fifth less
+weight.
+
+The eyeballs are the vertices of MakeHuman's eye helpers, found by their MakeHuman base-mesh
+indices, so the VRM export supports the topologies that keep those indices
+(:data:`VRM_TOPOLOGIES`); :func:`eyeball_vertices` refuses the others.
 """
 
 from __future__ import annotations
@@ -156,14 +164,12 @@ PRESETS_0 = (
 # Twist bones that VRM 1.0 turns with roll constraints: twist bone -> (the bone whose roll it
 # follows, the roll axis in the normalised T-pose of the file, the weight of the roll). The
 # forearm twist bone takes half of the roll of the hand, as the forearm does when the hand
-# turns, and the shin twist bone half of the roll of the foot.
+# turns. The shin twist bone has none: the T-posed shin runs off every axis of the file (see
+# the module docstring), so its weights merge into the shin.
 TWIST_BONES = {
     f"{bone}.{s}": (f"{source}.{s}", axis, 0.5)
     for s in ("L", "R")
-    for bone, source, axis in (
-        ("lowerarm02", "wrist", "X"),
-        ("lowerleg02", "foot", "Y"),
-    )
+    for bone, source, axis in (("lowerarm02", "wrist", "X"),)
 }
 # The twist bones and the mapped bones that take their weights. With twist="merge" every one
 # of them moves; with twist="constraint" the bones of TWIST_BONES keep their weights.
@@ -179,8 +185,15 @@ TWIST_MERGE = {
 }
 TWIST_MODES = ("constraint", "merge")
 
-# The eyeballs: MakeHuman base-mesh vertex ranges of helper-l-eye and helper-r-eye.
+# The eyeballs: MakeHuman base-mesh vertex ranges of helper-l-eye and helper-r-eye, 72
+# vertices each.
 _EYE_RANGES = {"L": (14598, 14669), "R": (14670, 14741)}
+EYEBALL_VERTEX_COUNT = 72
+# The largest distance (metres) between the centroid of an eyeball and the head of its eye
+# bone in the template; the MakeHuman eyes lie within a few micrometres.
+EYEBALL_CENTRE_TOLERANCE = 0.02
+# The topologies whose vertices keep their MakeHuman base-mesh indices, with the eyes.
+VRM_TOPOLOGIES = ("anny", "anny-quads", "anny-full", "makehuman")
 
 # The facial actions of the look-at ranges: VRM look-at direction -> ARKit action prefix.
 LOOK_ACTIONS = {
@@ -214,12 +227,51 @@ def required_bones(version: str) -> set[str]:
 
 
 def eyeball_vertices(model) -> dict[str, np.ndarray]:
-    """The model vertex indices of each eyeball (``"L"`` and ``"R"``)."""
-    base = model.base_mesh_vertex_indices.cpu().numpy()
-    return {
-        side: np.flatnonzero((base >= lo) & (base <= hi))
-        for side, (lo, hi) in _EYE_RANGES.items()
-    }
+    """
+    The model vertex indices of each eyeball (``"L"`` and ``"R"``): the vertices of MakeHuman's
+    eye helpers, found by their base-mesh indices (``model.base_mesh_vertex_indices``).
+
+    Raises ValueError unless each side has exactly 72 vertices whose centroid lies within 2 cm
+    of the head of its eye bone in the template (``model.template_bone_heads``). A
+    retopologised mesh (``notoes``, ``soma``, ...) numbers its vertices its own way, so the
+    MakeHuman indices would pick other vertices or none, and a mesh without eyes has none. The
+    VRM export supports the MakeHuman-based topologies of :data:`VRM_TOPOLOGIES`.
+    """
+    supported = ", ".join(VRM_TOPOLOGIES)
+
+    def refuse(problem: str):
+        raise ValueError(
+            f"The model's mesh has no MakeHuman eyeballs ({problem}). VRM export supports "
+            f"the MakeHuman-based topologies {supported}."
+        )
+
+    labels = list(model.bone_labels)
+    base = getattr(model, "base_mesh_vertex_indices", None)
+    if base is None:
+        refuse("it has no MakeHuman base-mesh vertex indices")
+    base = torch.as_tensor(base).detach().cpu().numpy()
+    template = model.template_vertices.detach().cpu().double().numpy()
+    heads = model.template_bone_heads.detach().cpu().double().numpy()
+    eyes = {}
+    for side, (lo, hi) in _EYE_RANGES.items():
+        bone = f"eye.{side}"
+        if bone not in labels:
+            refuse(f"the rig has no bone {bone!r}")
+        name = {"L": "left", "R": "right"}[side]
+        rows = np.flatnonzero((base >= lo) & (base <= hi))
+        if len(rows) != EYEBALL_VERTEX_COUNT:
+            refuse(
+                f"{len(rows)} vertices on the {name} eyeball, where MakeHuman has "
+                f"{EYEBALL_VERTEX_COUNT}"
+            )
+        gap = float(np.linalg.norm(template[rows].mean(0) - heads[labels.index(bone)]))
+        if not gap <= EYEBALL_CENTRE_TOLERANCE:
+            refuse(
+                f"the centre of the {name} eyeball lies {100 * gap:.1f} cm from the head "
+                f"of {bone}, where at most {100 * EYEBALL_CENTRE_TOLERANCE:g} cm is allowed"
+            )
+        eyes[side] = rows
+    return eyes
 
 
 def twist_constraints(version: str, twist: str) -> list[tuple[str, str, str, float]]:
@@ -239,10 +291,11 @@ def file_parents(model, version: str, twist: str) -> list[int]:
     The parent of each bone in the node hierarchy of the file (-1 for the root).
 
     With roll constraints, the source of each constraint leaves the constrained twist bone for
-    the twist bone's parent: the wrist hangs from lowerarm01 and the foot from lowerleg01. The
-    twist bones become leaves, and the hand and the foot do not turn twice. Without
-    constraints, the hierarchy is the rig's own. Every parent comes before its children, as in
-    the rig.
+    the twist bone's parent: the wrist hangs from lowerarm01. The forearm twist bones become
+    leaves, and the hand does not turn twice. Every other bone keeps the rig's parent, the foot
+    among them (it hangs from the shin twist bone lowerleg02, which carries no constraint);
+    without constraints, the hierarchy is the rig's own. Every parent comes before its
+    children, as in the rig.
     """
     labels = list(model.bone_labels)
     parents = [int(p) for p in model.bone_parents]
@@ -271,11 +324,11 @@ def vrm_skin_weights(model, twist: str = "constraint") -> tuple[np.ndarray, np.n
       The eye bones rest on the head in every pose but look-at, so neither move changes any
       other pose.
     - The twist bones of TWIST_MERGE move their weights to their mapped parents, except, with
-      ``twist="constraint"`` (the VRM 1.0 default), the bones of TWIST_BONES, which VRM 1.0
-      turns with roll constraints. A twist bone without a constraint follows its parent in the
-      file without a turn of its own, so the move leaves the skinning of the file as it was
-      and frees influences for the truncation. ``twist="merge"`` (the VRM 0.x default) moves
-      them all.
+      ``twist="constraint"`` (the VRM 1.0 default), the forearm twist bones of TWIST_BONES,
+      which VRM 1.0 turns with roll constraints. A twist bone without a constraint (upper
+      arm, thigh and shin) follows its parent in the file without a turn of its own, so the
+      move leaves the skinning of the file as it was and frees influences for the
+      truncation. ``twist="merge"`` (the VRM 0.x default) moves them all.
 
     Weights of the same bone on one vertex add up. Each row holds the model's K slots sorted
     from the strongest bone down; empty slots have weight 0 and bone 0. Rows sum to 1.

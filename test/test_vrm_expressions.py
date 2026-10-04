@@ -2,12 +2,13 @@
 # Apache License, Version 2.0
 """
 Checks of the VRM tables (opensculptboy.export.vrm_tables): the humanoid bone map against the
-parent rules of the VRM 1.0 and 0.x specifications, the twist constraints and the node
-hierarchy of the file, the VRM skin weights, the expressions (names, mixes and override flags,
-and the mouth shapes of the visemes measured on the mesh), the look-at ranges and the lid-only
-look targets.
+parent rules of the VRM 1.0 and 0.x specifications, the twist constraints, their roll axes
+against the limbs of the T-pose and the node hierarchy of the file, the eyeballs and the VRM
+skin weights, the expressions (names, mixes and override flags, and the mouth shapes of the
+visemes measured on the mesh), the look-at ranges and the lid-only look targets.
 """
 
+import types
 import unittest
 
 import numpy as np
@@ -15,6 +16,8 @@ import torch
 
 from anny.keypoints import KeypointsRegressor
 from opensculptboy.export import vrm_tables as vt
+from opensculptboy.export.tpose import vrm_t_pose
+from opensculptboy.export.vrm import FRAMES
 from test import vrm_fixtures
 
 SIDES = ("left", "right")
@@ -135,10 +138,11 @@ class TestTwist(unittest.TestCase):
     def test_constraints(self):
         constraints = vt.twist_constraints("1.0", "constraint")
         humanoid = set(vt.humanoid_bones("1.0").values())
-        self.assertEqual(
-            {c[0] for c in constraints},
-            {f"{b}.{s}" for b in ("lowerarm02", "lowerleg02") for s in "LR"},
-        )
+        # The forearm twist bones alone: the T-posed shin runs off every axis of the file
+        # (test_roll_axes_follow_the_limbs), so its twist bone merges into the shin.
+        self.assertEqual({c[0] for c in constraints}, {f"lowerarm02.{s}" for s in "LR"})
+        for s in "LR":
+            self.assertEqual(vt.TWIST_MERGE[f"lowerleg02.{s}"], f"lowerleg01.{s}")
         for bone, source, axis, weight in constraints:
             with self.subTest(bone=bone):
                 self.assertNotIn(
@@ -146,8 +150,8 @@ class TestTwist(unittest.TestCase):
                 )
                 self.assertIn(source, humanoid)
                 self.assertIn(bone, vt.TWIST_MERGE)
-                # The roll axis is the axis of the limb in the T-pose of the file (Y up).
-                self.assertEqual(axis, "X" if bone.startswith("lowerarm") else "Y")
+                # The roll axis is the axis of the forearm in the T-pose of the file.
+                self.assertEqual(axis, "X")
                 self.assertGreater(weight, 0.0)
                 self.assertLessEqual(weight, 1.0)
         for version, twist in (
@@ -177,16 +181,60 @@ class TestTwist(unittest.TestCase):
                     if not constraints:
                         self.assertEqual(changed, {})
                         continue
-                    # Only the sources move, from the twist bone to the twist bone's parent.
+                    # Only the sources move, from the twist bone to the twist bone's parent:
+                    # the wrist goes under lowerarm01, and the foot stays under lowerleg02.
                     self.assertEqual(
-                        changed,
-                        {f"wrist.{s}": f"lowerarm01.{s}" for s in "LR"}
-                        | {f"foot.{s}": f"lowerleg01.{s}" for s in "LR"},
+                        changed, {f"wrist.{s}": f"lowerarm01.{s}" for s in "LR"}
                     )
+                    for s in "LR":
+                        foot = self.labels.index(f"foot.{s}")
+                        self.assertEqual(self.labels[parents[foot]], f"lowerleg02.{s}")
                     for bone, source, _, _ in constraints:
                         b, s = self.labels.index(bone), self.labels.index(source)
                         self.assertNotIn(b, parents, f"{bone} must be a leaf")
                         self.assertEqual(parents[s], parents[b])
+
+    def test_roll_axes_follow_the_limbs(self):
+        # Every node of the file rests at the identity rotation, so a roll axis is an axis of
+        # the file. It must run along the limb in the T-pose: from the joint of the twist
+        # bone's file parent to the joint of its source (lowerarm01 to the wrist), within 1
+        # degree, on the default body and on the body of the shared exports, with and without
+        # the leg spread.
+        G = FRAMES["1.0"]
+        axes = {"X": (1.0, 0.0, 0.0), "Y": (0.0, 1.0, 0.0), "Z": (0.0, 0.0, 1.0)}
+        cos_1 = np.cos(np.radians(1.0))
+        parents = vt.file_parents(self.model, "1.0", "constraint")
+        kwargs = vrm_fixtures.CHARACTER.model_kwargs()
+        bodies = {
+            "default": {},
+            "fixture": {
+                k: kwargs[k] for k in ("phenotype_kwargs", "face_shape_kwargs")
+            },
+        }
+        for body, body_kwargs in bodies.items():
+            with torch.no_grad():
+                rest = self.model(**body_kwargs)["rest_bone_poses"][0]
+            for spread in (False, True):
+                T = vrm_t_pose(self.model, rest, keep_leg_spread=spread)
+                joints = T[:, :3, 3].double().numpy() @ G.T
+
+                def direction(start: int, end: int) -> np.ndarray:
+                    d = joints[end] - joints[start]
+                    return d / np.linalg.norm(d)
+
+                for bone, source, axis, _ in vt.twist_constraints("1.0", "constraint"):
+                    with self.subTest(body=body, keep_leg_spread=spread, bone=bone):
+                        b = self.labels.index(bone)
+                        d = direction(parents[b], self.labels.index(source))
+                        self.assertGreaterEqual(abs(d @ axes[axis]), cos_1)
+                # Why the shins carry none: they run more than 1 degree off every axis.
+                for s in "LR":
+                    with self.subTest(body=body, keep_leg_spread=spread, shin=s):
+                        d = direction(
+                            self.labels.index(f"lowerleg01.{s}"),
+                            self.labels.index(f"foot.{s}"),
+                        )
+                        self.assertLess(np.abs(d).max(), cos_1)
 
 
 class TestSkinWeights(unittest.TestCase):
@@ -215,6 +263,50 @@ class TestSkinWeights(unittest.TestCase):
             # The eye bone sits at the centre of its eyeball, the pivot of look-at.
             head = bones[self.labels.index(f"eye.{side}"), :3, 3]
             self.assertLess(np.linalg.norm(rest[rows].mean(0) - head), 1e-3)
+
+    def test_eyeballs_need_the_makehuman_mesh(self):
+        # A retopologised mesh numbers its vertices its own way (its base-mesh indices run
+        # from 0), and a mesh without eyes has no eye vertices: eyeball_vertices refuses both,
+        # as it refuses a mesh whose MakeHuman indices name other vertices.
+        model = self.model
+        base = model.base_mesh_vertex_indices.clone()
+        on_eyes = (base >= 14598) & (base <= 14741)
+
+        def stub(indices):
+            return types.SimpleNamespace(
+                bone_labels=model.bone_labels,
+                base_mesh_vertex_indices=indices,
+                template_vertices=model.template_vertices,
+                template_bone_heads=model.template_bone_heads,
+            )
+
+        self.assertEqual(
+            {k: len(v) for k, v in vt.eyeball_vertices(stub(base)).items()},
+            {"L": 72, "R": 72},
+        )
+        cases = {
+            "retopologised": torch.arange(len(base)),
+            "no eyes": torch.where(on_eyes, -1, base),
+            "other vertices": torch.roll(base, 500),
+            "no indices": None,
+        }
+        for case, indices in cases.items():
+            with self.subTest(case=case):
+                with self.assertRaises(ValueError) as raised:
+                    vt.eyeball_vertices(stub(indices))
+                self.assertIn(
+                    "topologies anny, anny-quads, anny-full, makehuman",
+                    str(raised.exception),
+                )
+        # The writer's skin weights refuse such a mesh as well.
+        with self.assertRaises(ValueError):
+            vt.vrm_skin_weights(
+                types.SimpleNamespace(
+                    **vars(stub(torch.arange(len(base)))),
+                    vertex_bone_weights=model.vertex_bone_weights,
+                    vertex_bone_indices=model.vertex_bone_indices,
+                )
+            )
 
     def test_weights(self):
         head = self.labels.index("head")

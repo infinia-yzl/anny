@@ -227,10 +227,32 @@ def srgb_eotf(c):
     return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
 
 
+# The colour fields of a material, which the 0.x file holds sRGB-encoded.
+COLOUR_FIELDS = ("base_color", "shade_color", "rim_color", "emissive", "outline_color")
+
+
+def unity_colours(material: ToonMaterial) -> ToonMaterial:
+    """
+    A material read by three-vrm with its colours decoded again as MToon 0.x in Unity decodes
+    them: three-vrm's 2.2 power is undone, and the exact sRGB curve is applied. The alpha of the
+    base colour is linear in the file and stays as it is.
+    """
+    changes = {}
+    for name in COLOUR_FIELDS:
+        value = tuple(getattr(material, name))
+        rgb = mtoon.srgb_decode(mtoon.gamma_encode(value[:3]))
+        changes[name] = tuple(rgb) + value[3:]
+    return dataclasses.replace(material, **changes)
+
+
 def through_v0(material: ToonMaterial, materials=None) -> ToonMaterial:
-    """The material as three-vrm reads the 0.x entry of ``to_vrm0``."""
+    """
+    The material of the 0.x entry of ``to_vrm0``, read back by three-vrm's conversion, with the
+    colours decoded as MToon 0.x in Unity decodes them (VSeeFace and 3tene, which the 0.x file
+    serves). :class:`TestColours` checks three-vrm's own reading of the colours.
+    """
     gltf, props = mtoon.to_vrm0(material)
-    return mtoon.from_vrm1(mtoon.v0_to_v1(props, gltf, materials))
+    return unity_colours(mtoon.from_vrm1(mtoon.v0_to_v1(props, gltf, materials)))
 
 
 class MaterialAssertions:
@@ -581,7 +603,7 @@ class TestVrm0(unittest.TestCase, MaterialAssertions):
                 messages = []
                 gltf, props = mtoon.to_vrm0(material, messages=messages)
                 self.assertEqual(messages, notes)
-                back = mtoon.from_vrm1(mtoon.v0_to_v1(props, gltf))
+                back = unity_colours(mtoon.from_vrm1(mtoon.v0_to_v1(props, gltf)))
                 self.assertMaterialsClose(
                     projected, back, skip=["render_queue_offset", "matcap_factor"]
                 )
@@ -863,10 +885,41 @@ class TestVrm0(unittest.TestCase, MaterialAssertions):
         material = ToonMaterial("skin", base_texture=0, shade_texture=0)
         self.assertEqual(mtoon.representable(material), (material, []))
 
+    def test_matcap_note(self):
+        # MToon 0.x adds the matcap unlit and unmasked (MToonCore.cginc lines 232-242), so a
+        # matcap that MToon 1.0 mixes with the lighting or masks looks different in 0.x apps.
+        cases = {
+            "lit": (dict(matcap_texture=3), True),
+            "masked": (
+                dict(matcap_texture=3, rim_lighting_mix=0.0, rim_multiply_texture=1),
+                True,
+            ),
+            "unlit": (dict(matcap_texture=3, rim_lighting_mix=0.0), False),
+            "no matcap": (dict(rim_multiply_texture=1), False),
+        }
+        for case, (fields, noted) in cases.items():
+            with self.subTest(case=case):
+                material = ToonMaterial("hair", **fields)
+                projected, notes = mtoon.representable(material)
+                self.assertEqual(projected, material)
+                self.assertEqual(
+                    any("adds the matcap unlit and unmasked" in n for n in notes),
+                    noted,
+                    notes,
+                )
+
 
 class TestColours(unittest.TestCase):
     def test_round_trip(self):
-        linear = np.linspace(0.0, 1.0, 1001)
+        linear = np.linspace(0.0, 1.0, 100001)
+        np.testing.assert_allclose(
+            mtoon.srgb_decode(mtoon.srgb_encode(linear)), linear, rtol=0, atol=1e-8
+        )
+        # Unity's Mathf.GammaToLinearSpace is the exact sRGB curve of the reference function.
+        encoded = np.linspace(0.0, 1.0, 1001)
+        np.testing.assert_allclose(
+            mtoon.srgb_decode(encoded), srgb_eotf(encoded), rtol=0, atol=1e-15
+        )
         np.testing.assert_allclose(
             mtoon.gamma_decode(mtoon.gamma_encode(linear)), linear, rtol=0, atol=1e-12
         )
@@ -880,7 +933,7 @@ class TestColours(unittest.TestCase):
             shade_color=(0.1, 0.2, 0.3),
             rim_color=(0.4, 0.5, 0.6),
             emissive=(0.05, 0.0, 0.9),
-            outline_color=(0.7, 0.8, 0.9),
+            outline_color=(0.002, 0.01, 0.9),
         )
         _, props = mtoon.to_vrm0(material)
         vectors = props["vectorProperties"]
@@ -895,29 +948,32 @@ class TestColours(unittest.TestCase):
         }
         for key, linear in pairs.items():
             with self.subTest(key=key):
+                # MToon 0.x in Unity decodes the values with the exact sRGB curve.
                 np.testing.assert_allclose(
-                    np.array(vectors[key][:3]) ** 2.2, linear, rtol=0, atol=1e-12
+                    srgb_eotf(vectors[key][:3]), linear, rtol=0, atol=1e-12
                 )
-                # Unity decodes the same values with the exact sRGB curve: within 0.009.
+                # three-vrm decodes them with a 2.2 power, within 0.009.
                 np.testing.assert_allclose(
-                    srgb_eotf(vectors[key][:3]), linear, atol=0.009
+                    np.array(vectors[key][:3]) ** 2.2, linear, rtol=0, atol=0.009
                 )
         back = mtoon.from_vrm1(mtoon.v0_to_v1(props))
-        for field in (
-            "base_color",
-            "shade_color",
-            "rim_color",
-            "emissive",
-            "outline_color",
-        ):
-            np.testing.assert_allclose(
-                getattr(back, field), getattr(material, field), rtol=0, atol=1e-12
-            )
+        for field, key in zip(COLOUR_FIELDS, pairs):
+            with self.subTest(field=field):
+                np.testing.assert_allclose(
+                    np.array(getattr(back, field))[:3],
+                    np.array(vectors[key][:3]) ** 2.2,
+                    rtol=0,
+                    atol=1e-12,
+                )
 
-    def test_unity_difference_bound(self):
+    def test_three_vrm_difference_bound(self):
+        # three-vrm's reading of an sRGB-encoded colour lies at most 0.0085 off, at a linear
+        # 0.52 (the README and the module docstring quote this bound).
         linear = np.linspace(0.0, 1.0, 100001)
-        gap = np.abs(srgb_eotf(np.array(mtoon.gamma_encode(linear))) - linear)
+        read = np.array(mtoon.gamma_decode(mtoon.srgb_encode(linear)))
+        gap = np.abs(read - linear)
         self.assertLess(gap.max(), 0.009)
+        self.assertGreater(gap.max(), 0.008)
 
 
 if __name__ == "__main__":
