@@ -92,15 +92,18 @@ REQUIRED_1 = {
 }
 REQUIRED_0 = REQUIRED_1 | {"chest", "neck"}
 
-# Twist bones: twist bone -> (the humanoid bone whose roll it follows, weight of the roll).
-TWIST_BONES = {
-    f"{bone}.{s}": (f"{source}.{s}", 0.5)
+# Twist bones: twist bone -> (the bone whose roll it follows, the roll axis in the normalised
+# T-pose of the file, the weight of the roll).
+TWIST_BONES = {f"lowerarm02.{s}": (f"wrist.{s}", "X", 0.5) for s in ("L", "R")}
+# The twist bones and the mapped bones that take their weights with twist="merge".
+TWIST_MERGE = {
+    f"{bone}.{s}": f"{parent}.{s}"
     for s in ("L", "R")
-    for bone, source in (
-        ("lowerarm02", "wrist"),
-        ("upperarm02", "lowerarm01"),
-        ("upperleg02", "lowerleg01"),
-        ("lowerleg02", "foot"),
+    for bone, parent in (
+        ("upperarm02", "upperarm01"),
+        ("lowerarm02", "lowerarm01"),
+        ("upperleg02", "upperleg01"),
+        ("lowerleg02", "lowerleg01"),
     )
 }
 
@@ -128,6 +131,26 @@ def eyeball_vertices(model) -> dict[str, np.ndarray]:
         side: np.flatnonzero((base >= lo) & (base <= hi))
         for side, (lo, hi) in _EYE_RANGES.items()
     }
+
+
+def twist_constraints(version: str, twist: str) -> list[tuple[str, str, str, float]]:
+    """
+    The roll constraints of a file: (constrained bone, source bone, roll axis, weight). VRM 1.0
+    with ``twist="constraint"`` carries them (``VRMC_node_constraint``); VRM 0.x has none.
+    """
+    if version != "1.0" or twist != "constraint":
+        return []
+    return [(bone, src, axis, w) for bone, (src, axis, w) in TWIST_BONES.items()]
+
+
+def file_parents(model, version: str, twist: str) -> list[int]:
+    """
+    The parent of each bone in the node hierarchy of the file (-1 for the root). With roll
+    constraints, the wrist hangs from lowerarm01, so that the constrained twist bone is a leaf
+    and the hand does not turn twice.
+    """
+    # placeholder: stream A3
+    return [int(p) for p in model.bone_parents]
 
 
 def vrm_skin_weights(model, twist: str = "constraint") -> tuple[np.ndarray, np.ndarray]:
