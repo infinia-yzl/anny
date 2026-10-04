@@ -4,7 +4,7 @@
 
 # OpenSculptBoy
 
-[![Tests](https://github.com/infinia-yzl/anny/actions/workflows/tests.yml/badge.svg)](https://github.com/infinia-yzl/anny/actions/workflows/tests.yml)
+[![Tests](https://github.com/infinia-yzl/opensculptboy/actions/workflows/tests.yml/badge.svg)](https://github.com/infinia-yzl/opensculptboy/actions/workflows/tests.yml)
 
 **OpenSculptBoy is an open toolkit for humanoid 3D characters: a differentiable body model in PyTorch, a web viewer and a glTF export for game engines. It is built on [Anny](https://github.com/naver/anny) by NAVER LABS Europe.**
 
@@ -54,9 +54,9 @@ The `opensculptboy` distribution holds two packages: `anny` (`src/anny`), the up
 Install OpenSculptBoy from this repository. It adds the viewer, the face shapes, the hair, the poses and the correctives to Anny:
 
 ```bash
-pip install "opensculptboy @ git+https://github.com/infinia-yzl/anny.git"                 # the model, the export and the opensculptboy command
-pip install "opensculptboy[examples] @ git+https://github.com/infinia-yzl/anny.git"       # with the examples and tutorials
-pip install "opensculptboy[smpl,examples] @ git+https://github.com/infinia-yzl/anny.git"  # with the SMPL and SMPL-X wrappers (non-commercial data, see Disclaimer)
+pip install "opensculptboy @ git+https://github.com/infinia-yzl/opensculptboy.git"                 # the model, the export and the opensculptboy command
+pip install "opensculptboy[examples] @ git+https://github.com/infinia-yzl/opensculptboy.git"       # with the examples and tutorials
+pip install "opensculptboy[smpl,examples] @ git+https://github.com/infinia-yzl/opensculptboy.git"  # with the SMPL and SMPL-X wrappers (non-commercial data, see Disclaimer)
 uv sync --extra examples                                                             # in a clone of this repository
 ```
 

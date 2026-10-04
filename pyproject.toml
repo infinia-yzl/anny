@@ -37,7 +37,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/infinia-yzl/anny"
+Homepage = "https://github.com/infinia-yzl/opensculptboy"
 Upstream = "https://github.com/naver/anny"
 
 [project.scripts]

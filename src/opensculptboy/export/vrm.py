@@ -67,7 +67,7 @@ from opensculptboy.export.document import (
 from opensculptboy.export.gltf import _check_names
 
 VRM1_LICENSE_URL = "https://vrm.dev/licenses/1.0/"
-PROJECT_URL = "https://github.com/infinia-yzl/anny"
+PROJECT_URL = "https://github.com/infinia-yzl/opensculptboy"
 # The licences of every part of the project (the 0.x ``otherPermissionUrl``).
 CREDITS_URL = PROJECT_URL + "/blob/main/LICENSE_THINGS"
 # The credits of the base model, in every VRM file (VRM 1.0 ``thirdPartyLicenses``, VRM 0.x
