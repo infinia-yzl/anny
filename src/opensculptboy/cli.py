@@ -43,10 +43,24 @@ def _flag(dest: str) -> str:
     return "--" + dest.replace("_", "-")
 
 
-def _load_character(path: str | None) -> Character:
+def _load_character(path: str | None, parser=None) -> Character:
+    """
+    The character card at ``path``, or the default character; with ``parser``, a card that
+    cannot be read is a usage error.
+    """
     if path is None:
         return Character()
-    return Character.from_dict(json.loads(pathlib.Path(path).read_text()))
+    try:
+        return Character.from_dict(json.loads(pathlib.Path(path).read_text()))
+    except (OSError, ValueError, TypeError) as error:
+        if parser is None:
+            raise
+        parser.error(f"--character {path}: {_one_line(error)}")
+
+
+def _one_line(error: BaseException) -> str:
+    """The message of an error on one line."""
+    return " ".join(str(error).split()) or type(error).__name__
 
 
 def _export(args, parser) -> int:
@@ -63,7 +77,7 @@ def _export(args, parser) -> int:
         return _export_vrm(args, parser)
     from opensculptboy.export.gltf import export_glb
 
-    character = _load_character(args.character)
+    character = _load_character(args.character, parser)
     model, morph_targets = None, None  # export_glb builds the model it needs
     if args.morph_targets == "none":
         morph_targets = []
@@ -93,14 +107,18 @@ def _export_vrm(args, parser) -> int:
     if args.meta:
         try:
             meta = VrmMeta.from_dict(json.loads(pathlib.Path(args.meta).read_text()))
-        except (OSError, ValueError) as error:
-            parser.error(f"--meta {args.meta}: {error}")
+        except (OSError, ValueError, TypeError) as error:
+            parser.error(f"--meta {args.meta}: {_one_line(error)}")
     if not args.author and not (meta and meta.authors):
         parser.error(
             "a VRM file needs an author: pass --author NAME, or --meta FILE with "
             '"authors": ["NAME"].'
         )
-    character = _load_character(args.character)
+    character = _load_character(args.character, parser)
+    # A file over a strict budget fails (exit 1); a character, an option or a thumbnail
+    # that a VRM file cannot carry is a usage error (exit 2). Each prints one line, after
+    # the warnings of the export.
+    failure = None
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         try:
@@ -120,10 +138,18 @@ def _export_vrm(args, parser) -> int:
                 keep_anny_vertex=args.anny_vertex,
             )
         except BudgetError as error:
-            print(f"opensculptboy export: {error}", file=sys.stderr)
-            return 1
-    for warning in caught:
-        print(f"warning: {warning.message}", file=sys.stderr)
+            failure = (1, _one_line(error))
+        except (OSError, ValueError, TypeError) as error:
+            failure = (2, _one_line(error))
+        finally:
+            for warning in caught:
+                print(f"warning: {warning.message}", file=sys.stderr)
+    if failure is not None:
+        code, message = failure
+        if code == 2:
+            parser.error(message)
+        print(f"opensculptboy export: {message}", file=sys.stderr)
+        return code
     print(json.dumps(summary, indent=2))
     return 0
 
@@ -266,13 +292,13 @@ def main(argv=None) -> int:
     r.add_argument(
         "--thumbnail",
         metavar="PATH|auto",
-        help="the thumbnail: a PNG or JPEG file, or 'auto' for a rendered portrait",
+        help="the thumbnail: a square PNG or JPEG file, or 'auto' for a rendered portrait",
     )
     r.add_argument(
         "--twist",
         choices=("constraint", "merge"),
-        help="the forearm and leg twist bones: roll constraints (the VRM 1.0 default) or "
-        "their weights merged into the limb bones (the VRM 0.x default)",
+        help="the forearm and leg twist bones: roll constraints (VRM 1.0 only, and its "
+        "default) or their weights merged into the limb bones (the VRM 0.x default)",
     )
     r.add_argument(
         "--bind",

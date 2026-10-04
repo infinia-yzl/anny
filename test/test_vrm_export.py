@@ -144,18 +144,26 @@ class TestVrmGeometry(unittest.TestCase):
                 self.assertAlmostEqual(at_rest[:, 1].min(), 0.0, places=6)
 
     def test_normals_of_the_welded_bind_mesh(self):
+        """
+        The file carries the normals of the bind mesh, rotated by G: those of the rebind
+        when it computes them, else those of the welded bind vertices.
+        """
+        triangles, _ = triangulated_faces(vrm_fixtures.model())
         for version in VERSIONS:
             with self.subTest(version=version):
                 spec = vrm_fixtures.vrm_build(version)
                 glb = vrm_fixtures.vrm_glb(version)
-                triangles, _ = triangulated_faces(vrm_fixtures.model())
-                expected = (
-                    vertex_normals(spec.rebind.vertices, triangles) @ spec.frame.T
-                )
+                bind_normals = getattr(spec.rebind, "normals", None)
+                if bind_normals is None:
+                    bind_normals = vertex_normals(spec.rebind.vertices, triangles)
+                expected = np.asarray(bind_normals, dtype=np.float64) @ spec.frame.T
                 attrs = glb.json["meshes"][0]["primitives"][0]["attributes"]
                 normals = glb.accessor(attrs["NORMAL"]).astype(np.float64)
                 np.testing.assert_allclose(
                     normals, expected[spec.meshes[0].body.source], atol=1e-4
+                )
+                np.testing.assert_allclose(
+                    np.linalg.norm(normals, axis=1), 1.0, atol=1e-4
                 )
 
     def test_normalised_joints(self):
@@ -666,6 +674,142 @@ class TestVrmExtension(unittest.TestCase):
         meta = vrm.VrmMeta.from_dict({"authors": "a", "name": "n"})
         self.assertEqual(meta.authors, ["a"])
 
+    def test_meta_types(self):
+        """
+        Each field of a --meta file must have its type: the text "false" or "no" would
+        grant a permission, and a number where the schema wants a string makes an invalid
+        file. The error names the field.
+        """
+        good = vrm.VrmMeta.from_dict(
+            {
+                "authors": "a",
+                "references": "https://example.com",
+                "version": "1",
+                "allow_redistribution": True,
+                "commercial_usage": "corporation",
+            }
+        )
+        self.assertEqual(good.references, ["https://example.com"])
+        self.assertIs(good.allow_redistribution, True)
+        bad = {
+            "allow_redistribution": "false",
+            "allow_excessively_sexual_usage": "no",
+            "allow_excessively_violent_usage": 0,
+            "allow_political_or_religious_usage": None,
+            "allow_antisocial_or_hate_usage": "true",
+            "name": 7,
+            "version": 2,
+            "copyright_information": ["x"],
+            "contact_information": 5,
+            "third_party_licenses": {"a": 1},
+            "other_license_url": 3.0,
+            "authors": ["a", ""],
+            "references": ["https://example.com", 1],
+            "avatar_permission": "anyone",
+            "commercial_usage": "Corporation",
+            "credit_notation": True,
+            "modification": ["prohibited"],
+        }
+        for field, value in bad.items():
+            with self.subTest(field=field):
+                data = {"authors": ["a"], field: value}
+                with self.assertRaisesRegex(ValueError, field):
+                    vrm.VrmMeta.from_dict(data)
+        with self.assertRaisesRegex(ValueError, "authors"):
+            vrm.VrmMeta.from_dict({"authors": None})
+        # A string boolean given in Python is refused before the model is built.
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(
+                vrm.Character, "build_model", side_effect=AssertionError("built")
+            ),
+        ):
+            path = pathlib.Path(tmp) / "x.vrm"
+            meta = vrm.VrmMeta("x", ["y"], allow_redistribution="false")
+            with self.assertRaisesRegex(ValueError, "allow_redistribution"):
+                vrm.export_vrm(path, vrm_fixtures.CHARACTER, meta=meta)
+            meta = vrm.VrmMeta("x", "y")
+            with self.assertRaisesRegex(ValueError, "authors"):
+                vrm.export_vrm(path, vrm_fixtures.CHARACTER, meta=meta)
+            self.assertFalse(path.exists())
+
+    def test_twist_constraint_needs_vrm1(self):
+        with mock.patch.object(
+            vrm.Character, "build_model", side_effect=AssertionError("built")
+        ):
+            with self.assertRaisesRegex(ValueError, "VRM 0.x files cannot carry roll"):
+                vrm.vrm_spec(
+                    vrm_fixtures.CHARACTER,
+                    version="0.x",
+                    twist="constraint",
+                    author="a",
+                )
+            with self.assertRaisesRegex(ValueError, "Unknown twist mode"):
+                vrm.vrm_spec(vrm_fixtures.CHARACTER, twist="spin", author="a")
+        # The extras and the summary record the twist mode in use.
+        for version in VERSIONS:
+            with self.subTest(version=version):
+                path, summary = vrm_fixtures.vrm_export(version)
+                extras = GLB(path).json["scenes"][0]["extras"]["opensculptboy"]
+                self.assertEqual(
+                    summary["twist"], {"1.0": "constraint", "0.x": "merge"}[version]
+                )
+                self.assertEqual(extras["options"]["twist"], summary["twist"])
+
+    def test_topology(self):
+        """
+        VRM export takes the MakeHuman body mesh with its eyes, and refuses every other
+        topology before a model is built: the SMPL topologies without downloading their
+        non-commercial data.
+        """
+        for topology in (
+            "anny",
+            "anny-quads",
+            "anny-full",
+            "anny-notongue",
+            "makehuman",
+            "makehuman-tris",
+        ):
+            with self.subTest(topology=topology):
+                vrm.check_topology(topology)
+        for topology, message in (
+            ("smpl", "non-commercial"),
+            ("smplx", "non-commercial"),
+            ("notoes", "MakeHuman body mesh"),
+            ("soma", "MakeHuman body mesh"),
+            ("anny_from_soma", "MakeHuman body mesh"),
+            ("head", "MakeHuman body mesh"),
+            ("hand.L", "MakeHuman body mesh"),
+            ("anny-noeyes", "MakeHuman body mesh"),
+            ("default", "Unknown topology"),
+            ("cube", "Unknown topology"),
+            (3, "must be a string"),
+        ):
+            with self.subTest(topology=topology):
+                with self.assertRaisesRegex(ValueError, message):
+                    vrm.check_topology(topology)
+        import anny.paths
+
+        def never(*args, **kwargs):
+            self.fail("the VRM export started a download or built a model")
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(anny.paths, "download_noncommercial_data", never),
+            mock.patch.object(vrm.Character, "build_model", never),
+        ):
+            path = pathlib.Path(tmp) / "x.vrm"
+            for topology, message in (
+                ("smpl", "non-commercial"),
+                ("smplx", "non-commercial"),
+                ("notoes", "MakeHuman body mesh"),
+            ):
+                with self.subTest(export=topology):
+                    character = vrm.Character(topology=topology)
+                    with self.assertRaisesRegex(ValueError, message):
+                        vrm.export_vrm(path, character, author="a")
+            self.assertFalse(path.exists())
+
     def test_materials(self):
         g1 = vrm_fixtures.vrm_json("1.0")
         for material in g1["materials"]:
@@ -696,6 +840,7 @@ class TestVrmExtension(unittest.TestCase):
                 self.assertEqual(extras["format"], "vrm")
                 self.assertEqual(extras["vrm_version"], version)
                 self.assertEqual(extras["options"]["bind"], vrm.DEFAULT_BIND)
+                self.assertEqual(summary["twist"], extras["options"]["twist"])
                 self.assertEqual(extras["budget"]["counts"], summary["counts"])
                 self.assertEqual(extras["budget"]["messages"], [])
 
@@ -878,6 +1023,46 @@ class TestThumbnail(unittest.TestCase):
                 )
             self.assertFalse(never.exists())
 
+    def test_thumbnails_must_be_square(self):
+        """VRM 1.0 requires a square thumbnail; both versions refuse any other."""
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(
+                vrm.Character, "build_model", side_effect=AssertionError("built")
+            ),
+        ):
+            tmp = pathlib.Path(tmp)
+            wide = tmp / "wide.png"
+            wide.write_bytes(_png(64, 32))
+            for version in VERSIONS:
+                for thumbnail, message in (
+                    (wide, "square; this one is 64 x 32"),
+                    (str(wide), "square"),
+                    (_jpeg(30, 40), "square; this one is 30 x 40"),
+                    (b"\x89PNG\r\n\x1a\n", "size"),
+                    (tmp / "missing.png", "No such file"),
+                ):
+                    with self.subTest(version=version, thumbnail=str(thumbnail)[:40]):
+                        error = OSError if message == "No such file" else ValueError
+                        with self.assertRaisesRegex(error, message):
+                            vrm.export_vrm(
+                                tmp / "x.vrm",
+                                vrm_fixtures.CHARACTER,
+                                version=version,
+                                author="a",
+                                thumbnail=thumbnail,
+                            )
+            self.assertFalse((tmp / "x.vrm").exists())
+        # A spec given a thumbnail afterwards is checked when it is written.
+        spec = dataclasses.replace(
+            vrm_fixtures.vrm_build("0.x"), thumbnail=_jpeg(48, 32)
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "wide.vrm"
+            with self.assertRaisesRegex(ValueError, "square"):
+                vrm.write_vrm(spec, path)
+            self.assertFalse(path.exists())
+
 
 class TestCommandLine(unittest.TestCase):
     def test_vrm_export(self):
@@ -921,39 +1106,48 @@ class TestCommandLine(unittest.TestCase):
             )
 
     def test_errors(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        """
+        Usage errors end the command with exit status 2 and one error line, without a
+        traceback, before any model is built.
+        """
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(
+                vrm.Character, "build_model", side_effect=AssertionError("built")
+            ),
+        ):
             tmp = pathlib.Path(tmp)
-            meta = tmp / "meta.json"
-            meta.write_text(json.dumps({"name": "no authors"}))
+            files = {
+                "meta.json": {"name": "no authors"},
+                "enum.json": {"authors": ["a"], "commercial_usage": "free"},
+                "flag.json": {"authors": ["a"], "allow_redistribution": "false"},
+                "number.json": {"authors": ["a"], "version": 2},
+                "rig.json": dict(vrm_fixtures.CHARACTER.to_dict(), rig="makehuman"),
+                "smpl.json": dict(vrm_fixtures.CHARACTER.to_dict(), topology="smpl"),
+            }
+            for file, data in files.items():
+                (tmp / file).write_text(json.dumps(data))
+            (tmp / "broken.json").write_text("{")
+            (tmp / "wide.png").write_bytes(_png(40, 20))
+            vrm_file = ["export", str(tmp / "a.vrm")]
+            glb_file = ["export", str(tmp / "a.glb")]
+            by_a = vrm_file + ["--author", "a"]
             for argv, message in (
-                (["export", str(tmp / "a.vrm")], "needs an author"),
-                (
-                    ["export", str(tmp / "a.vrm"), "--meta", str(meta)],
-                    "needs an author",
-                ),
-                (
-                    [
-                        "export",
-                        str(tmp / "a.vrm"),
-                        "--author",
-                        "a",
-                        "--animation",
-                        "walk",
-                    ],
-                    "--animation",
-                ),
-                (["export", str(tmp / "a.glb"), "--author", "a"], "--author"),
-                (
-                    [
-                        "export",
-                        str(tmp / "a.vrm"),
-                        "--author",
-                        "a",
-                        "--influences",
-                        "8",
-                    ],
-                    "--influences",
-                ),
+                (vrm_file, "needs an author"),
+                (vrm_file + ["--meta", str(tmp / "meta.json")], "needs an author"),
+                (by_a + ["--animation", "walk"], "--animation"),
+                (glb_file + ["--author", "a"], "--author"),
+                (by_a + ["--influences", "8"], "--influences"),
+                (vrm_file + ["--meta", str(tmp / "enum.json")], "commercial_usage"),
+                (vrm_file + ["--meta", str(tmp / "flag.json")], "allow_redistribution"),
+                (vrm_file + ["--meta", str(tmp / "number.json")], "metadata version"),
+                (by_a + ["--thumbnail", str(tmp / "no.png")], "No such file"),
+                (by_a + ["--thumbnail", str(tmp / "wide.png")], "square"),
+                (by_a + ["--character", str(tmp / "rig.json")], "'anny' rig"),
+                (by_a + ["--character", str(tmp / "smpl.json")], "non-commercial"),
+                (by_a + ["--character", str(tmp / "broken.json")], "--character"),
+                (by_a + ["--vrm-version", "0", "--twist", "constraint"], "roll"),
+                (glb_file + ["--character", str(tmp / "no.json")], "--character"),
             ):
                 with self.subTest(argv=argv[2:]):
                     stderr = io.StringIO()
@@ -963,8 +1157,83 @@ class TestCommandLine(unittest.TestCase):
                     ):
                         cli.main(argv)
                     self.assertEqual(exit_.exception.code, 2)
-                    self.assertIn(message, stderr.getvalue())
+                    text = stderr.getvalue()
+                    errors = [line for line in text.splitlines() if "error:" in line]
+                    self.assertEqual(len(errors), 1, text)
+                    self.assertIn(message, errors[0])
+                    self.assertNotIn("Traceback", text)
             self.assertEqual(list(tmp.glob("a.*")), [])
+
+    def test_failures_print_the_warnings(self):
+        """
+        A file over a strict budget ends the command with exit status 1 and one line; the
+        warnings of the export are printed whether it succeeds or fails.
+        """
+
+        def over_budget(*args, **kwargs):
+            warnings.warn("an early warning", budget.BudgetWarning)
+            raise budget.BudgetError("triangles: 99,999 over the VRM 0.x budget")
+
+        def invalid(*args, **kwargs):
+            warnings.warn("an early warning", budget.BudgetWarning)
+            raise ValueError("an invalid\noption")
+
+        argv = ["export", "x.vrm", "--author", "a"]
+        with mock.patch.object(vrm, "export_vrm", over_budget):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(cli.main(argv), 1)
+            self.assertEqual(
+                stderr.getvalue().splitlines(),
+                [
+                    "warning: an early warning",
+                    "opensculptboy export: triangles: 99,999 over the VRM 0.x budget",
+                ],
+            )
+        with mock.patch.object(vrm, "export_vrm", invalid):
+            stderr = io.StringIO()
+            with (
+                contextlib.redirect_stderr(stderr),
+                self.assertRaises(SystemExit) as exit_,
+            ):
+                cli.main(argv)
+            self.assertEqual(exit_.exception.code, 2)
+            lines = stderr.getvalue().splitlines()
+            self.assertEqual(lines[0], "warning: an early warning")
+            self.assertTrue(lines[-1].endswith("error: an invalid option"), lines)
+
+    def test_bare_exports(self):
+        """
+        --bare at the command line: a GLB file keeps the structure of a plain export, and a
+        VRM file holds the body alone.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = pathlib.Path(tmp)
+            for argv in (
+                ["export", str(tmp / "plain.glb")],
+                ["export", str(tmp / "bare.glb"), "--bare"],
+                ["export", str(tmp / "bare.vrm"), "--bare", "--author", "a"],
+            ):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(cli.main(argv), 0)
+            plain, bare = (GLB(tmp / f"{n}.glb").json for n in ("plain", "bare"))
+            for key in ("nodes", "meshes", "accessors", "skins", "materials"):
+                self.assertEqual(len(bare.get(key, [])), len(plain.get(key, [])), key)
+            self.assertEqual(
+                [n.get("name") for n in bare["nodes"]],
+                [n.get("name") for n in plain["nodes"]],
+            )
+            self.assertEqual(
+                [len(m["primitives"]) for m in bare["meshes"]],
+                [len(m["primitives"]) for m in plain["meshes"]],
+            )
+            self.assertEqual(budget.counts(bare), budget.counts(plain))
+            g = GLB(tmp / "bare.vrm").json
+            found = budget.counts(g)
+            self.assertEqual(found["meshes"], 1)
+            self.assertEqual(found["triangles"], 27_420)
+            options = g["scenes"][0]["extras"]["opensculptboy"]["options"]
+            self.assertIs(options["bare"], True)
 
 
 if __name__ == "__main__":

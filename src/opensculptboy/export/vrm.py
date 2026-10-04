@@ -163,6 +163,24 @@ _META_CHOICES = {
         "allowModificationRedistribution",
     ),
 }
+# The text fields of the metadata (``name`` is required, the others may be None), its lists of
+# texts and its permissions, which must be real booleans: the text "false" would grant one.
+_META_TEXTS = (
+    "name",
+    "version",
+    "copyright_information",
+    "contact_information",
+    "third_party_licenses",
+    "other_license_url",
+)
+_META_LISTS = ("authors", "references")
+_META_FLAGS = (
+    "allow_excessively_violent_usage",
+    "allow_excessively_sexual_usage",
+    "allow_political_or_religious_usage",
+    "allow_antisocial_or_hate_usage",
+    "allow_redistribution",
+)
 _ALLOWED_USER_0 = {
     "onlyAuthor": "OnlyAuthor",
     "onlySeparatelyLicensedPerson": "ExplicitlyLicensedPerson",
@@ -207,7 +225,8 @@ class VrmMeta:
         """
         Metadata from a dict of the field names of this class (a ``--meta`` file); ``name``
         and ``authors`` may be missing, for the command line to fill them. The thumbnail
-        comes from ``--thumbnail``, not from the dict.
+        comes from ``--thumbnail``, not from the dict. Raises ValueError for unknown fields
+        and for values of the wrong type or outside their choices (:meth:`check_fields`).
         """
         if not isinstance(data, dict):
             raise ValueError("VRM metadata must be a JSON object.")
@@ -222,22 +241,55 @@ class VrmMeta:
             data["authors"] = [data["authors"]]
         if isinstance(data.get("references"), str):
             data["references"] = [data["references"]]
-        return cls(**{"name": "", "authors": [], **data})
+        meta = cls(**{"name": "", "authors": [], **data})
+        meta.check_fields()
+        return meta
 
-    def check(self) -> None:
-        """Raise ValueError for metadata that a VRM file cannot carry."""
-        if not self.name:
-            raise ValueError("A VRM file needs a name.")
-        if not self.authors or not all(isinstance(a, str) and a for a in self.authors):
-            raise ValueError(
-                "A VRM file needs an author: pass author= (--author) or meta= with authors."
-            )
+    def check_fields(self) -> None:
+        """
+        Raise ValueError, naming the field, for a value of the wrong type or outside its
+        choices: the texts must be strings (None for the optional ones), ``authors`` and
+        ``references`` lists of non-empty strings, and the ``allow_*`` permissions booleans,
+        since a string such as "false" would grant the permission.
+        """
+        for field in _META_TEXTS:
+            value = getattr(self, field)
+            if not isinstance(value, str) and (field == "name" or value is not None):
+                raise ValueError(
+                    f"VRM metadata {field} must be a string (got {value!r})."
+                )
+        for field in _META_LISTS:
+            value = getattr(self, field)
+            if not isinstance(value, (list, tuple)) or not all(
+                isinstance(v, str) and v.strip() for v in value
+            ):
+                raise ValueError(
+                    f"VRM metadata {field} must be a list of non-empty strings (got "
+                    f"{value!r})."
+                )
+        for field in _META_FLAGS:
+            value = getattr(self, field)
+            if not isinstance(value, bool):
+                raise ValueError(
+                    f"VRM metadata {field} must be a boolean, true or false (got "
+                    f"{value!r})."
+                )
         for field, choices in _META_CHOICES.items():
             value = getattr(self, field)
-            if value not in choices:
+            if not isinstance(value, str) or value not in choices:
                 raise ValueError(
                     f"VRM metadata {field}={value!r}; use one of {list(choices)}."
                 )
+
+    def check(self) -> None:
+        """Raise ValueError for metadata that a VRM file cannot carry."""
+        self.check_fields()
+        if not self.name.strip():
+            raise ValueError("A VRM file needs a name.")
+        if not self.authors:
+            raise ValueError(
+                "A VRM file needs an author: pass author= (--author) or meta= with authors."
+            )
 
 
 @dataclasses.dataclass
@@ -370,6 +422,34 @@ def vrm_version(version: str) -> str:
     return VERSIONS[version]
 
 
+def check_topology(topology: str) -> None:
+    """
+    Raise ValueError unless a VRM file can carry a character of this topology: the MakeHuman
+    body mesh with its eyes (``anny``, ``makehuman`` and their modifiers such as ``-quads``,
+    ``-full`` or ``-notongue``). The eyes turn with look-at, and the expressions and the
+    look-at ranges rest on the eyeball vertices of that mesh. The topology is only parsed,
+    so that no model is built and no data is downloaded.
+    """
+    from anny.models.model_data import TopologyConfig
+
+    if not isinstance(topology, str):
+        raise ValueError(f"The topology must be a string (got {topology!r}).")
+    try:
+        config = TopologyConfig.from_string(topology)
+    except ValueError as error:
+        raise ValueError(f"Unknown topology {topology!r} ({error})") from None
+    if config.base_mesh in ("smpl", "smplx"):
+        raise ValueError(
+            f"VRM export does not support the {topology!r} topology: it rests on the "
+            "non-commercial SMPL data. Use the 'anny' topology."
+        )
+    if config.base_mesh != "makehuman" or config.submodel != "body" or not config.eyes:
+        raise ValueError(
+            f"The {topology!r} topology cannot be exported as VRM: VRM export needs the "
+            "MakeHuman body mesh with its eyes (the 'anny' or 'makehuman' topology)."
+        )
+
+
 def resolve_meta(
     meta: VrmMeta | None,
     author: str | None,
@@ -382,6 +462,7 @@ def resolve_meta(
     """
     if meta is None:
         meta = VrmMeta(name="", authors=[])
+    meta.check_fields()
     meta = dataclasses.replace(
         meta,
         name=name or meta.name or character.name,
@@ -409,29 +490,39 @@ def vrm_spec(
     """
     The content of a VRM file of a character (see :func:`export_vrm` for the arguments).
     """
+    # Every check runs before the model is built.
     version = vrm_version(version)
     character = character or Character()
-    meta = resolve_meta(meta, author, name, character)
+    check_topology(character.topology)
     if character.rig != "anny":
-        raise ValueError("VRM export supports the 'anny' rig only.")
+        raise ValueError(
+            f"VRM export supports the 'anny' rig only; the character has the "
+            f"{character.rig!r} rig."
+        )
     twist = twist or ("constraint" if version == "1.0" else "merge")
     if twist not in ("constraint", "merge"):
         raise ValueError(f"Unknown twist mode {twist!r}; use 'constraint' or 'merge'.")
+    if twist == "constraint" and version == "0.x":
+        raise ValueError(
+            "VRM 0.x files cannot carry roll constraints: use twist 'merge' (the VRM 0.x "
+            "default) or VRM 1.0 for twist 'constraint'."
+        )
     if bind not in ("forward", "inverse"):
         raise ValueError(f"Unknown bind {bind!r}; use 'forward' or 'inverse'.")
+    meta = resolve_meta(meta, author, name, character)
     if thumbnail is None:
         png, thumbnail_kind = (
             meta.thumbnail_png,
-            "given" if meta.thumbnail_png else None,
+            "given" if meta.thumbnail_png is not None else None,
         )
-    elif thumbnail == "auto":
+    elif isinstance(thumbnail, str) and thumbnail == "auto":
         png, thumbnail_kind = None, "auto"  # rendered below, from the rest mesh
     elif isinstance(thumbnail, (bytes, bytearray)):
         png, thumbnail_kind = bytes(thumbnail), "given"
     else:
         png, thumbnail_kind = pathlib.Path(thumbnail).read_bytes(), "given"
     if png is not None:
-        _mime_type(png)  # a PNG or JPEG file
+        _thumbnail_mime_type(png)  # a square PNG or JPEG file
     if model is None:
         model = character.build_model(face_shapes=bool(character.face_shapes))
     labels = list(model.bone_labels)
@@ -469,7 +560,17 @@ def vrm_spec(
         vrm_tables.lid_only(t, eyes) if a.startswith("eyeLook") else t
         for a, t in zip(actions, rb.targets)
     ]
-    body = build_body(model, rb.vertices, targets, G, 4, weights, indices)
+    # The normals of the bind mesh, as the rebind computes them (None: from the vertices).
+    body = build_body(
+        model,
+        rb.vertices,
+        targets,
+        G,
+        4,
+        weights,
+        indices,
+        normals=getattr(rb, "normals", None),
+    )
 
     # Centring: the hips at X = Z = 0, the lowest vertex at Y = 0.
     joints = np.asarray(rb.joint_positions, dtype=np.float64) @ G.T
@@ -663,12 +764,30 @@ def _vrm0_group_name(e: vrm_tables.Expression) -> str:
     return e.name
 
 
-def _mime_type(data: bytes) -> str:
+def _thumbnail_mime_type(data: bytes) -> str:
+    """
+    The MIME type of a thumbnail. Raises ValueError unless it is a square PNG or JPEG file:
+    VRM 1.0 requires a square thumbnail, and VRM 0.x apps show it as a square.
+    """
+    if not isinstance(data, (bytes, bytearray)):
+        raise ValueError("A VRM thumbnail must be the bytes of a PNG or JPEG file.")
     if data.startswith(_PNG):
-        return "image/png"
-    if data.startswith(_JPEG):
-        return "image/jpeg"
-    raise ValueError("A VRM thumbnail must be a PNG or JPEG file.")
+        mime = "image/png"
+    elif data.startswith(_JPEG):
+        mime = "image/jpeg"
+    else:
+        raise ValueError("A VRM thumbnail must be a PNG or JPEG file.")
+    size = budgets.image_size(data)
+    if size is None:
+        raise ValueError(
+            "The size of the VRM thumbnail cannot be read from its header."
+        )
+    width, height = size
+    if width != height or width == 0:
+        raise ValueError(
+            f"A VRM thumbnail must be square; this one is {width} x {height} pixels."
+        )
+    return mime
 
 
 def _srgb_hex(colour: Sequence[float]) -> str:
@@ -842,7 +961,7 @@ def vrm_document(spec: VrmSpec) -> GltfDocument:
     thumbnail = None
     if spec.thumbnail is not None:
         thumbnail = doc.add_image(
-            spec.thumbnail, _mime_type(spec.thumbnail), "thumbnail"
+            spec.thumbnail, _thumbnail_mime_type(spec.thumbnail), "thumbnail"
         )
     if spec.version == "1.0":
         doc.extensions["VRMC_vrm"] = _vrm1_extension(spec, thumbnail)
@@ -1113,9 +1232,10 @@ def export_vrm(
 
     Args:
         path: the ``.vrm`` file to write.
-        character: the character; the default character when None. Its face shapes are baked
-            into the mesh, and its facial actions and its pose are ignored (the file starts
-            neutral, in the T-pose).
+        character: the character; the default character when None. Its rig must be
+            ``anny`` and its topology the MakeHuman body mesh with eyes
+            (:func:`check_topology`). Its face shapes are baked into the mesh, and its facial
+            actions and its pose are ignored (the file starts neutral, in the T-pose).
         model: the Anny model; ``character.build_model()`` when None. It needs
             ``facial_actions="all"`` for the expressions, and face shapes for a character with
             face shapes.
@@ -1123,11 +1243,13 @@ def export_vrm(
         meta: the licence metadata; built from ``author`` and ``name`` when None.
         author: the author, required unless ``meta`` names authors; replaces them otherwise.
         name: the avatar's name; the metadata's name, else the character's name, when None.
-        thumbnail: a PNG or JPEG path or the bytes of one, ``"auto"`` for a rendered portrait
-            (:func:`portrait_png`), or None (``meta.thumbnail_png``, if any).
+        thumbnail: a square PNG or JPEG file, as a path or bytes, ``"auto"`` for a rendered
+            portrait (:func:`portrait_png`), or None (``meta.thumbnail_png``, if any).
         bare: the body alone (no outfit, hair cards or face kit; PR 1 has only the body).
         twist: ``"constraint"`` (the VRM 1.0 default: roll constraints turn the twist bones)
             or ``"merge"`` (the 0.x default: the twist bones' weights move to their parents).
+            VRM 0.x files cannot carry constraints, so ``"constraint"`` raises ValueError
+            there. The scene extras and the summary record the mode in use.
         bind: ``"forward"`` or ``"inverse"`` (see :func:`opensculptboy.export.tpose.rebind`).
         keep_leg_spread: keep the rig's leg spread in the T-pose.
         budget: ``"strict"``, ``"warn"`` or ``"off"`` (see :mod:`opensculptboy.export.budget`).
@@ -1136,6 +1258,14 @@ def export_vrm(
 
     Returns:
         A summary: counts, the file size, the version and the budget messages.
+
+    Raises:
+        ValueError: for a character, an option, metadata or a thumbnail that a VRM file
+            cannot carry, before anything is written. The topology, the rig, the options,
+            the metadata and the thumbnail are checked before the model is built.
+        OSError: for a thumbnail file that cannot be read.
+        BudgetError: for a file over its budget with ``budget="strict"``, before anything
+            is written.
     """
     spec = vrm_spec(
         character,
