@@ -89,9 +89,11 @@ FRAMES = {
     "1.0": ANNY_TO_GLTF.copy(),
     "0.x": np.diag([-1.0, 1.0, -1.0]) @ ANNY_TO_GLTF,
 }
-# The bind that the export uses by default: the inverse bind lands about twice as close to
-# Anny's own posed mesh as the forward bind on the arms-down poses (``relaxed``, ``walk``;
-# see :func:`opensculptboy.export.tpose.bind_error`).
+# The bind that the export uses by default. On the arms-down poses (``relaxed``, ``walk``) of the
+# default body, measured with the file's weights by :func:`opensculptboy.export.tpose.bind_error`,
+# the inverse bind lands a third closer to Anny's own posed mesh than the forward bind: p99 8.5 mm
+# against 12.5 mm, a maximum of 11.6 to 14.3 mm against 21 mm, and normals within 14 to 18
+# degrees at p99 against 30 degrees.
 DEFAULT_BIND = "inverse"
 # The linear base colour of the skin (the colour of the GLB export), until the styles of PR 2.
 SKIN_COLOUR = (0.80, 0.62, 0.52, 1.0)
@@ -560,16 +562,9 @@ def vrm_spec(
         vrm_tables.lid_only(t, eyes) if a.startswith("eyeLook") else t
         for a, t in zip(actions, rb.targets)
     ]
-    # The normals of the bind mesh, as the rebind computes them (None: from the vertices).
+    # The normals of the rebind: for the inverse bind, Anny's rest normals mapped as the targets.
     body = build_body(
-        model,
-        rb.vertices,
-        targets,
-        G,
-        4,
-        weights,
-        indices,
-        normals=getattr(rb, "normals", None),
+        model, rb.vertices, targets, G, 4, weights, indices, normals=rb.normals
     )
 
     # Centring: the hips at X = Z = 0, the lowest vertex at Y = 0.

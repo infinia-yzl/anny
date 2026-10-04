@@ -28,7 +28,6 @@ import torch
 
 from opensculptboy import cli, read_character
 from opensculptboy.export import budget, vrm, vrm_tables
-from opensculptboy.export.body import triangulated_faces, vertex_normals
 from test import vrm_fixtures
 from test.gltf_reader import GLB, node_world_matrices
 
@@ -143,20 +142,18 @@ class TestVrmGeometry(unittest.TestCase):
                 self.assertAlmostEqual(hips[2], 0.0, places=6)
                 self.assertAlmostEqual(at_rest[:, 1].min(), 0.0, places=6)
 
-    def test_normals_of_the_welded_bind_mesh(self):
+    def test_normals_of_the_bind(self):
         """
-        The file carries the normals of the bind mesh, rotated by G: those of the rebind
-        when it computes them, else those of the welded bind vertices.
+        The file carries the normals of the rebind, rotated by G (test_vrm_tpose checks that the
+        inverse bind gives Anny's rest normals back at rest).
         """
-        triangles, _ = triangulated_faces(vrm_fixtures.model())
         for version in VERSIONS:
             with self.subTest(version=version):
                 spec = vrm_fixtures.vrm_build(version)
                 glb = vrm_fixtures.vrm_glb(version)
-                bind_normals = getattr(spec.rebind, "normals", None)
-                if bind_normals is None:
-                    bind_normals = vertex_normals(spec.rebind.vertices, triangles)
-                expected = np.asarray(bind_normals, dtype=np.float64) @ spec.frame.T
+                expected = (
+                    np.asarray(spec.rebind.normals, dtype=np.float64) @ spec.frame.T
+                )
                 attrs = glb.json["meshes"][0]["primitives"][0]["attributes"]
                 normals = glb.accessor(attrs["NORMAL"]).astype(np.float64)
                 np.testing.assert_allclose(
