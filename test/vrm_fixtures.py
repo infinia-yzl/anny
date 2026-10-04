@@ -4,7 +4,15 @@
 Shared VRM exports for the tests: each file is written once per test process and cached, so
 that the VRM test modules stay within their time budget.
 
-CONTRACT (PR 1): stream A4 may add fixtures; every VRM test module uses these.
+- :func:`vrm_export` gives the path and the summary of an export of :data:`CHARACTER`
+  (``version`` "1.0" or "0.x", other options as for ``export_vrm``), and :func:`vrm_json` its
+  JSON chunk.
+- :func:`vrm_build` gives the :class:`~opensculptboy.export.vrm.VrmSpec` behind an export: the
+  rebind, the centring offset, the file's skin weights and the source vertex of each file
+  vertex, for tests that compare the file with Anny.
+- :func:`vrm_glb` gives the export read by ``test.gltf_reader.GLB``.
+
+Exports that differ only in ``budget`` share one spec.
 """
 
 import functools
@@ -26,6 +34,7 @@ CHARACTER = Character(
     face_shapes={"nose-scale-horiz": 0.4},
     facial_actions={"jawOpen": 0.25},
 )
+AUTHOR = "OpenSculptBoy tests"
 
 
 @functools.lru_cache(maxsize=None)
@@ -35,25 +44,35 @@ def model(face_shapes: bool = True):
 
 
 @functools.lru_cache(maxsize=None)
+def vrm_build(version: str = "1.0", **options):
+    """The VrmSpec of a VRM export of ``CHARACTER``; ``options`` go to ``vrm_spec``."""
+    from opensculptboy.export.vrm import vrm_spec
+
+    return vrm_spec(CHARACTER, model(), version=version, author=AUTHOR, **options)
+
+
+@functools.lru_cache(maxsize=None)
 def vrm_export(version: str = "1.0", **options) -> tuple[pathlib.Path, dict]:
     """The path and summary of a VRM export of ``CHARACTER``; ``options`` go to export_vrm."""
-    from opensculptboy.export.vrm import export_vrm
+    from opensculptboy.export.vrm import write_vrm
 
+    budget = options.pop("budget", "warn")
     path = (
         pathlib.Path(_TMP.name)
-        / f"fixture_{version}_{len(options)}_{hash(tuple(sorted(options.items())))}.vrm"
+        / f"fixture_{version}_{len(options)}_{budget}_{abs(hash(tuple(sorted(options.items()))))}.vrm"
     )
-    summary = export_vrm(
-        path,
-        CHARACTER,
-        model(),
-        version=version,
-        author="OpenSculptBoy tests",
-        **options,
-    )
+    summary = write_vrm(vrm_build(version, **options), path, budget=budget)
     return path, summary
 
 
 def vrm_json(version: str = "1.0", **options) -> dict:
     """The JSON chunk of the shared VRM export."""
     return read_gltf_json(vrm_export(version, **options)[0])
+
+
+@functools.lru_cache(maxsize=None)
+def vrm_glb(version: str = "1.0", **options):
+    """The shared VRM export, read by ``test.gltf_reader.GLB``."""
+    from test.gltf_reader import GLB
+
+    return GLB(vrm_export(version, **options)[0])

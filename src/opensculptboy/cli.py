@@ -6,6 +6,8 @@ The ``opensculptboy`` command.
     opensculptboy character > me.json                # a character card with the default settings
     opensculptboy export me.glb --character me.json --animation walk --animation wave
     opensculptboy export me.glb --morph-targets all  # every facial action and face shape
+    opensculptboy export me.vrm --character me.json --author "Me"   # a VRM 1.0 avatar
+    opensculptboy export me0.vrm --author "Me" --vrm-version 0 --thumbnail auto   # VRM 0.x
     opensculptboy names poses                        # the poses and clips of the library
     opensculptboy pose photo.jpg --card pose.json --glb pose.glb --svg pose.svg --png pose.png
     opensculptboy viewer build                       # the web viewer (python -m anny.viewer build)
@@ -17,8 +19,28 @@ import argparse
 import json
 import pathlib
 import sys
+import warnings
 
 from opensculptboy.character import Character
+
+# The options of ``export`` that only one of the two formats takes.
+_GLB_ONLY = ("animation", "morph_targets", "influences", "no_ground")
+_VRM_ONLY = (
+    "author",
+    "name",
+    "meta",
+    "vrm_version",
+    "thumbnail",
+    "twist",
+    "bind",
+    "keep_leg_spread",
+    "budget",
+    "anny_vertex",
+)
+
+
+def _flag(dest: str) -> str:
+    return "--" + dest.replace("_", "-")
 
 
 def _load_character(path: str | None) -> Character:
@@ -27,7 +49,18 @@ def _load_character(path: str | None) -> Character:
     return Character.from_dict(json.loads(pathlib.Path(path).read_text()))
 
 
-def _export(args) -> int:
+def _export(args, parser) -> int:
+    is_vrm = pathlib.Path(args.output).suffix.lower() == ".vrm"
+    wrong = _GLB_ONLY if is_vrm else _VRM_ONLY
+    given = [_flag(d) for d in wrong if getattr(args, d) not in (None, False)]
+    if given:
+        kind, other = (".vrm", ".glb") if is_vrm else (".glb", ".vrm")
+        parser.error(
+            f"{', '.join(given)}: only for {other} files, not for the {kind} file "
+            f"{args.output}."
+        )
+    if is_vrm:
+        return _export_vrm(args, parser)
     from opensculptboy.export.gltf import export_glb
 
     character = _load_character(args.character)
@@ -45,9 +78,52 @@ def _export(args) -> int:
         model,
         animations=args.animation or (),
         morph_targets=morph_targets,
-        max_influences=args.influences,
+        max_influences=args.influences or 4,
         ground=not args.no_ground,
     )
+    print(json.dumps(summary, indent=2))
+    return 0
+
+
+def _export_vrm(args, parser) -> int:
+    from opensculptboy.export.budget import BudgetError
+    from opensculptboy.export.vrm import DEFAULT_BIND, VrmMeta, export_vrm
+
+    meta = None
+    if args.meta:
+        try:
+            meta = VrmMeta.from_dict(json.loads(pathlib.Path(args.meta).read_text()))
+        except (OSError, ValueError) as error:
+            parser.error(f"--meta {args.meta}: {error}")
+    if not args.author and not (meta and meta.authors):
+        parser.error(
+            "a VRM file needs an author: pass --author NAME, or --meta FILE with "
+            '"authors": ["NAME"].'
+        )
+    character = _load_character(args.character)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            summary = export_vrm(
+                args.output,
+                character,
+                version={"1": "1.0", "0": "0.x"}[args.vrm_version or "1"],
+                meta=meta,
+                author=args.author,
+                name=args.name,
+                thumbnail=args.thumbnail,
+                bare=args.bare,
+                twist=args.twist,
+                bind=args.bind or DEFAULT_BIND,
+                keep_leg_spread=args.keep_leg_spread,
+                budget=args.budget or "warn",
+                keep_anny_vertex=args.anny_vertex,
+            )
+        except BudgetError as error:
+            print(f"opensculptboy export: {error}", file=sys.stderr)
+            return 1
+    for warning in caught:
+        print(f"warning: {warning.message}", file=sys.stderr)
     print(json.dumps(summary, indent=2))
     return 0
 
@@ -133,32 +209,92 @@ def main(argv=None) -> int:
     sub.add_parser("character", help="print a character card with the default settings")
 
     e = sub.add_parser(
-        "export", help="export a character as a glTF 2.0 binary file (.glb)"
+        "export",
+        help="export a character as a glTF 2.0 binary file (.glb) or a VRM avatar (.vrm)",
+        description="Export a character. The suffix of the output picks the format: .vrm "
+        "writes a VRM avatar for VTuber apps (VRM 1.0, or VRM 0.x with --vrm-version 0), "
+        "any other suffix a glTF 2.0 binary file.",
     )
-    e.add_argument("output", help="the .glb file to write")
+    e.add_argument("output", help="the .glb or .vrm file to write")
     e.add_argument(
         "--character",
         help="a character card (JSON); the default character when omitted",
     )
     e.add_argument(
+        "--bare",
+        action="store_true",
+        help="the body alone: no outfit, hair cards, teeth or lashes",
+    )
+    g = e.add_argument_group("glTF (.glb) options")
+    g.add_argument(
         "--animation",
         action="append",
         help="a pose or clip of the library; repeat for more",
     )
-    e.add_argument(
+    g.add_argument(
         "--morph-targets",
         help="'facial' (the default: the 52 facial actions), 'all' (with the face shapes), "
         "'none', or a comma-separated list of names",
     )
-    e.add_argument(
+    g.add_argument(
         "--influences",
         type=int,
         choices=(4, 8),
-        default=4,
         help="bones per vertex (default 4)",
     )
-    e.add_argument(
+    g.add_argument(
         "--no-ground", action="store_true", help="keep the rest pose at Anny's origin"
+    )
+    r = e.add_argument_group("VRM (.vrm) options")
+    r.add_argument(
+        "--author",
+        help="the avatar's author (required, unless --meta names the authors)",
+    )
+    r.add_argument("--name", help="the avatar's name (default: the character's name)")
+    r.add_argument(
+        "--meta",
+        metavar="FILE",
+        help="licence metadata as JSON: the fields of opensculptboy.export.vrm.VrmMeta "
+        '(for example {"authors": ["Me"], "commercial_usage": "personalProfit"})',
+    )
+    r.add_argument(
+        "--vrm-version",
+        choices=("1", "0"),
+        help="1 for VRM 1.0 (the default: Warudo, VMagicMirror, three-vrm), 0 for VRM 0.x "
+        "(VSeeFace, 3tene)",
+    )
+    r.add_argument(
+        "--thumbnail",
+        metavar="PATH|auto",
+        help="the thumbnail: a PNG or JPEG file, or 'auto' for a rendered portrait",
+    )
+    r.add_argument(
+        "--twist",
+        choices=("constraint", "merge"),
+        help="the forearm and leg twist bones: roll constraints (the VRM 1.0 default) or "
+        "their weights merged into the limb bones (the VRM 0.x default)",
+    )
+    r.add_argument(
+        "--bind",
+        choices=("forward", "inverse"),
+        help="how the mesh moves into the T-pose (default: inverse, closest to the "
+        "character's own skinning with the arms down)",
+    )
+    r.add_argument(
+        "--keep-leg-spread",
+        action="store_true",
+        help="keep the rig's leg spread in the T-pose (default: legs vertical)",
+    )
+    r.add_argument(
+        "--budget",
+        choices=("strict", "warn", "off"),
+        help="a file over the budget of its VRM version fails, warns (the default) or "
+        "passes",
+    )
+    r.add_argument(
+        "--anny-vertex",
+        action="store_true",
+        help="keep the _ANNY_VERTEX attribute (the Anny vertex of each file vertex)",
     )
 
     p = sub.add_parser(
@@ -232,7 +368,7 @@ def main(argv=None) -> int:
         print(json.dumps(Character().to_dict(), indent=2))
         return 0
     if args.command == "export":
-        return _export(args)
+        return _export(args, e)
     if args.command == "names":
         return _names(args)
     if args.command == "pose":

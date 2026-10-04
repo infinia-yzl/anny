@@ -63,7 +63,7 @@ package() {
   uv venv --python "${python}" "${work}/venv"
   # --python names the new environment; UV_PYTHON (set in CI) would otherwise pick another one.
   uv pip install --python "${work}/venv/bin/python" --torch-backend cpu "${work}"/dist/*.whl
-  step "package: import, version and the opensculptboy command"
+  step "package: import, version and the opensculptboy command (GLB and VRM exports)"
   (
     cd "${work}"
     ./venv/bin/python - <<'EOF'
@@ -76,6 +76,10 @@ EOF
     ./venv/bin/opensculptboy names poses | head -3
     ./venv/bin/opensculptboy export smoke.glb --animation walk
     test -s smoke.glb
+    ./venv/bin/opensculptboy export smoke.vrm --author smoke
+    test -s smoke.vrm
+    ./venv/bin/opensculptboy export smoke0.vrm --author smoke --vrm-version 0
+    test -s smoke0.vrm
   )
 }
 
