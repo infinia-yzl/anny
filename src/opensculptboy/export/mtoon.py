@@ -15,6 +15,16 @@ VRM 0.x cannot hold every MToon 1.0 material. :func:`representable` projects a m
 three-vrm's conversion of a 0.x entry to MToon 1.0, and ``from_vrm1`` reads a 1.0 material back,
 so that the tests check that a 0.x reader sees the material of the 1.0 file.
 
+Colours: MToon 1.0 holds linear colours, and MToon 0.x holds the sRGB-encoded colours of Unity's
+material properties, which Unity decodes with the exact sRGB curve in a linear colour space (and
+uses as they are in a gamma colour space). VRM 0.x exists for VSeeFace, 3tene and the other
+UniVRM 0.x apps, so ``to_vrm0`` writes the exact sRGB encoding of each linear colour
+(:func:`srgb_encode`, Unity's ``Mathf.LinearToGammaSpace``), which those apps decode exactly.
+three-vrm decodes the same values with a 2.2 power curve (:func:`gamma_decode`, which
+``v0_to_v1`` repeats) and reads them up to 0.009 off in linear units (0.0085 at a linear 0.52).
+That difference holds for every colour of every 0.x file, so :func:`representable` does not
+report it.
+
 Sources, at the commits that the line numbers below refer to:
 
 - MToon 1.0: vrm-c/vrm-specification@94e82dd, ``specification/VRMC_materials_mtoon-1.0/README.md``
@@ -174,7 +184,8 @@ class ToonMaterial:
     normal_scale: float = 1.0
     # An sRGB texture that multiplies the emissive colour (glTF emissiveTexture).
     emissive_texture: int | None = None
-    # An sRGB mask that multiplies the rim lighting (the matcap and the parametric rim).
+    # An sRGB mask that multiplies the rim lighting: the matcap and the parametric rim in MToon
+    # 1.0, the parametric rim alone in MToon 0.x.
     rim_multiply_texture: int | None = None
     # A linear mask of the outline width: MToon 1.0 reads its G channel and MToon 0.x its R
     # channel (MToonCore.cginc line 86), so the mask must be grey for both versions to agree.
@@ -525,11 +536,37 @@ def project_shading(toony: float, shift: float) -> tuple[float, float]:
 # VRM 0.x
 
 
+def srgb_encode(linear) -> list[float]:
+    """
+    Linear colour components in [0, 1] as a 0.x file stores them: the exact sRGB encoding, as
+    Unity's ``Mathf.LinearToGammaSpace`` computes it (12.92 c up to 0.0031308, then
+    1.055 c^(1/2.4) - 0.055). MToon 0.x in Unity decodes it exactly (:func:`srgb_decode`).
+    """
+    out = []
+    for c in linear:
+        c = float(c)
+        out.append(12.92 * c if c <= 0.0031308 else 1.055 * c ** (1.0 / 2.4) - 0.055)
+    return out
+
+
+def srgb_decode(encoded) -> list[float]:
+    """
+    The exact sRGB decoding of each component, Unity's ``Mathf.GammaToLinearSpace`` (e / 12.92 up
+    to 0.04045, then ((e + 0.055) / 1.055)^2.4): the inverse of :func:`srgb_encode`, within
+    3e-9 where the two pieces of the curve meet.
+    """
+    out = []
+    for e in encoded:
+        e = float(e)
+        out.append(e / 12.92 if e <= 0.04045 else ((e + 0.055) / 1.055) ** 2.4)
+    return out
+
+
 def gamma_encode(linear) -> list[float]:
     """
-    Linear colour components as a 0.x file stores them: linear^(1/2.2), the inverse of three-vrm's
-    gammaEOTF. Unity apps (VSeeFace, UniVRM) decode them with the exact sRGB curve instead, which
-    differs from the 2.2 power by at most 0.009 in linear units.
+    Linear colour components as three-vrm's 2.2 power curve encodes them: linear^(1/2.2), the
+    inverse of :func:`gamma_decode`. The 0.x encoder writes :func:`srgb_encode` instead, for the
+    Unity apps; this pair serves to compare three-vrm's reading with it.
     """
     return [float(c) ** (1.0 / GAMMA) for c in linear]
 
@@ -540,7 +577,8 @@ def gamma_decode(encoded) -> list[float]:
 
 
 def _tidy(value: float) -> float:
-    """A derived 0.x value rounded to 12 decimals, so that the file reads 0 rather than 4e-17."""
+    """A derived 0.x value rounded to 12 decimals, so that the file reads 0 where float error
+    would leave 4e-17."""
     return round(float(value), 12) + 0.0  # + 0.0 turns -0.0 into 0.0
 
 
@@ -566,11 +604,18 @@ def representable(material: ToonMaterial) -> tuple[ToonMaterial, list[str]]:
       without a factor (MToonCore.cginc lines 242-244), so the factor must be baked into the
       texture of the 0.x file.
 
-    Notes, without changes: a non-black emissive colour (three-vrm decodes _EmissionColor with
-    the gamma curve, UniVRM's 1.0 migration reads it as linear), an outline width texture (R
-    channel in 0.x, G in 1.0), and a base texture without a shade texture (UniVRM's 1.0 migration
-    then multiplies the shade colour by the base texture, MigrationMToonMaterial.cs lines 183-202,
-    while MToon 0.x and three-vrm do not).
+    Notes, without changes:
+
+    - a matcap texture with a rim lighting mix above 0 or a rim multiply texture: MToon 0.x adds
+      the matcap unlit and unmasked, since _RimLightingMix and _RimTexture apply to the
+      parametric rim alone and _SphereAdd is added raw (MToonCore.cginc lines 232-242), where
+      MToon 1.0 multiplies the matcap by the rim mask and mixes in the lighting;
+    - a non-black emissive colour (three-vrm decodes _EmissionColor with the 2.2 gamma curve,
+      UniVRM's 1.0 migration reads it as linear);
+    - an outline width texture (R channel in 0.x, G in 1.0);
+    - a base texture without a shade texture (UniVRM's 1.0 migration then multiplies the shade
+      colour by the base texture, MigrationMToonMaterial.cs lines 183-202, while MToon 0.x and
+      three-vrm do not).
     """
     check(material)
     m = material
@@ -596,6 +641,15 @@ def representable(material: ToonMaterial) -> tuple[ToonMaterial, list[str]]:
         messages.append(
             f"{m.name}: VRM 0.x has no matcap factor; bake {tuple(m.matcap_factor)} into the "
             "matcap texture of the 0.x file"
+        )
+    if m.matcap_texture is not None and (
+        m.rim_lighting_mix > 0.0 or m.rim_multiply_texture is not None
+    ):
+        messages.append(
+            f"{m.name}: MToon 0.x adds the matcap unlit and unmasked (_RimLightingMix and "
+            "_RimTexture apply to the parametric rim alone), where MToon 1.0 multiplies it by "
+            "the rim mask and mixes in the lighting; the matcap of the 0.x file looks "
+            "different in VSeeFace and 3tene"
         )
     if any(c > 0.0 for c in m.emissive):
         messages.append(
@@ -630,8 +684,10 @@ def to_vrm0(
 
     Mapping (0.x property from the 1.0 value):
 
-    - _Color, _ShadeColor, _RimColor, _EmissionColor, _OutlineColor: :func:`gamma_encode` of
-      the linear colour, the alpha of _Color linear (VRMMaterialsV0CompatPlugin.ts lines 98-100).
+    - _Color, _ShadeColor, _RimColor, _EmissionColor, _OutlineColor: :func:`srgb_encode` of
+      the linear colour, which MToon 0.x in Unity decodes exactly (three-vrm reads it up to
+      0.009 off, see the module docstring), the alpha of _Color linear
+      (VRMMaterialsV0CompatPlugin.ts lines 98-100).
     - _ShadeToony, _ShadeShift: :func:`shade_to_v0`.
     - _IndirectLightIntensity: 1 - giEqualizationFactor, at least ``MIN_INDIRECT_LIGHT_INTENSITY``.
     - _OutlineWidth: centimetres in world coordinates (100 x metres). In screen coordinates the
@@ -705,11 +761,11 @@ def to_vrm0(
         "_AlphaToMask": float(alpha_to_mask),
     }
     colours = {
-        "_Color": gamma_encode(m.base_color[:3]) + [float(m.base_color[3])],
-        "_ShadeColor": gamma_encode(m.shade_color) + [1.0],
-        "_RimColor": gamma_encode(m.rim_color) + [1.0],
-        "_EmissionColor": gamma_encode(m.emissive) + [1.0],
-        "_OutlineColor": gamma_encode(m.outline_color) + [1.0],
+        "_Color": srgb_encode(m.base_color[:3]) + [float(m.base_color[3])],
+        "_ShadeColor": srgb_encode(m.shade_color) + [1.0],
+        "_RimColor": srgb_encode(m.rim_color) + [1.0],
+        "_EmissionColor": srgb_encode(m.emissive) + [1.0],
+        "_OutlineColor": srgb_encode(m.outline_color) + [1.0],
     }
     vectors = {
         name: colours[name] if name in colours else list(IDENTITY_ST)
@@ -830,8 +886,10 @@ def v0_to_v1(
 
     Returns:
         The glTF material, as three-vrm's loader then reads it. Its colour factors have 4
-        components where the 0.x vector has 4 (three-vrm reads the first 3); the UV animation
-        rotation stays in 0.x's turns per second, as in three-vrm (UniVRM multiplies it by 2 pi).
+        components where the 0.x vector has 4 (three-vrm reads the first 3), decoded with
+        three-vrm's 2.2 power curve, so the sRGB colours of ``to_vrm0`` come back up to 0.009
+        off; the UV animation rotation stays in 0.x's turns per second, as in three-vrm (UniVRM
+        multiplies it by 2 pi).
     """
     floats = props.get("floatProperties") or {}
     vectors = props.get("vectorProperties") or {}
