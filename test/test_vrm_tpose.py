@@ -2,24 +2,65 @@
 # Apache License, Version 2.0
 """
 Checks of the VRM T-pose and its rebind (opensculptboy.export.tpose): the directions of the
-arms, hands, fingers, thumbs, legs and feet, the palms and the nails, the symmetry, the
-agreement of the forward bind with Anny's own forward pass, the exactness of the inverse bind at
-Anny's rest pose, and the pose error of both binds.
+arms, hands, fingers, thumbs, legs and feet, the palms and the nails (against the mesh: the
+palm side of the hand and MakeHuman's fingernail mask), the symmetry, the agreement of the
+forward bind with Anny's own forward pass, the exactness of the inverse bind at Anny's rest
+pose (positions, targets and normals), the pose error of both binds with the file's weights,
+and the error of a file whose humanoid bones turn alone.
 """
 
 import itertools
+import pathlib
 import time
 import unittest
 
 import numpy as np
 import torch
+from PIL import Image
 
-from opensculptboy.export import tpose
-from opensculptboy.export.body import top_skin_weights
+import anny
+import anny.poses
+from opensculptboy.export import tpose, vrm_tables
+from opensculptboy.export.body import (
+    top_skin_weights,
+    triangulated_faces,
+    vertex_normals,
+)
 from test import vrm_fixtures
 
 SIDES = {"L": 1.0, "R": -1.0}
 UP = np.array([0.0, 0.0, 1.0])
+FINGERNAILS = (
+    pathlib.Path(anny.__file__).parent
+    / "data"
+    / "mpfb2"
+    / "textures"
+    / "mpfb_fingernails.jpg"
+)
+# The phenotype corners of the error reports, besides the default body.
+CORNERS = {
+    "heavy tall": dict(gender=1.0, weight=1.0, muscle=1.0, height=1.0),
+    "heavy": dict(gender=0.0, weight=1.0),
+}
+# The measured bind errors with the file's weights (the same for VRM 1.0 with twist
+# "constraint" and VRM 0.x with "merge", within 0.02 mm): (body, method, pose) -> (max mm,
+# 99th percentile mm, 99th percentile of the normal angle in degrees). The test allows 1.2
+# times these values.
+MEASURED_BIND_ERROR = {
+    ("default", "forward", "relaxed"): (21.08, 12.49, 29.49),
+    ("default", "forward", "walk"): (21.45, 12.53, 30.79),
+    ("default", "inverse", "relaxed"): (11.62, 8.45, 14.32),
+    ("default", "inverse", "walk"): (14.28, 7.86, 18.13),
+    ("heavy tall", "forward", "relaxed"): (26.05, 15.24, 30.07),
+    ("heavy tall", "forward", "walk"): (25.94, 15.60, 32.29),
+    ("heavy tall", "inverse", "relaxed"): (15.68, 11.11, 14.68),
+    ("heavy tall", "inverse", "walk"): (19.27, 10.22, 18.80),
+    ("heavy", "forward", "relaxed"): (24.42, 14.44, 31.97),
+    ("heavy", "forward", "walk"): (24.24, 14.14, 34.16),
+    ("heavy", "inverse", "relaxed"): (12.01, 8.71, 15.45),
+    ("heavy", "inverse", "walk"): (13.70, 8.30, 19.94),
+}
+VERSIONS = {"1.0": "constraint", "0.x": "merge"}
 
 
 def angle(a, b) -> float:
@@ -32,6 +73,11 @@ def unit(v):
     return v / np.linalg.norm(v)
 
 
+def across(v, axis):
+    """The part of ``v`` perpendicular to the unit ``axis``."""
+    return v - (v @ axis) * axis
+
+
 class TestVrmTPose(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -40,6 +86,15 @@ class TestVrmTPose(unittest.TestCase):
         )  # float64, with every facial action and face shape
         cls.labels = list(cls.model.bone_labels)
         cls.parents = [int(p) for p in cls.model.bone_parents]
+        cls.triangles, uv_triangles = triangulated_faces(cls.model)
+        # The faces that MakeHuman's fingernail mask covers (the mean of its corners above
+        # 0.5; the mask's rows run from v = 1 at the top).
+        mask = np.asarray(Image.open(FINGERNAILS).convert("L"), dtype=np.float64) / 255
+        uv = cls.model.texture_coordinates.numpy()[uv_triangles]
+        rows, cols = mask.shape
+        x = np.clip((uv[..., 0] * cols).astype(int), 0, cols - 1)
+        y = np.clip(((1.0 - uv[..., 1]) * rows).astype(int), 0, rows - 1)
+        cls.nail_faces = mask[y, x].mean(axis=1) > 0.5
         kwargs = vrm_fixtures.CHARACTER.model_kwargs()
         # The default body, and the body of the shared exports (a phenotype off the default
         # and a face shape).
@@ -62,11 +117,23 @@ class TestVrmTPose(unittest.TestCase):
             B = out["rest_bone_poses"][0].numpy()
             cls.rest[name] = (vertices[0], vertices[1:] - vertices[0], B)
             cls.poses[name] = tpose.vrm_t_pose(cls.model, torch.from_numpy(B)).numpy()
-        cls.file_weights, cls.file_indices, _ = top_skin_weights(
-            cls.model.vertex_bone_weights.numpy(),
-            cls.model.vertex_bone_indices.numpy(),
-            4,
-        )
+        # The weights of a VRM 1.0 file (the eyelids moved to the head, the upper twist bones
+        # merged), as the file stores them.
+        cls.vrm_weights = vrm_tables.vrm_skin_weights(cls.model, "constraint")
+        cls.file_weights, cls.file_indices, _ = top_skin_weights(*cls.vrm_weights, 4)
+        # Anny's skin into the T-pose (the forward bind) of each body, without targets.
+        cls.tposed = {
+            name: tpose.rebind(
+                cls.model,
+                base,
+                offsets[:0],
+                B,
+                cls.file_weights,
+                cls.file_indices,
+                method="forward",
+            )
+            for name, (base, offsets, B) in cls.rest.items()
+        }
         cls.binds = {}
         for method in ("forward", "inverse"):
             base, offsets, B = cls.rest["fixture"]
@@ -84,6 +151,20 @@ class TestVrmTPose(unittest.TestCase):
                 f"\nrebind {method}: {time.perf_counter() - start:.3f} s "
                 f"({len(base)} vertices, {len(offsets)} targets)"
             )
+        # The fixture body in the relaxed pose: Anny's vertices and world bone poses.
+        params = anny.poses.pose_parameters(
+            cls.model,
+            "relaxed",
+            phenotype_kwargs=cls.bodies["fixture"]["phenotype_kwargs"],
+            grounded=False,
+        )["pose_parameters"]
+        with torch.no_grad():
+            out = cls.model(
+                pose_parameters=params,
+                pose_parameterization="local-ref",
+                **cls.bodies["fixture"],
+            )
+        cls.relaxed = (out["vertices"][0].numpy(), out["bone_poses"][0].numpy())
 
     @classmethod
     def batched(cls, body):
@@ -110,6 +191,24 @@ class TestVrmTPose(unittest.TestCase):
     def direction(self, body, start, end):
         h = self.heads(body)
         return h[self.bone(end)] - h[self.bone(start)]
+
+    def weight(self, *names):
+        """The skin weight (Anny's weights) of each vertex on the named bones."""
+        weights = self.model.vertex_bone_weights.numpy()
+        indices = self.model.vertex_bone_indices.numpy()
+        bones = [self.bone(name) for name in names]
+        return np.where(np.isin(indices, bones), weights, 0.0).sum(axis=1)
+
+    def nail(self, vertices, bone):
+        """
+        The area-weighted normal of the faces of the fingernail mask that ``bone`` carries
+        with a weight above 0.9.
+        """
+        strong = self.weight(bone) > 0.9
+        faces = self.triangles[self.nail_faces & strong[self.triangles].all(axis=1)]
+        self.assertGreater(len(faces), 10, bone)
+        a, b, c = (vertices[faces[:, k]] for k in range(3))
+        return unit(np.cross(b - a, c - a).sum(axis=0))
 
     def test_shared_root_heads(self):
         # In the cached anny rig, the hips of a VRM file (root) share their head with spine05
@@ -218,6 +317,91 @@ class TestVrmTPose(unittest.TestCase):
                         with self.subTest(body=body, bone=self.labels[j], part="nail"):
                             self.assertLess(angle(U[j] @ nail, UP), 1.0)
 
+    def test_palms_against_the_mesh(self):
+        # Checks of the hands that do not use tpose.palm: in the A-pose the palms face the
+        # thighs, so the palm side of the hand is the side of the metacarpals whose normals
+        # point toward the body. In the T-pose that side faces down, and the thumb side of the
+        # hand faces the front (the figure faces -Y): the index knuckle stands in front of the
+        # little-finger knuckle, and the root of the thumb in front of the middle knuckle. (The
+        # root of the thumb lies level with the index knuckle, within 2 mm.)
+        hand_bones = {
+            side: [f"metacarpal{k}.{side}" for k in range(1, 5)] for side in SIDES
+        }
+        for body in self.bodies:
+            base, _, B = self.rest[body]
+            rest_normals = vertex_normals(base, self.triangles)
+            normals = vertex_normals(self.tposed[body].vertices, self.triangles)
+            heads = self.heads(body)
+            for side, s in SIDES.items():
+                with self.subTest(body=body, side=side):
+                    # The back of a hand that hangs at the side faces outward and up.
+                    _, back = tpose.palm(B[:, :3, 3], self.labels, side)
+                    self.assertGreater(s * back[0], 0.5)
+                    self.assertGreater(back[2], 0.3)
+                    hand = self.weight(*hand_bones[side]) > 0.9
+                    palm_side = hand & (s * rest_normals[:, 0] < 0.0)
+                    at_rest = rest_normals[palm_side].sum(axis=0)
+                    down = normals[palm_side].sum(axis=0)
+                    y = {
+                        k: heads[self.bone(f"finger{k}-1.{side}"), 1] * 1000.0
+                        for k in range(1, 6)
+                    }
+                    print(
+                        f"\n{body} {side}: {palm_side.sum()} palm vertices, at rest "
+                        f"{angle(at_rest, -back):.1f} degrees from the palm normal, in the "
+                        f"T-pose {angle(down, -UP):.1f} degrees from down; y of the thumb "
+                        "root and of the knuckles: "
+                        + ", ".join(f"{v:.1f}" for v in y.values())
+                        + " mm"
+                    )
+                    self.assertGreater(palm_side.sum(), 20)
+                    self.assertLess(angle(at_rest, -back), 30.0)
+                    self.assertLess(angle(down, -UP), 20.0)
+                    self.assertLess(y[2], y[5] - 30.0)
+                    self.assertLess(y[1], y[3] - 15.0)
+
+    def test_thumb_nails(self):
+        # VRM T-pose definition 1.8: the thumb nail faces a quarter turn from the other nails,
+        # (-s, -1, 0) / sqrt(2) in Anny's frame, measured on the fingernail mask of the mesh.
+        # The last thumb bone keeps its rest bend, so the nail tilts toward the tip; its roll
+        # about the thumb is what the definition fixes.
+        meshes = {f"{body}, forward": rb.vertices for body, rb in self.tposed.items()}
+        meshes["fixture, inverse"] = self.binds["inverse"].vertices
+        for mesh, vertices in meshes.items():
+            for side in SIDES:
+                with self.subTest(mesh=mesh, side=side):
+                    nail = self.nail(vertices, f"finger1-3.{side}")
+                    axis = tpose.thumb_direction(side)
+                    target = tpose.thumb_nail_target(side)
+                    roll = angle(across(nail, axis), target)
+                    fingers = [
+                        angle(self.nail(vertices, f"finger{k}-3.{side}"), UP)
+                        for k in tpose.FINGERS
+                    ]
+                    print(
+                        f"\n{mesh} {side}: thumb nail {roll:.2f} degrees of roll from its "
+                        f"target ({angle(nail, target):.1f} degrees with the tilt), "
+                        f"{np.degrees(np.arcsin(nail[2])):.2f} degrees above level; the "
+                        "other nails "
+                        + ", ".join(f"{a:.1f}" for a in fingers)
+                        + " degrees from up"
+                    )
+                    self.assertLess(roll, 2.0)
+                    self.assertLess(abs(nail[2]), 0.05)
+                    self.assertLess(max(fingers), 20.0)
+        # At rest, tpose.thumb_nail is the nail of the mesh.
+        for body in self.bodies:
+            base, _, B = self.rest[body]
+            for side in SIDES:
+                with self.subTest(body=body, side=side, pose="rest"):
+                    self.assertLess(
+                        angle(
+                            tpose.thumb_nail(B, self.labels, side),
+                            self.nail(base, f"finger1-3.{side}"),
+                        ),
+                        5.0,
+                    )
+
     def test_thumbs(self):
         for body in self.bodies:
             for side, s in SIDES.items():
@@ -304,14 +488,25 @@ class TestVrmTPose(unittest.TestCase):
                 }
             )
         for c, B in enumerate(out["rest_bone_poses"].numpy()):
-            h = tpose.vrm_t_pose(self.model, torch.from_numpy(B)).numpy()[:, :3, 3]
+            T = tpose.vrm_t_pose(self.model, torch.from_numpy(B)).numpy()
+            h = T[:, :3, 3]
 
             def d(start, end):
                 return h[self.bone(end)] - h[self.bone(start)]
 
             for side, s in SIDES.items():
                 hand, back = tpose.palm(h, self.labels, side)
+                j = self.bone(f"finger1-3.{side}")
+                nail = (
+                    T[j, :3, :3]
+                    @ B[j, :3, :3].T
+                    @ tpose.thumb_nail(B, self.labels, side)
+                )
                 angles = {
+                    "thumb nail": angle(
+                        across(nail, tpose.thumb_direction(side)),
+                        tpose.thumb_nail_target(side),
+                    ),
                     "upper arm": angle(
                         d(f"upperarm01.{side}", f"lowerarm01.{side}"), [s, 0, 0]
                     ),
@@ -384,11 +579,74 @@ class TestVrmTPose(unittest.TestCase):
             base,
             offsets[:0],
             self.rest["fixture"][2],
-            self.model.vertex_bone_weights.numpy(),
-            self.model.vertex_bone_indices.numpy(),
+            *self.vrm_weights,
             method="inverse",
         )
         np.testing.assert_allclose(same.vertices, rb.vertices, atol=1e-7)
+
+    def test_bind_normals(self):
+        # The forward bind keeps the normals of its welded mesh. The inverse bind carries
+        # Anny's rest normals by the map of its targets, so that the file, skinned as engines
+        # skin normals, shows Anny's rest normals at Anny's rest pose.
+        base, _, B = self.rest["fixture"]
+        forward, inverse = self.binds["forward"], self.binds["inverse"]
+        np.testing.assert_allclose(
+            forward.normals,
+            vertex_normals(forward.vertices, self.triangles),
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            np.linalg.norm(inverse.normals, axis=1), 1.0, atol=1e-12
+        )
+        rest_normals = vertex_normals(base, self.triangles)
+        welded = vertex_normals(inverse.vertices, self.triangles)
+        weights, indices = self.file_weights, self.file_indices
+        back = tpose.rigid_inverse(inverse.transforms)
+        at_rest = {
+            "file": tpose.angles(
+                tpose.skin_normals(inverse.normals, weights, indices, back),
+                rest_normals,
+            ),
+            "welded bind mesh": tpose.angles(
+                tpose.skin_normals(welded, weights, indices, back), rest_normals
+            ),
+        }
+        # The relaxed pose, against the normals of Anny's posed mesh; Anny's own skin of its
+        # rest normals shows how close skinned normals can come.
+        vertices, W = self.relaxed
+        posed = vertex_normals(vertices, self.triangles)
+        transforms = W @ tpose.rigid_inverse(inverse.bone_poses)
+        relaxed = {
+            "file": tpose.angles(
+                tpose.skin_normals(inverse.normals, weights, indices, transforms), posed
+            ),
+            "welded bind mesh": tpose.angles(
+                tpose.skin_normals(welded, weights, indices, transforms), posed
+            ),
+            "Anny's skin of its rest normals": tpose.angles(
+                tpose.skin_normals(
+                    rest_normals,
+                    self.model.vertex_bone_weights.numpy(),
+                    self.model.vertex_bone_indices.numpy(),
+                    W @ tpose.rigid_inverse(B),
+                ),
+                posed,
+            ),
+        }
+        for name, a in at_rest.items():
+            print(
+                f"\ninverse bind, normals of the {name} at rest: within 1 degree for "
+                f"{np.mean(a < 1.0) * 100:.2f} % of the vertices, max {a.max():.2f} degrees"
+            )
+        for name, a in relaxed.items():
+            print(
+                f"relaxed, {name}: 99th percentile {np.percentile(a, 99):.2f} degrees, "
+                f"mean {a.mean():.2f}, over 45 degrees at {np.sum(a > 45)} vertices"
+            )
+        self.assertGreaterEqual(np.mean(at_rest["file"] < 1.0), 0.999)
+        p99 = {name: np.percentile(a, 99) for name, a in relaxed.items()}
+        self.assertLess(p99["file"], 18.0)
+        self.assertLess(p99["file"], 0.6 * p99["welded bind mesh"])
 
     def test_joints_and_centring(self):
         for method, rb in self.binds.items():
@@ -449,30 +707,120 @@ class TestVrmTPose(unittest.TestCase):
             )
 
     def test_bind_error(self):
-        # The error report of each bind on the arms-down poses: the file's 4 weights skin the
-        # bind mesh through W_j T_j^-1, against Anny's own posed vertices.
-        report = {}
-        for method in ("forward", "inverse"):
+        # The error report of each bind on the arms-down poses: the weights of the file (VRM
+        # 1.0 with roll constraints, VRM 0.x with the twist bones merged) skin the bind mesh
+        # through W_j T_j^-1, against Anny's own posed vertices and normals.
+        bodies = {"default": None, **CORNERS}
+        for version, twist in VERSIONS.items():
+            for body, phenotype in bodies.items():
+                report = {}
+                for method in ("forward", "inverse"):
+                    start = time.perf_counter()
+                    report[method] = tpose.bind_error(
+                        self.model,
+                        method,
+                        phenotype_kwargs=phenotype,
+                        version=version,
+                        twist=twist,
+                    )
+                    seconds = time.perf_counter() - start
+                    for pose, e in report[method].items():
+                        print(
+                            f"\nVRM {version} ({twist}), {body} body, {method} bind, {pose} "
+                            f"({e['frames']} frames, {seconds:.2f} s): max "
+                            f"{e['max_mm']:.2f} mm, 99th percentile {e['p99_mm']:.2f} mm, "
+                            f"mean {e['mean_mm']:.3f} mm; normals: 99th percentile "
+                            f"{e['normal_p99_deg']:.2f} degrees, mean "
+                            f"{e['normal_mean_deg']:.2f}"
+                        )
+                        top, p99, normal = MEASURED_BIND_ERROR[(body, method, pose)]
+                        with self.subTest(
+                            version=version, body=body, method=method, pose=pose
+                        ):
+                            self.assertLess(e["max_mm"], 1.2 * top)
+                            self.assertLess(e["p99_mm"], 1.2 * p99)
+                            self.assertLess(e["normal_p99_deg"], 1.2 * normal)
+                # The inverse bind stays the closer one on these poses, which makes it the
+                # default of the VRM export.
+                for pose in report["inverse"]:
+                    with self.subTest(version=version, body=body, pose=pose):
+                        for key in ("p99_mm", "max_mm", "normal_p99_deg"):
+                            self.assertLess(
+                                report["inverse"][pose][key],
+                                report["forward"][pose][key],
+                            )
+
+    def test_humanoid_error(self):
+        # A VRM app turns the humanoid bones alone. With their local rotations from Anny's
+        # pose, the bones between them (spine05, spine03, the neck, shoulder01, the pelvis
+        # bones, the metacarpals) stay at rest; with their world rotations ("folded"), only
+        # the leaves (the toes) and the twist bones miss Anny's turns.
+        for version, twist in VERSIONS.items():
             start = time.perf_counter()
-            report[method] = tpose.bind_error(self.model, method)
+            report = tpose.humanoid_error(self.model, version, twist)
             seconds = time.perf_counter() - start
-            for name, e in report[method].items():
-                print(
-                    f"\n{method} bind, {name} ({e['frames']} frames): max {e['max_mm']:.2f} mm, "
-                    f"99th percentile {e['p99_mm']:.2f} mm, mean {e['mean_mm']:.3f} mm"
+            for pose, variants in report.items():
+                for variant, e in variants.items():
+                    print(
+                        f"\nVRM {version} ({twist}), {pose} ({e['frames']} frames, "
+                        f"{seconds:.2f} s), {variant}: max {e['max_mm']:.2f} mm, 99th "
+                        f"percentile {e['p99_mm']:.2f} mm, mean {e['mean_mm']:.3f} mm"
+                    )
+                every, humanoid, folded = (
+                    variants[v] for v in ("every_node", "humanoid", "humanoid_folded")
                 )
-            print(f"{method} bind: error report in {seconds:.2f} s")
-            for name, e in report[method].items():
-                with self.subTest(method=method, pose=name):
-                    self.assertLess(e["p99_mm"], 30.0)
-                    self.assertLess(e["max_mm"], 60.0)
-        # The inverse bind stays the closer one on these poses, which makes it the default
-        # that the VRM export should keep.
-        for name in report["inverse"]:
-            with self.subTest(pose=name):
-                self.assertLess(
-                    report["inverse"][name]["p99_mm"], report["forward"][name]["p99_mm"]
-                )
+                with self.subTest(version=version, pose=pose):
+                    top, p99, _ = MEASURED_BIND_ERROR[("default", "inverse", pose)]
+                    self.assertLess(every["max_mm"], 1.2 * top)
+                    self.assertLess(every["p99_mm"], 1.2 * p99)
+                    self.assertLess(humanoid["p99_mm"], 60.0)
+                    self.assertLess(humanoid["mean_mm"], 25.0)
+                    self.assertLess(folded["p99_mm"], 25.0)
+                    self.assertLess(folded["mean_mm"], 6.0)
+                    self.assertLess(folded["p99_mm"], humanoid["p99_mm"])
+                    self.assertLess(every["p99_mm"], folded["p99_mm"])
+
+    def test_roll_constraint(self):
+        # The roll of a source about the axis, after the smallest turn that brings the axis
+        # back, at the constraint's weight.
+        axis = np.array([1.0, 0.0, 0.0])
+        roll = tpose._axis_angle(axis, 0.8)
+        swing = tpose._axis_angle(unit(np.array([0.0, 0.6, 0.8])), 0.5)
+        half = tpose._axis_angle(axis, 0.4)
+        np.testing.assert_allclose(
+            tpose.roll_constraint(roll, axis, 0.5), half, atol=1e-12
+        )
+        np.testing.assert_allclose(
+            tpose.roll_constraint(swing @ roll, axis, 0.5), half, atol=1e-12
+        )
+        np.testing.assert_allclose(
+            tpose.roll_constraint(swing, axis, 1.0), np.eye(3), atol=1e-12
+        )
+        # A roll about the opposite axis is the same roll.
+        np.testing.assert_allclose(
+            tpose.roll_constraint(swing @ roll, -axis, 0.5), half, atol=1e-12
+        )
+
+    def test_humanoid_drive_of_every_node(self):
+        # Driving every node of a file with the rig's hierarchy (VRM 0.x) by its local
+        # rotation in Anny's pose gives the skin matrices W_j T_j^-1 back, up to the
+        # orthonormality of Anny's posed rotations (about 1e-5: the pose library stores its
+        # rotations in single precision).
+        parents = [int(p) for p in vrm_tables.file_parents(self.model, "0.x", "merge")]
+        self.assertEqual(parents, self.parents)
+        rb = self.binds["inverse"]
+        _, W = self.relaxed
+        transforms = W @ tpose.rigid_inverse(rb.bone_poses)
+        drive = tpose._humanoid_drive(
+            transforms[:, :3, :3],
+            W[:, :3, 3],
+            rb.joint_positions,
+            parents,
+            tpose._parents_first(parents),
+            dict(enumerate(parents)),
+            [],
+        )
+        np.testing.assert_allclose(drive, transforms, atol=1e-4)
 
 
 if __name__ == "__main__":
