@@ -109,7 +109,8 @@ class Buffers:
         deltas[still] = 0.0
         moving = np.flatnonzero(~still)
         if not sparse or len(moving) >= SPARSE_SHARE * len(deltas):
-            return self.accessor(deltas, minmax=True)
+            # morph targets are vertex attributes: their buffer view names ARRAY_BUFFER
+            return self.accessor(deltas, ARRAY_BUFFER, minmax=True)
         if len(moving) == 0:
             moving = np.array([0])  # glTF needs at least one sparse element
         index_type = np.uint16 if len(deltas) < 65536 else np.uint32

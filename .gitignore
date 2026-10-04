@@ -11,6 +11,10 @@ docs/build/
 .claude/
 smplx_models/
 test/data/
+# the reference of the GLB export (test/test_gltf_export.py, base model guarantee 2)
+!test/data/
+test/data/*
+!test/data/gltf_reference.json
 tutorials/.ipynb_checkpoints/
 viewer/node_modules/
 viewer/build/
