@@ -23,6 +23,11 @@ class Character:
     (see ``model.face_shape_ranges``) and ``facial_actions`` takes
     ``model.facial_action_labels`` (0 to 1, the ARKit blend shape names). Missing names keep
     their defaults.
+
+    ``pose`` holds an optional still pose in Anny's ``local-ref`` parameters: ``"bones"`` maps
+    bone labels (``model.bone_labels``) to unit quaternions (x, y, z, w), each the bone's turn
+    relative to its parent, and ``"root"`` moves the root bone (x, y, z in metres, Anny's
+    frame). Missing bones keep the rest pose, and an empty ``pose`` is the rest pose.
     """
 
     name: str = "character"
@@ -33,6 +38,7 @@ class Character:
     local_changes: dict[str, float] = dataclasses.field(default_factory=dict)
     face_shapes: dict[str, float] = dataclasses.field(default_factory=dict)
     facial_actions: dict[str, float] = dataclasses.field(default_factory=dict)
+    pose: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     def build_model(self, face_shapes: bool | None = None, dtype=torch.float32):
         """
@@ -61,6 +67,49 @@ class Character:
             face_shape_kwargs=dict(self.face_shapes) or None,
             facial_actions=dict(self.facial_actions) or None,
         )
+
+    def pose_parameters(self, model) -> torch.Tensor | None:
+        """``local-ref`` pose parameters (1, bones, 4, 4) of ``pose`` for ``model``, or None
+        when the character has no pose"""
+        if not self.pose:
+            return None
+        import roma
+
+        labels = list(model.bone_labels)
+        bones = self.pose.get("bones", {})
+        unknown = sorted(set(bones) - set(labels))
+        if unknown:
+            raise ValueError(f"Unknown bones in the pose: {unknown}.")
+        dtype = model.template_vertices.dtype
+        params = torch.eye(4, dtype=dtype).repeat(1, len(labels), 1, 1)
+        for bone, quaternion in bones.items():
+            q = torch.as_tensor(quaternion, dtype=torch.float64)
+            params[0, labels.index(bone), :3, :3] = roma.unitquat_to_rotmat(
+                q / q.norm()
+            ).to(dtype)
+        params[0, 0, :3, 3] = torch.as_tensor(
+            self.pose.get("root", (0, 0, 0)), dtype=dtype
+        )
+        return params
+
+    @staticmethod
+    def pose_from_parameters(model, pose_parameters, tolerance: float = 1e-6) -> dict:
+        """the ``pose`` field for ``local-ref`` pose parameters (bones, 4, 4) or (1, bones, 4,
+        4); bones within ``tolerance`` of the rest pose are left out"""
+        import roma
+
+        params = (
+            torch.as_tensor(pose_parameters).detach().double().cpu().reshape(-1, 4, 4)
+        )
+        quaternions = roma.rotmat_to_unitquat(params[:, :3, :3])
+        bones = {}
+        for label, q, R in zip(model.bone_labels, quaternions, params[:, :3, :3]):
+            if (R - torch.eye(3, dtype=R.dtype)).abs().max() > tolerance:
+                bones[label] = [round(float(x), 7) for x in q]
+        return {
+            "bones": bones,
+            "root": [round(float(x), 6) for x in params[0, :3, 3]],
+        }
 
     def to_dict(self) -> dict[str, Any]:
         return {"schema": SCHEMA_VERSION, **dataclasses.asdict(self)}

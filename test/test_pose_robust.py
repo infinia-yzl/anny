@@ -1,0 +1,214 @@
+# OpenSculptBoy
+# Apache License, Version 2.0
+"""The pose from a picture on bad landmarks: misplaced and noisy head points, a head larger
+than Anny's (as drawn by AI models), a hand with impossible proportions and a far-off point."""
+
+import math
+import os
+import pathlib
+import unittest
+
+import numpy as np
+import torch
+
+import anny.poses
+from opensculptboy import Character
+from opensculptboy.posing.head import face_mesh_rest
+from opensculptboy.posing.landmarks import BODY, Landmarks
+from opensculptboy.posing.refine import refine
+from opensculptboy.posing.retarget import Retargeter, adjust_head
+from opensculptboy.posing.skeleton import Skeleton, bend, rot
+from test.markers import local_only
+
+PIXELS = 500.0  # pixels per metre of the synthetic pictures
+N_HEAD = 11
+
+
+def angle(a, b) -> float:
+    """degrees between two rotations"""
+    R = np.asarray(a, np.float64).T @ np.asarray(b, np.float64)
+    return math.degrees(math.acos(np.clip((np.trace(R) - 1) / 2, -1, 1)))
+
+
+def picture(points: np.ndarray) -> np.ndarray:
+    """pixel positions (x right, y down) of points in the model's frame, seen along +y"""
+    return np.stack([PIXELS * points[:, 0] + 400, 600 - PIXELS * points[:, 2]], axis=1)
+
+
+def tipped_head(model, skeleton, retarget):
+    """a figure that tips its head back and turns it, as in a look up at a raised hand: the
+    model's output, the head's world turn from the rest pose, and clean landmarks with a
+    picture"""
+    h = skeleton.labels.index("head")
+    params = anny.poses.pose_parameters(model, "relaxed", grounded=False)[
+        "pose_parameters"
+    ][:1].clone()
+    turn = (rot("z", -30) @ bend(35)).to(params.dtype)
+    params[0, h, :3, :3] = params[0, h, :3, :3] @ turn
+    with torch.no_grad():
+        out = model(pose_parameters=params)
+    posed = out["bone_poses"][0, h, :3, :3].double().numpy()
+    truth = posed @ skeleton.rest[h, :3, :3].double().numpy().T
+    clean = retarget.anny.landmarks(out)
+    clean.image = picture(clean.body)
+    clean.visibility = np.ones(len(BODY))
+    return out, truth, clean
+
+
+def corrupted(clean: Landmarks) -> Landmarks:
+    """the head as a drawing and a noisy picture give it: 1.3 times Anny's size, the hidden
+    ear on the cheek and the hidden eye on the brow in 3D, and noise everywhere"""
+    rng = np.random.default_rng(7)
+    body = clean.body.copy()
+    head = body[:N_HEAD]
+    centre = head.mean(0)
+    head[:] = centre + 1.3 * (head - centre)
+    image = picture(body)
+    p = lambda n: body[BODY.index(n)]  # noqa: E731
+    body[BODY.index("right_ear")] = 0.5 * (p("nose") + p("right_eye_outer"))
+    for n in ("right_eye_inner", "right_eye", "right_eye_outer", "mouth_right"):
+        body[BODY.index(n)] += np.array([0.0, -0.03, 0.035])
+    body += rng.normal(0, 0.004, body.shape)
+    image += rng.normal(0, 1.5, image.shape)
+    return Landmarks(
+        body=body,
+        visibility=np.ones(len(BODY)),
+        image=image,
+        hands={s: h.copy() for s, h in clean.hands.items()},
+    )
+
+
+def long_finger(L: Landmarks) -> Landmarks:
+    """``L`` with the left index finger ten times too long"""
+    hand = L.hands[".L"]
+    hand[8] = hand[5] + 10 * (hand[8] - hand[5])
+    return L
+
+
+class TestRobustPose(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.model = Character().build_model()
+        cls.skeleton = Skeleton(cls.model)
+        cls.retarget = Retargeter(cls.skeleton)
+        cls.out, cls.truth, cls.clean = tipped_head(
+            cls.model, cls.skeleton, cls.retarget
+        )
+
+    def corrupted(self) -> Landmarks:
+        return corrupted(self.clean)
+
+    def test_clean_head_comes_from_the_points(self):
+        choice = self.retarget.head_fit(self.clean)
+        self.assertEqual(choice.source, "points")
+        self.assertLess(angle(choice.rotation, self.truth), 0.5)
+
+    def test_misplaced_head_points_leave_the_head_right(self):
+        L = self.corrupted()
+        choice = self.retarget.head_fit(L)
+        self.assertEqual(choice.source, "picture")
+        self.assertLess(angle(choice.rotation, self.truth), 10.0)
+        W, _ = self.retarget(L)
+        self.assertLess(angle(W["head"].double().numpy(), self.truth), 10.0)
+
+    def test_face_mesh_sets_the_head(self):
+        rng = np.random.default_rng(3)
+        vertices = self.out["vertices"][0].double().numpy()
+        mesh = face_mesh_rest(self.model, vertices) * PIXELS
+        mesh += rng.normal(0, 0.5, mesh.shape)
+        wrong = rng.choice(len(mesh), 40, replace=False)
+        mesh[wrong] += rng.normal(0, 20.0, (len(wrong), 3))
+        L = self.corrupted()
+        L.face_points = mesh
+        choice = self.retarget.head_fit(L)
+        self.assertEqual(choice.source, "face")
+        self.assertLess(angle(choice.rotation, self.truth), 3.0)
+
+    def test_implausible_hand_keeps_the_fingers_at_rest(self):
+        L = self.corrupted()
+        W_good, _ = self.retarget(L)
+        self.assertIn("finger2-2.L", W_good)
+        hand = L.hands[".L"]
+        hand[8] = hand[5] + 10 * (
+            hand[8] - hand[5]
+        )  # an index finger ten times too long
+        W, _ = self.retarget(L)
+        self.assertNotIn("finger2-2.L", W)
+        self.assertIn("finger2-2.R", W)
+
+    def test_head_correction_turns_the_head_by_hand(self):
+        W, _ = self.retarget(self.clean)
+
+        def head(W):
+            """the face's direction and the head's up, in the chest's frame"""
+            R = W["spine01"].double().numpy().T @ W["head"].double().numpy()
+            return R @ np.array([0.0, -1.0, 0.0]), R @ np.array([0.0, 0.0, 1.0])
+
+        face, up = head(W)
+        turned, _ = head(adjust_head(W, turn=20))
+        raised, _ = head(adjust_head(W, up=15))
+        _, tilted = head(adjust_head(W, tilt=15))
+        # x is the figure's left, so its right is -x
+        self.assertLess(turned[0], face[0] - 0.2)
+        self.assertGreater(raised[2], face[2] + 0.15)
+        self.assertLess(tilted[0], up[0] - 0.15)
+        # the head takes the whole correction, the neck a share of it
+        full = adjust_head(W, turn=20, up=10, tilt=-5)
+        rel = W["head"].double().numpy().T @ full["head"].double().numpy()
+        self.assertAlmostEqual(angle(np.eye(3), rel), 23.3, delta=0.2)
+        neck = W["neck01"].double().numpy().T @ full["neck01"].double().numpy()
+        self.assertAlmostEqual(angle(np.eye(3), neck), 0.3 * 23.3, delta=0.2)
+
+    def test_refinement_resists_a_far_off_point(self):
+        params = anny.poses.pose_parameters(self.model, "mh_hero", grounded=False)[
+            "pose_parameters"
+        ][:1]
+        with torch.no_grad():
+            out = self.model(pose_parameters=params)
+        bp = out["bone_poses"][0]
+        labels = self.skeleton.labels
+        joints = ["lowerarm01.L", "wrist.L", "lowerarm01.R", "wrist.R", "head"]
+
+        def centred(get):
+            hips = (get("upperleg01.L") + get("upperleg01.R")) / 2
+            return np.stack([get(j) - hips for j in joints])
+
+        truth = centred(lambda j: bp[labels.index(j), :3, 3].numpy())
+
+        def error(L):
+            W, _ = self.retarget(L)
+            posed = self.skeleton.posed_joints(refine(self.retarget, W, L))
+            got = centred(lambda j: posed[j].numpy())
+            return np.linalg.norm(got - truth, axis=1).mean()
+
+        clean = error(self.retarget.anny.landmarks(out))
+        L = self.retarget.anny.landmarks(out)
+        L.body[BODY.index("left_knee")] += np.array([0.4, -0.3, 0.2])
+        # the arms and the head stay where the clean landmarks put them
+        self.assertLess(error(L), clean + 0.01)
+
+
+@local_only("a picture outside the repository, named by OPENSCULPTBOY_POSE_PICTURE")
+@unittest.skipUnless(
+    os.environ.get("OPENSCULPTBOY_POSE_PICTURE"),
+    "set OPENSCULPTBOY_POSE_PICTURE to the floating figure with the raised right hand",
+)
+class TestReferencePicture(unittest.TestCase):
+    """The logo's reference picture, an AI drawing on which MediaPipe misplaces the head
+    points: the head must look up toward the raised right hand (the picture's left)."""
+
+    def test_head_looks_up_at_the_raised_hand(self):
+        from opensculptboy.posing.landmarks import detect
+
+        L = detect(pathlib.Path(os.environ["OPENSCULPTBOY_POSE_PICTURE"]))
+        retarget = Retargeter(Skeleton(Character().build_model()))
+        choice = retarget.head_fit(L)
+        self.assertIn(choice.source, ("face", "picture"))
+        W, _ = retarget(L)
+        forward = W["head"].double().numpy() @ np.array([0.0, -1.0, 0.0])
+        self.assertGreater(forward[2], 0.5)  # the face points up
+        self.assertLess(forward[0], -0.2)  # toward the picture's left
+
+
+if __name__ == "__main__":
+    unittest.main()

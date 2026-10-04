@@ -336,5 +336,57 @@ class TestGltfFaceShapes(unittest.TestCase):
         self.assertLess(np.abs(vertices - expected).max(), 1e-5)
 
 
+class TestGltfCharacterPose(unittest.TestCase):
+    def test_pose_card_round_trip(self):
+        import anny.poses
+
+        model = Character().build_model(dtype=torch.float64)
+        params = anny.poses.pose_parameters(model, "mh_cheer")["pose_parameters"][:1]
+        pose = Character.pose_from_parameters(model, params)
+        again = Character(pose=pose).pose_parameters(model)
+        self.assertLess((again - params).abs().max().item(), 1e-6)
+        card = Character.from_dict(
+            json.loads(json.dumps(Character(pose=pose).to_dict()))
+        )
+        self.assertEqual(card.pose, pose)
+        self.assertIsNone(Character().pose_parameters(model))
+
+    def test_pose_animation_matches_anny(self):
+        import anny.poses
+
+        character = Character(name="posed", phenotype={"height": 0.7})
+        model = character.build_model(dtype=torch.float64)
+        params = anny.poses.pose_parameters(model, "mh_thinking", grounded=False)
+        character.pose = Character.pose_from_parameters(
+            model, params["pose_parameters"][:1]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "posed.glb"
+            summary = export_glb(path, character, model, animations=["walk"])
+            glb = GLB(path)
+            self.assertEqual(summary["animations"], 2)
+            self.assertEqual(
+                [a["name"] for a in glb.json["animations"]], ["pose", "walk"]
+            )
+            vertices, source = evaluate(glb, "pose", 0)
+            self.assertEqual(read_character(path), character)
+        grounded, _ = anny.poses.ground(
+            model,
+            character.pose_parameters(model),
+            phenotype_kwargs=character.phenotype,
+        )
+        with torch.no_grad():
+            out = model(
+                pose_parameters=grounded,
+                pose_parameterization="local-ref",
+                **character.model_kwargs(),
+            )
+        expected = (out["vertices"][0].numpy() @ C3.T)[source]
+        # four skin weights per vertex against Anny's full skinning
+        error = np.linalg.norm(vertices - expected, axis=1)
+        self.assertLess(error.max(), 0.05)
+        self.assertLess(np.median(error), 1e-3)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -17,13 +17,11 @@ from the front turned by 40 degrees, and its silhouette is traced into an SVG pa
 import math
 import pathlib
 
-import contourpy
 import numpy as np
-import roma
 import torch
-from PIL import Image, ImageDraw, ImageFilter
 
-import anny
+from opensculptboy.posing.skeleton import Skeleton, align, bend, rot
+from opensculptboy.render.flat import fit, outline, svg
 
 FIGURES = pathlib.Path(__file__).resolve().parents[1] / "docs" / "figures"
 SKIN = "#e2bca3"
@@ -74,93 +72,17 @@ POSE = {
 }
 SPINE = ["spine05", "spine04", "spine03", "spine02", "spine01"]
 NECK = ["neck01", "neck02", "neck03", "head"]
-ARCH_SHARES = [
-    0.10,
-    0.14,
-    0.16,
-    0.16,
-    0.14,
-]  # 70% of the arch; the neck is set with the head
-FINGER_PARENTS = {
-    2: "metacarpal1",
-    3: "metacarpal2",
-    4: "metacarpal3",
-    5: "metacarpal4",
-}
+# the spine's share of the arch and the lean, from the hips up; the neck carries on the arch
+# with the head (Poser.head)
+ARCH_SHARES = [0.10, 0.14, 0.16, 0.16, 0.14]
 
 
-def rot(axis, deg):
-    v = torch.zeros(3)
-    v["xyz".index(axis)] = math.radians(deg)
-    return roma.rotvec_to_rotmat(v)
-
-
-def bend(deg):
-    """a backward bend of the torso, or a forward swing of a leg, in the body's side plane"""
-    return rot("x", -deg)
-
-
-def axis_angle(axis, deg):
-    axis = torch.as_tensor(axis, dtype=torch.float32)
-    return roma.rotvec_to_rotmat(axis / axis.norm() * math.radians(deg))
-
-
-def align(a, b):
-    """the smallest rotation that takes direction a to direction b"""
-    a = torch.as_tensor(a, dtype=torch.float32)
-    b = torch.as_tensor(b, dtype=torch.float32)
-    a, b = a / a.norm(), b / b.norm()
-    axis = torch.linalg.cross(a, b)
-    s, c = axis.norm(), torch.dot(a, b)
-    if s < 1e-8:
-        return torch.eye(3)
-    return roma.rotvec_to_rotmat(axis / s * torch.atan2(s, c))
-
-
-def frame(f, t):
-    """an orthonormal frame (as columns) from a main direction f and a second direction t"""
-    f = torch.as_tensor(f, dtype=torch.float32)
-    t = torch.as_tensor(t, dtype=torch.float32)
-    f = f / f.norm()
-    t = t - torch.dot(t, f) * f
-    t = t / t.norm()
-    return torch.stack([f, t, torch.linalg.cross(f, t)], dim=1)
-
-
-class Poser:
+class Poser(Skeleton):
     def __init__(self):
-        self.model = anny.Anny().to(dtype=torch.float32)
-        self.labels = self.model.bone_labels
-        self.parents = self.model.bone_parents
-        with torch.no_grad():
-            self.rest = self.model(phenotype_kwargs=PHENOTYPE)["bone_poses"][0]
+        super().__init__(phenotype=PHENOTYPE)
         c, s = math.cos(math.radians(YAW)), math.sin(math.radians(YAW))
         self.right = torch.tensor([c, -s, 0.0])  # the picture's right
         self.camera = torch.tensor([-s, -c, 0.0])  # toward the viewer
-
-    def joint(self, name):
-        return self.rest[self.labels.index(name), :3, 3]
-
-    def hand(self, W, s, spec):
-        """the fingers along ``point``, the index side toward ``index``, spread and curled"""
-        target = frame(spec["point"], spec["index"])
-        f0 = self.joint("finger3-1" + s) - self.joint("wrist" + s)
-        t0 = self.joint("finger2-1" + s) - self.joint("finger5-1" + s)
-        R = target @ frame(f0, t0).T
-        W["wrist" + s] = R
-        normal = torch.linalg.cross(target[:, 0], target[:, 1])  # across the palm
-        for k, spread in zip((2, 3, 4, 5), spec["spread"]):
-            W[FINGER_PARENTS[k] + s] = R
-            base = axis_angle(normal, spread) @ R
-            rest = self.joint(f"finger{k}-2" + s) - self.joint(f"finger{k}-1" + s)
-            side = torch.linalg.cross(
-                base @ rest, normal
-            )  # the axis the finger curls about
-            for i in (1, 2, 3):
-                W[f"finger{k}-{i}" + s] = axis_angle(side, i * spec["curl"]) @ base
-        thumb = axis_angle(normal, spec["thumb"]) @ R
-        for i in (1, 2, 3):
-            W[f"finger1-{i}" + s] = thumb
 
     def head(self, W, extension, turn, shares=(0.3, 0.25, 0.2, 0.25)):
         """the neck and the head carry on the arch of the spine: each bends back by its share
@@ -194,115 +116,17 @@ class Poser:
             for a, b, target in segments:
                 rest = self.joint(b + s) - self.joint(a + s)
                 W[a + s] = align(rest, target)
-            self.hand(W, s, p["hand" + s])
+            self.hand(W, s, **p["hand" + s])
         self.head(W, **p["head"])
         return W
 
-    def params(self, W):
-        """local-ref pose parameters: each bone's world rotation seen from its posed ancestor"""
-        P = torch.eye(4)[None, None].repeat(1, self.model.bone_count, 1, 1)
-        for bone, Wb in W.items():
-            i = self.labels.index(bone)
-            j = self.parents[i]
-            while j >= 0 and self.labels[j] not in W:
-                j = self.parents[j]
-            Wp = W[self.labels[j]] if j >= 0 else torch.eye(3)
-            P[0, i, :3, :3] = Wp.T @ Wb
-        return P
-
     def picture(self, p):
         """the posed vertices in the picture (x right, y up), and the mesh's triangles"""
-        with torch.no_grad():
-            out = self.model(
-                pose_parameters=self.params(self.world(p)), phenotype_kwargs=PHENOTYPE
-            )
-        v = out["vertices"][0].numpy()
+        v = self.output(self.world(p))["vertices"][0].numpy()
         x = v @ self.right.numpy()
         cr, sr = math.cos(math.radians(-ROLL)), math.sin(math.radians(-ROLL))
         xy = np.stack([cr * x - sr * v[:, 2], sr * x + cr * v[:, 2]], axis=1)
         return xy, self.model.get_triangular_faces().numpy()
-
-
-def simplify(points, tolerance):
-    """Douglas-Peucker simplification of a closed ring: each half keeps its own end points."""
-    if len(points) < 8:
-        return points
-    half = len(points) // 2
-    return np.concatenate(
-        [
-            _simplify_open(points[: half + 1], tolerance)[:-1],
-            _simplify_open(points[half:], tolerance),
-        ]
-    )
-
-
-def _simplify_open(points, tolerance):
-    if len(points) < 3:
-        return points
-    keep = np.zeros(len(points), dtype=bool)
-    keep[0] = keep[-1] = True
-    stack = [(0, len(points) - 1)]
-    while stack:
-        a, b = stack.pop()
-        if b - a < 2:
-            continue
-        seg = points[b] - points[a]
-        rel = points[a + 1 : b] - points[a]
-        dist = np.abs(seg[0] * rel[:, 1] - seg[1] * rel[:, 0]) / (
-            np.linalg.norm(seg) + 1e-12
-        )
-        i = int(np.argmax(dist))
-        if dist[i] > tolerance:
-            keep[a + 1 + i] = True
-            stack += [(a, a + 1 + i), (a + 1 + i, b)]
-    return points[keep]
-
-
-def outline(points, faces, supersample=8):
-    """the silhouette of a mesh already in pixels (x right, y down) as an SVG path"""
-    lo = points.min(axis=0) - 2
-    size = ((points.max(axis=0) + 2 - lo) * supersample).astype(int) + 1
-    image = Image.new("L", tuple(size), 0)
-    draw = ImageDraw.Draw(image)
-    for tri in ((points - lo) * supersample)[faces]:
-        draw.polygon([tuple(p) for p in tri], fill=255)
-    image = image.filter(ImageFilter.GaussianBlur(supersample * 0.35))
-    mask = np.asarray(image, dtype=np.float32) / 255.0
-    gen = contourpy.contour_generator(z=mask, fill_type="OuterOffset")
-    polygons, offsets = gen.filled(0.5, 2.0)
-    parts = []
-    for ring_points, offs in zip(polygons, offsets):
-        for a, b in zip(offs[:-1], offs[1:]):
-            ring = simplify(
-                ring_points[a:b].astype(np.float64) / supersample + lo, 0.15
-            )
-            if len(ring) >= 3:
-                parts.append(
-                    "M" + " L".join(f"{p[0]:.1f} {p[1]:.1f}" for p in ring) + "Z"
-                )
-    return "".join(parts)
-
-
-def fit(xy, box):
-    """``xy`` (y up) scaled into ``box`` (x, y, width, height in pixels, y down), centred"""
-    lo, hi = xy.min(axis=0), xy.max(axis=0)
-    x, y, w, h = box
-    s = min(w / (hi[0] - lo[0]), h / (hi[1] - lo[1]))
-    ox = x + (w - (hi[0] - lo[0]) * s) / 2
-    oy = y + (h - (hi[1] - lo[1]) * s) / 2
-    return np.stack([ox + (xy[:, 0] - lo[0]) * s, oy + (hi[1] - xy[:, 1]) * s], axis=1)
-
-
-def svg(width, height, body, desc, background=None):
-    lines = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
-        f'viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">',
-        '  <title id="title">OpenSculptBoy</title>',
-        f'  <desc id="desc">{desc}</desc>',
-    ]
-    if background:
-        lines.append(f'  <rect width="{width}" height="{height}" fill="{background}"/>')
-    return "\n".join(lines + body + ["</svg>"]) + "\n"
 
 
 def banner_text(x, centre):
