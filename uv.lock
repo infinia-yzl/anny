@@ -2753,6 +2753,7 @@ cu126 = [
 ]
 dev = [
     { name = "build" },
+    { name = "jsonschema" },
     { name = "ruff" },
     { name = "twine" },
 ]
@@ -2800,6 +2801,7 @@ requires-dist = [
     { name = "gradio", marker = "extra == 'examples'" },
     { name = "ipykernel", marker = "extra == 'examples'" },
     { name = "jsonargparse", marker = "extra == 'examples'" },
+    { name = "jsonschema", marker = "extra == 'dev'" },
     { name = "jupytext", marker = "extra == 'examples'" },
     { name = "matplotlib", marker = "extra == 'examples'", specifier = ">=3.10.9" },
     { name = "matplotlib", marker = "extra == 'faces'" },

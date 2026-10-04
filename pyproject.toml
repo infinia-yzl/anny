@@ -53,6 +53,7 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 "anny" = ["data/*"]
+"opensculptboy" = ["data/**/*"]
 
 [project.optional-dependencies]
 examples = [
@@ -92,7 +93,9 @@ pose = [
 dev = [
     "ruff==0.14.5",
     "build",
-    "twine"
+    "twine",
+    # the VRM schema checks (test/test_vrm_schema.py)
+    "jsonschema"
 ]
 cu126 = ["torch"]
 

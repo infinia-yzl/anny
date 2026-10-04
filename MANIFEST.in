@@ -1,1 +1,2 @@
 recursive-include src/anny/data *
+recursive-include src/opensculptboy/data *
