@@ -198,6 +198,35 @@ def _rasters(px, depth, faces, size, supersample, shade=None):
     return d, s
 
 
+def _smooth_normals(vertices, faces, px, ids, supersample, chunk=1_000_000):
+    """the normal at each pixel of the supersampled picture (zero where empty): the vertex
+    normals of the triangle drawn there (``ids``: its index plus one, 0 where empty),
+    interpolated with the pixel's barycentric coordinates, which the orthographic projection
+    keeps exact"""
+    vn = vertex_normals(vertices, faces)
+    face = np.rint(ids).astype(np.int64) - 1
+    rows, cols = np.nonzero(face >= 0)
+    normals = np.zeros(ids.shape + (3,))
+    for part in np.array_split(np.arange(len(rows)), max(1, len(rows) // chunk)):
+        r, c = rows[part], cols[part]
+        tri = faces[face[r, c]]
+        a, b, d = px[tri[:, 0]], px[tri[:, 1]], px[tri[:, 2]]
+        e0, e1 = b - a, d - a
+        e2 = np.stack([c, r], axis=1) / supersample - a
+        d00, d01, d11 = (e0 * e0).sum(1), (e0 * e1).sum(1), (e1 * e1).sum(1)
+        d20, d21 = (e2 * e0).sum(1), (e2 * e1).sum(1)
+        den = d00 * d11 - d01 * d01
+        den = np.where(np.abs(den) < 1e-18, 1e-18, den)
+        wb = (d11 * d20 - d01 * d21) / den
+        wc = (d00 * d21 - d01 * d20) / den
+        # Pixels on the edge of their triangle may fall just outside it.
+        w = np.clip(np.stack([1.0 - wb - wc, wb, wc], axis=1), 0.0, None)
+        w /= np.maximum(w.sum(axis=1, keepdims=True), 1e-12)
+        n = np.einsum("pk,pkc->pc", w, vn[tri])
+        normals[r, c] = n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
+    return normals
+
+
 def _contour_edges(vertices, faces, view, px, depth, supersample, width_px, tol=0.015):
     """a mask of the mesh's visible contour edges: the edges between a triangle that faces
     the camera and one that faces away, drawn where the depth raster shows them in front
@@ -335,24 +364,36 @@ def shaded_png(
     light=(-0.45, 0.7, 0.55),
     lines=True,
     supersample=3,
+    smooth=False,
 ):
     """the posed mesh in flat toon shading: ``bands`` of light from the light direction
     (picture right, up, toward the camera), a soft rim at the contour, and the outline's
-    lines in a darker ``ink``; a PIL image with a transparent background"""
+    lines in a darker ``ink``; a PIL image with a transparent background. Each triangle takes
+    one shade, or with ``smooth`` each pixel takes the shade of its interpolated normal, so
+    that the edges of the bands run smoothly across the triangles"""
     from PIL import Image
 
     px, depth = _place(vertices, view, size, margin)
     right, up, toward = view.basis()
-    n = vertex_normals(vertices, faces)[faces].mean(axis=1)
-    n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
     L = light[0] * right + light[1] * up + light[2] * toward
     L /= np.linalg.norm(L)
-    lambert = np.clip(n @ L, 0.0, 1.0)
     thresholds = np.linspace(0.0, 1.0, len(bands) + 1)[1:-1] * 0.8 + 0.1
-    band = np.array(bands)[np.searchsorted(thresholds, lambert)]
-    rim = np.clip(1.0 - np.abs(n @ toward), 0.0, 1.0) ** 3 * 0.12
-    shade = band + rim
-    d, s = _rasters(px, depth, faces, size, supersample, shade=shade)
+
+    def shading(n):
+        lambert = np.clip(n @ L, 0.0, 1.0)
+        band = np.array(bands)[np.searchsorted(thresholds, lambert)]
+        rim = np.clip(1.0 - np.abs(n @ toward), 0.0, 1.0) ** 3 * 0.12
+        return band + rim
+
+    if smooth:
+        ids = np.arange(1, len(faces) + 1, dtype=np.float64)
+        d, ids = _rasters(px, depth, faces, size, supersample, shade=ids)
+        n = _smooth_normals(vertices, faces, px, ids, supersample)
+        s = np.where(np.isfinite(d), shading(n), 0.0)
+    else:
+        n = vertex_normals(vertices, faces)[faces].mean(axis=1)
+        n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
+        d, s = _rasters(px, depth, faces, size, supersample, shade=shading(n))
     body = np.isfinite(d)
     base = _rgb(colour)
     rgb = np.clip(base[None, None, :] * s[..., None], 0, 255)

@@ -11,7 +11,14 @@ import torch
 
 import anny
 import anny.poses
-from opensculptboy.render.flat import View, outline_svg, shaded_png, silhouette_svg
+from opensculptboy.render.flat import (
+    SKIN,
+    View,
+    _rgb,
+    outline_svg,
+    shaded_png,
+    silhouette_svg,
+)
 
 SIZE = (300, 420)
 
@@ -27,6 +34,35 @@ def pose(model, name):
 def paths(svg):
     root = ET.fromstring(svg)
     return [e for e in root.iter() if e.tag.endswith("path")]
+
+
+def sphere(rings=8, segments=16):
+    """a coarse unit sphere (vertices, triangles wound outward)"""
+    th = np.linspace(0.0, np.pi, rings + 1)[1:-1]
+    ph = np.linspace(0.0, 2.0 * np.pi, segments, endpoint=False)
+    middle = [
+        [np.sin(t) * np.cos(p), np.sin(t) * np.sin(p), np.cos(t)]
+        for t in th
+        for p in ph
+    ]
+    v = np.array([[0.0, 0.0, 1.0]] + middle + [[0.0, 0.0, -1.0]])
+    last = len(v) - 1
+
+    def ring(i, j):
+        return 1 + i * segments + j % segments
+
+    f = [[0, ring(0, j), ring(0, j + 1)] for j in range(segments)]
+    for i in range(rings - 2):
+        for j in range(segments):
+            a, b = ring(i, j), ring(i, j + 1)
+            c, d = ring(i + 1, j), ring(i + 1, j + 1)
+            f += [[a, c, b], [b, c, d]]
+    f += [[last, ring(rings - 2, j + 1), ring(rings - 2, j)] for j in range(segments)]
+    f = np.array(f)
+    n = np.cross(v[f[:, 1]] - v[f[:, 0]], v[f[:, 2]] - v[f[:, 0]])
+    inward = (n * v[f].mean(axis=1)).sum(axis=1) < 0
+    f[inward] = f[inward][:, ::-1]
+    return v, f
 
 
 def area(d):
@@ -57,6 +93,36 @@ class TestFlatRender(unittest.TestCase):
                 opaque = (picture[..., 3] > 127).sum()
                 self.assertAlmostEqual(area(shape.get("d")) / opaque, 1.0, delta=0.04)
                 self.assertEqual(picture[2, 2, 3], 0)  # the background stays clear
+
+    def test_smooth_shading_follows_the_surface(self):
+        # On a coarse sphere, smooth shading gives each pixel the band of its interpolated
+        # normal, so the picture follows the toon shading of the true sphere, whose normal at a
+        # pixel is known; the shading of whole triangles departs from it along the steps of
+        # the triangles at the edges of the bands.
+        v, f = sphere()
+        size, view = (400, 400), View()
+        right, up, toward = view.basis()
+        L = -0.45 * right + 0.7 * up + 0.55 * toward
+        L /= np.linalg.norm(L)
+        bands = np.array([0.62, 0.84, 1.0])
+        thresholds = np.linspace(0.0, 1.0, len(bands) + 1)[1:-1] * 0.8 + 0.1
+        off = {}
+        for smooth in (False, True):
+            picture = np.asarray(
+                shaded_png(v, f, view, size=size, margin=0, lines=False, smooth=smooth)
+            ).astype(np.float64)
+            ys, xs = np.nonzero(picture[..., 3] > 254)
+            x = (xs + 0.5) / size[0] * 2.0 - 1.0
+            y = 1.0 - (ys + 0.5) / size[1] * 2.0
+            z = np.sqrt(np.clip(1.0 - x * x - y * y, 0.0, 1.0))
+            n = np.outer(x, right) + np.outer(y, up) + np.outer(z, toward)
+            band = bands[np.searchsorted(thresholds, np.clip(n @ L, 0.0, 1.0))]
+            rim = np.clip(1.0 - np.abs(n @ toward), 0.0, 1.0) ** 3 * 0.12
+            expected = np.clip(_rgb(SKIN)[None, :] * (band + rim)[:, None], 0, 255)
+            error = np.abs(picture[ys, xs, :3] - expected).mean(axis=1)
+            off[smooth] = float((error > 20).mean())
+        self.assertLess(off[True], 0.02, off)
+        self.assertLess(off[True], 0.3 * off[False], off)
 
     def test_outline_draws_the_arms_across_the_chest(self):
         crossed = outline_svg(self.crossed, self.faces, size=SIZE)

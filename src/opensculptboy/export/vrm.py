@@ -805,9 +805,12 @@ def portrait_png(
     the heads of its bones (J, 3), seen from the front in the flat toon shading of
     :func:`opensculptboy.render.flat.shaded_png`: the thumbnail of a VRM file.
 
-    The frame runs from just above the top of the head down to the upper chest. The mesh is
-    drawn in a frame a quarter larger and then cropped, so that the cut of the arms and the
-    torso, and its outline, fall outside the picture.
+    The frame runs from just above the top of the head down to a little below the heads of
+    the clavicles, which keeps the chest out of the picture on every body. The shading is
+    smooth (``shaded_png(smooth=True)``), so that the edges of its bands run along the face
+    and the shoulders without the steps of single triangles. The mesh is drawn in a frame a
+    quarter larger and then cropped, so that the cut of the arms and the torso, and its
+    outline, fall outside the picture.
     """
     from PIL import Image
 
@@ -820,11 +823,13 @@ def portrait_png(
     view = View()
     right, up, toward = view.basis()
     xy, depth = view.project(vertices)
-    head, neck = (
-        view.project(joints[[labels.index(b)]])[0][0] for b in ("head", "neck01")
+    head, clavicle = (
+        view.project(joints[[labels.index(b)]])[0][0] for b in ("head", "clavicle.L")
     )
     top = float(xy[:, 1].max())
-    side = 1.75 * (top - float(neck[1]))
+    # The bottom of the frame lies 1.25 times as far below the top of the head as the heads of
+    # the clavicles, and the top of the head 7 % of the frame below its top edge.
+    side = 1.25 * (top - float(clavicle[1])) / 0.93
     centre = np.array([float(head[0]), top + 0.07 * side - side / 2])
     wide = 1.25 * side
     lo, hi = centre - wide / 2, centre + wide / 2
@@ -846,6 +851,7 @@ def portrait_png(
         margin=0,
         colour=_srgb_hex(colour),
         supersample=2,
+        smooth=True,
     )
     cut = (drawn - size) // 2
     image = image.crop((cut, cut, cut + size, cut + size))
